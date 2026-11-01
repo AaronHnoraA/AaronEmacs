@@ -1,170 +1,125 @@
 # Neomacs 兼容层
 
-本仓库同时支持 GNU Emacs 31 和 Neomacs（Rust 重写，跟随 GNU Emacs 31.1 的
-Lisp 层）。两者的差异全部收敛在 `lisp/os/neomacs/config.el` 这一个边界里，其它模块
-不做构建分支判断。在 GNU Emacs 下整个模块是空操作。
+## 范围
 
-判定谓词是 `+neomacs-p`（`(fboundp 'neomacs-core-backend)`）。
+GNU Emacs 31 仍是默认与主力；Neomacs 0.0.20 是可选的启动试用。
+本轮验收完整配置、启动回调和基本修饰键，不包含 Portal、Noema 页面或其它原生
+界面的功能迁移。已有兼容层位于 `lisp/os/neomacs/config.el`；本轮新增修复集中在
+`lisp/os/neomacs/trial.el`，只由独立入口 `bin/neomacs-trial` 启用。
 
-## 为什么需要这一层
+## 模型
 
-Neomacs 的 Lisp 层与 GNU Emacs 31.1 对齐，但底层运行时不是。对本配置真正有
-影响的是下面三条，都会直接破坏手感：
+判定谓词是 `+neomacs-p`（`(fboundp 'neomacs-core-backend)`）。普通启动不加载 `os/neomacs/trial`。只有独立入口设置
+`NEOMACS_CONFIG_TRIAL=1` 且运行在 Neomacs 时，才加载试验 patch；GNU 不安装这些
+advice、翻译表或启动 hook。
 
-### 1. 物理修饰键
+### 修饰键
 
-GNU Emacs 通过 `mac-option-modifier` / `mac-command-modifier` 决定物理键的语
-义，`lisp/os/macos/config.el` 把它们设为 `hyper` / `meta`。
+试验 patch 在有 `neomacs-set-modifier-policy` 的构建上使用 NS 修饰键设置、`mac-*-modifier`
+别名与 Hyper，直接沿用 `os/macos` 的物理 Option→Hyper、Command→Meta。
+0.0.20 使用这条路径；再安装 Meta→Hyper 翻译会让 Cmd-X 误开 `H-x` 的 Telescope。
 
-Neomacs 没有这两个变量。它的输入桥
-（`crates/neomacs-display-runtime/src/render_thread/window_events.rs`）把
-winit 的 `alt_key()`（Option）硬编码为 Meta、`super_key()`（Command）硬编码为
-Super，而且事件协议只有 shift/ctrl/meta/super 四个位，**没有 Hyper 位**。
+较旧构建没有这套原生策略，才在 `key-translation-map` 上同时重命名：
 
-后果是 `os/macos/config.el` 的 54 个 `H-` 绑定、`editor/fold/config.el` 的 `H-<tab>` 折叠键、
-`config/mouse/config.el` 预留给鼠标软件的 `H-C-M-` 层全部打不出来，同时 `M-c` / `M-v`
-剪贴板也失效。
-
-兼容层的做法是在 `key-translation-map` 上做**同时重命名**：
-
-| Neomacs 实际送出 | 重命名为 | 物理按键 |
+| 输入 | 翻译 | 物理键 |
 | --- | --- | --- |
-| `M-x` | `H-x` | Option |
-| `s-x` | `M-x` | Command |
-| `C-M-s-a` | `C-H-M-a` | Ctrl+Option+Command |
+| Meta | Hyper | Option |
+| Super | Meta | Command |
 
-重命名是一次性的，不会级联（`s-c` 只变成 `M-c`，不会再被翻译成 `H-c`）。
-`ESC f` 这类 ESC 前缀序列不受影响，仍然是 `M-f`，与 GNU Emacs 一致。
+翻译表挂在原 map 的父级，保留用户条目；条目手工构造，避免 `define-key` 把 Meta
+字符改成 ESC 序列。翻译函数只作用于 GUI；TTY 与 ESC 前缀不变。
+`+neomacs-modifier-remap` 的 nil 表示自动，`none` 关闭，也接受显式 alist。
+`+mac-swap-option-and-command` 在原生策略下交换正常的 modifier 变量，旧构建才
+交换翻译表。
 
-三个实现细节值得记住：
+### 字体与 fringe
 
-- 翻译表以 `key-translation-map` 的**父 keymap** 形式挂载，用户自己的条目优先，
-  卸载只需要一次 `set-keymap-parent`。
-- 表是手工构造的 alist，不用 `define-key`。`define-key` 会把 meta **字符**改写
-  成 `ESC` 前缀序列，而 `read-key-sequence` 的翻译步骤按事件原样查表，改写过的
-  条目永远命中不了，`M-<char>` 会整体失效。
-- 每个条目绑定的是函数而不是常量，只在 `display-graphic-p` 为真时翻译。TTY 上
-  没有 Command 键，在那里重命名 Meta 只会把 Meta 弄丢。
+0.0.20 的 `clear-font-cache` 会删除底层自定义 face 定义，但 Lisp 的 `facep` 仍
+返回存在；随后 `set-face-attribute` 报 Invalid face，启动字体回调因此中断。
+兼容层将这个破坏性清理替换为空操作，字体属性继续正常更新。它不为缺失 face
+伪造定义，也不隐藏字体回调中的其它错误。
 
-代价是每次按键多约 37µs 的查表开销（1638 个条目的线性扫描），相对 16ms 一帧
-可以忽略。
+Neomacs 对默认 fringe 的 frame 参数返回 nil，`diff-hl` 等需要数值。
+`+neomacs-repair-fringe-parameters` 用 `window-fringes` 的实际值补齐，并在
+创建 frame、启动和窗口设置完成后重查，避免主题再次清空参数。
 
-### 2. Fringe frame 参数
+### 启动与运行状态
 
-`lisp/ui/theme/config.el` 调用 `(set-fringe-mode '(nil . nil))`，语义是「用默认宽度」。
-GNU Emacs 的 `frame-parameter` 仍然返回解析后的宽度 8；Neomacs 直接返回 nil，
-而 `window-fringes` 报告的是真实宽度。
+Neomacs 在 early-init 已有 GUI frame；`early-init.el` 只在 frame 尚不存在时
+预隐藏，避免取消映射真实窗口。显帧兜底尊重后台模块主动隐藏的 frame，启动 timer
+会在执行和退出时取消。
 
-于是 `diff-hl-define-bitmaps` 里的 `(min (frame-parameter nil 'left-fringe) 16)`
-变成 `(min nil 16)`，**每次打开一个受版本控制的文件都会掉进 debugger**。
+试验 GUI 默认 server 名为 `neomacs-trial`；显式命名的实例不被覆盖，批量进程不改
+server 名称。`bin/emacs-app`、`bin/emacsopen`、Raycast 与登录项保持原来的 GNU
+路径，不参与试验。`bin/neomacs-trial --app /完整路径/neomacs.app` 只启动指定应用，
+不安装、不切换默认应用，也不修改登录项。未指定 `--app` 时先找 `/Applications`，
+再找原下载目录；`NEOMACS_APP` 也可指定 bundle。
 
-`+neomacs-repair-fringe-parameters` 把 `window-fringes` 的真实值写回 frame
-参数。因为 `ui/theme/config.el` 在本模块之后加载并会再次清空这些参数，修复挂在
-`after-make-frame-functions`、`window-setup-hook` 和 `emacs-startup-hook` 上各
-跑一次。
+saveplace 里 PDF 的 `(pdf-page . 15)` 是页码，不是文件名。试验 patch
+在原生 saveplace 规范化前暂存该元数据，规范化后恢复；文件路径、普通文本位置与
+Dired 条目仍交给 saveplace。这个问题也能在 GNU 复现，本轮按试验范围仅在独立
+Neomacs 入口启用修复，不改普通启动的 saveplace 行为。
 
-### 3. 启动时的第一个 frame
+### Elsa 并发
 
-`early-init.el` 有一个「先隐藏第一个 GUI frame，等 Dashboard 就绪再显示」的开关
-`aaron-gui-hide-initial-frame-during-startup`。
+Neomacs 没有 native compilation。`+elisp-elsa-worker-limit` 的 nil 表示自动：
+原生编译构建不干预，其它构建给 Elsa worker 数设置
+`+elisp-elsa-worker-fallback-limit`（4）的上限。该设置与修饰键设置均在 Config
+registry 中，可由 `M-x config-board` 修改。
 
-GNU Emacs 在 early-init 阶段 `display-graphic-p` 为 nil、`window-system` 为 nil，
-所以**这段代码在 GNU 上从来没有生效过**。Neomacs 在 early-init 阶段已经有活的
-图形 frame（`window-system` 为 `neo`，`frame-list` 已有两个 frame），这时通过
-`initial-frame-alist` 设 `(visibility . nil)` 会把真实窗口取消映射，而
-`emacs-startup-hook` 里的显示又和渲染线程竞态——表现就是启动后窗口长时间没有
-反应，要按 quit 之类的操作才恢复。
+## 契约
 
-因此 `early-init.el` 增加了「frame 还不存在时才预隐藏」的条件，行为与 GNU 侧
-完全一致；`+neomacs/reveal-frames` 作为兜底，在 `window-setup-hook`、
-`emacs-startup-hook` 和一个 1 秒的一次性 timer 上重新显示任何仍不可见的图形
-frame。
+- **C1** 原生修饰键策略与兼容翻译互斥；Cmd-X 是 `execute-extended-command`，
+  Option-X 保持 `H-x` 的 Telescope。测试：
+  `neomacs-c1-native-modifiers-avoid-double-translation`。
+- **C2** 刷新字体后已有自定义 face 仍可设置属性，启动字体回调不报 Invalid face。
+  测试：`neomacs-c2-font-cache-refresh-preserves-custom-faces`。
+- **C3** 启动显帧不能撤销后台模块的隐藏意图。测试：
+  `neomacs-c3-reveal-respects-background-frames`。
+- **C4** 试验只从 `bin/neomacs-trial` 进入；普通 GNU 启动不加载 patch，现有外部
+  入口与登录项不变。
+- **C5** 从磁盘读取 PDF 页码不把整数传给文件名规范化；文本位置与 Dired 条目保持
+  原语义。测试：`neomacs-c5-save-place-loads-numeric-page-metadata`。
+- **C6** 完整配置必须能从源码加载，不能靠旧编译缓存掩盖语法错误；启动模块失败和
+  配置回调错误都算启动失败。当前声明为 117 个直接加载模块与 3 个延迟模块。
 
-## Elsa 并发
+## 实现位置
 
-Neomacs 目前没有 native compilation（`(native-comp-available-p)` 为 nil）。
-Elsa 的 `elsa-analyse-file-parallel` 按 `(num-processors)` 无上限地 fork worker，
-每个 worker 都是一个从头加载 Elsa 的全新 Emacs。在这台机器上就是 12 个纯解释
-执行的 Neomacs 同时启动，打开任何 `.el` 文件都会把机器压满。
+- `lisp/os/neomacs/config.el`：已有构建探测、旧修饰键兼容、fringe、显帧与 cookie；
+  增加显式试验开关。
+- `lisp/os/neomacs/trial.el`：本轮独立 patch，持有原生修饰键、字体缓存、显帧与
+  PDF 保存位置修复。
+- `lisp/lang/elisp/config.el`：Elsa worker 上限。
+- `bin/neomacs-trial`：唯一试验入口。
+- `test/neomacs-compat-tests.el`：试验 patch 的回归验证。
 
-`+elisp-elsa-worker-limit`（`lisp/lang/elisp/config.el`）默认为 nil，含义是
-自动：有 native compilation 时完全不干预，没有时在注入给 LSP server 的
-`--eval` 里给 `num-processors` 加一条 override，上限
-`+elisp-elsa-worker-fallback-limit`（4）。GNU Emacs 侧的命令行完全不变。
+## 已知差距
 
-## 可调项
+- **G1** 当前 Portal 原生模块要求 GNU Cocoa `ns` 后端，Neomacs 的 `neo` 后端被
+  `portal-view--unsupported` 拒绝；原生主线程与窗口挂载也未适配。本轮不改 Portal。
+  可使用现有 Eshell（`SPC o s`）。
+- **G2** Noema、Lean infoview 和其它内嵌网页未完成本轮功能验收。较旧构建在 Retina
+  上出现过 xwidget 裁剪、焦点、JavaScript 回调及多窗口差异，启动通过不代表这些
+  能力可用。
+- **G3** 缺少 `xwidget-webkit-set-cookie-storage-file` 时保留一次提示的 no-op 替身；
+  cookie 文件持久化不能因此视为可用。
+- **G4** 后台 Dock 策略、抓手、Finder 打开、拖放、输入法和长期运行均未完成 Neomacs
+  图形验收；试验入口不代表这些原生交互已迁移。
 
-两个都注册在 `config` registry 里，可以用 `M-x config-board` 修改：
+## 待定设计
 
-| 设置 | 默认 | 含义 |
-| --- | --- | --- |
-| `+neomacs-modifier-remap` | nil（自动） | 修饰键重命名表；`none` 关闭；也可给出自定义 alist |
-| `+elisp-elsa-worker-limit` | nil（自动） | Elsa worker 上限；整数强制 |
-
-`M-x +mac-swap-option-and-command` 在 Neomacs 下切换重命名表而不是
-`mac-*-modifier`，交换 Option / Command 的角色。
-
-## 状态：2026-09-13 暂停迁移
-
-在 0.0.18 上评估后决定**不迁移**，Neomacs 已从本机删除，GNU Emacs 仍是唯一
-主力。本模块保留下来并且在 GNU Emacs 下完全空操作，等上游成熟后可以直接复用。
-
-停下来的直接原因是下面第一条：xwidget 在 Retina 上只渲染一半，而它无法在配置
-层修复。
-
-## 仍然存在的上游差异
-
-这些不是配置能修的，将来重新评估时先验证这几条：
-
-- **xwidget 在 HiDPI 上只有一半尺寸（阻塞项）。** 2x Retina 上每个 xwidget —
-  内置浏览器、Noema 面板、Lean infoview — 都只占 window 的左上四分之一，右侧和
-  下方被裁掉。原因在
-  `crates/neomacs-webview/src/platform/macos/view.rs` 的 placement 路径：注释写着
-  "Frame geometry is expressed in root-surface device pixels"，于是把
-  `content_rect` / `visible_rect` 除以 `device_scale`；但 Emacs 侧的 frame 和
-  window 几何是逻辑点（`frame-native-width` 3008 对应 "UI looks like 3008x1692"，
-  而同一个 build 的 `display-monitor-attributes-list` 又报物理的 6016x3384），
-  于是又被除了一次。
-
-  实测确认无法从 Lisp 修复：给 `xwidget-resize` 和 `xwidget-insert` 加 advice 把
-  尺寸预乘 `scale-factor`（请求从 1784x1014 变成 3568x2028）之后，渲染结果完全
-  没有变化。placement 矩形来自渲染管线内部的 scene 几何，不是 Lisp 请求的尺寸。
-- `xwidget-webkit-set-cookie-storage-file` 不存在。Neomacs 照搬了 GNU 的
-  `xwidget.el`，其中 `xwidget-webkit--create-new-session-buffer` 在
-  `xwidget-webkit-cookie-file` 非空时无条件调用它，所以每次新建 webkit session 都
-  会 void-function 报错。本模块用一个 no-op 顶替（只在缺失时定义），代价是 cookie
-  不会写入配置的文件，与 Brave 共享登录态失效。
-- 没有 native compilation，纯解释/字节码执行。
-- `window-system` 是 `neo`，不是 `ns`；`(featurep 'ns)` 为 nil。`ns-*` frame
-  参数（`ns-appearance` 等）被当作未知参数保留，但没有效果。
-- 输入桥会丢弃文件拖放事件，应用清单也没有声明文档类型，Finder 双击打开还不
-  可靠。
-- xwidget 的键盘焦点、JavaScript 回调、多窗口支持仍不完整。
-- macOS 平台在上游仍标注为 experimental。
+暂无。继续使用 GNU Emacs；扩大 Neomacs 的功能验收范围需另行安排。
 
 ## 验证
 
 ```sh
-# Neomacs 当前未安装；重新装上后
-NEO=/Applications/neomacs.app/Contents/MacOS/neomacs
-make EMACS=$NEO health-startup doctor
+bin/neomacs-trial --app /完整路径/neomacs.app
 
-# GNU 侧不应有任何变化
-/Applications/Emacs.app/Contents/MacOS/Emacs --batch --debug-init \
-  -l ./early-init.el -l ./init.el \
-  --eval '(princ (format "neomacs-p=%S\n" (bound-and-true-p +neomacs-p)))'
+# 专项回归，所有新 patch 都由试验入口启用
+bin/neomacs-trial --batch -q -l early-init.el -l init.el \
+  -l test/neomacs-compat-tests.el -f ert-run-tests-batch-and-exit
+
+# 默认入口仍然连接 GNU Emacs
+bin/emacs-app status
+make state-check
 ```
-
-在图形实例里检查手感是否还原：
-
-```elisp
-;; 应当返回 find-file，而不是 forward-word
-(let ((unread-command-events (listify-key-sequence (kbd "M-f"))))
-  (key-binding (read-key-sequence-vector nil) t))
-```
-
-因为 GNU 上这个隐藏不生效，第一个 frame 在主题加载前会露出默认的白底。
-`aaron-gui-startup-background`（默认是当前深色主题 kanagawa-wave 的背景
-`#171B28`）只写进 `initial-frame-alist`，给第一个 frame 一个深色底，主题加载后由
-主题的 `default` face 接管；之后新建的 frame 不带这个参数，不会盖过主题。换成浅色
-主题时把它设为 nil 或改成那套主题的背景色。

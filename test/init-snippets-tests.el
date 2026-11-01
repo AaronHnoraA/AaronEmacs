@@ -31,16 +31,6 @@
           (should-not (+yas--compiled-snippets-stale-p directory)))
       (delete-directory directory t))))
 
-(ert-deftest init-snippets-jutext-uses-the-shared-research-catalog ()
-  "JuText reads the Markdown/TeX catalog Noema shares with Emacs."
-  (let ((parents (expand-file-name "snippets/noema-research-mode/.yas-parents"
-                                   user-emacs-directory)))
-    (should (file-readable-p parents))
-    (should (member "markdown-mode"
-                    (split-string (with-temp-buffer
-                                    (insert-file-contents parents)
-                                    (buffer-string)))))))
-
 (ert-deftest init-snippets-markdown-structure-keys-expand ()
   "Shared Markdown structure keys expand through Yasnippet in Emacs."
   (yas-reload-all t)
@@ -62,9 +52,7 @@
   (dolist (case '((tex-mode ";" "$a$ ")
                   (tex-mode ":" "$$\na\n$$\n")
                   (markdown-mode ";" "\\(\\) ")
-                  (markdown-mode ":" "\\[\n\n\\]\n")
-                  (noema-research-mode ";" "\\(\\) ")
-                  (noema-research-mode ":" "\\[\n\n\\]\n")))
+                  (markdown-mode ":" "\\[\n\n\\]\n")))
     (with-temp-buffer
       (setq major-mode (nth 0 case))
       (yas-minor-mode 1)

@@ -31,6 +31,7 @@
 (declare-function +agent-acp-adopt "tools/agent/acp" (buffer &rest args))
 (declare-function +agent-acp-tabs-mode "tools/agent/acp" (&optional arg))
 (defvar +agent-acp-display-buffer-function)
+(defvar +buffer-hide-function nil)
 
 (defvar remote-terminal-instance)
 
@@ -291,7 +292,9 @@ CURRENT is the currently displayed popup buffer."
   "Choose an agent-shell session to open in the shared popup."
   (interactive (list last-nonmenu-event))
   (when (mouse-event-p event) (mouse-set-point event))
-  (popup-menu (easy-menu-create-menu "Agent" (+portal-popup--agent-menu-items)) event))
+  (popup-menu (easy-menu-create-menu
+               "Agent" (append '(["Agent Manager · H-A" +agent/manager t] "--")
+                               (+portal-popup--agent-menu-items))) event))
 
 (defun +agent-shell-launch-context ()
   "Return (NOEMA-ROOT . DIRECTORY) for the focused work buffer."
@@ -327,7 +330,7 @@ CURRENT is the currently displayed popup buffer."
                     +portal-popup-workspace-id workspace
                     +agent-acp-display-buffer-function
                     #'+portal-popup-display-buffer)
-        (+agent-acp-tabs-mode -1)
+        (+agent-acp--install-workspace-tabs buffer)
         (+portal-popup-agent-keys-mode 1))
       (+portal-popup-display-buffer buffer))))
 
@@ -345,14 +348,18 @@ CURRENT is the currently displayed popup buffer."
   (interactive) (+portal-popup/agent 'opencode))
 
 (defvar +portal-popup-agent-keys-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-c C-e") #'+portal-popup/toggle)
-    (define-key map (kbd "C-c E") #'+portal-popup/cycle)
-    (define-key map (kbd "C-c M-e") #'+portal/toggle-fixed)
-    map))
+  (make-sparse-keymap))
+
+;; Update existing popup buffers as well when this module is reloaded.
+(dolist (binding '(("C-c C-e" . +agent-acp-focus-input)
+                   ("C-c C-o" . +agent-acp-hide)
+                   ("C-c C-l" . +agent/manager)
+                   ("C-c E" . +portal-popup/cycle)
+                   ("C-c M-e" . +portal/toggle-fixed)))
+  (define-key +portal-popup-agent-keys-mode-map (kbd (car binding)) (cdr binding)))
 
 (define-minor-mode +portal-popup-agent-keys-mode
-  "Share popup folding, cycling and pinning keys in an agent-shell buffer."
+  "Keep agent input/hide keys consistent with the dock; retain popup cycling."
   :lighter nil :keymap +portal-popup-agent-keys-mode-map)
 
 (defun +portal-popup--new-tab-segment ()
@@ -404,13 +411,16 @@ CURRENT is the currently displayed popup buffer."
   "Apply the shared one-line popup tab strip to BUFFER."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
-      (if (derived-mode-p 'portal-terminal-mode)
+      (cond
+       ((derived-mode-p 'agent-shell-mode)
+        (+agent-acp--install-workspace-tabs buffer))
+       ((derived-mode-p 'portal-terminal-mode)
           (setq-local tab-line-format '(:eval (+portal-popup--tab-line))
                       tab-line-exclude t
-                      header-line-format nil)
-        ;; Native agent headers and ordinary buffer headers stay intact.
+                      header-line-format nil))
+       (t
         (setq-local tab-line-format '(:eval (+portal-popup--tab-line))
-                    tab-line-exclude t))
+                    tab-line-exclude t)))
       (when (or (derived-mode-p 'portal-terminal-mode)
                 (derived-mode-p 'agent-shell-mode))
         (setq-local fringes-outside-margins nil)
@@ -427,7 +437,7 @@ CURRENT is the currently displayed popup buffer."
                         '(mode-line-format header-line-format
                           tab-line-format tab-line-exclude
                           fringes-outside-margins left-margin-width
-                          right-margin-width)))))
+                          right-margin-width +buffer-hide-function)))))
 
 (defun +portal-popup--restore-ui ()
   "Restore the current buffer's window-line values after popup release."
@@ -543,7 +553,8 @@ DIRECTORY is used only when creating a buffer."
 
 (defun +portal-popup--show-buffer (buffer)
   "Show popup portal BUFFER in the shared side window."
-  (let ((+portal-popup--displaying t))
+  (let ((+portal-popup--displaying t)
+        (source (selected-window)))
     (+portal-popup--remember-origin)
     (setq +portal-popup-current-buffer buffer)
     (let ((window (or (+portal-popup--window)
@@ -553,6 +564,11 @@ DIRECTORY is used only when creating a buffer."
                          (slot . 1)
                          (window-height . ,(+portal-popup--effective-window-height)))))))
       (set-window-buffer window buffer)
+      (when (and (window-live-p source) (not (eq source window))
+                 (not (window-minibuffer-p source))
+                 (eq (window-frame source) (window-frame window))
+                 (not (window-parameter source '+portal-popup)))
+        (set-window-parameter window '+portal-popup-origin-window source))
       (set-window-parameter window '+portal-popup t)
       (set-window-parameter
        window '+portal-fixed
@@ -569,7 +585,9 @@ DIRECTORY is used only when creating a buffer."
   "Display BUFFER using the shared popup portal window logic."
   (unless (buffer-live-p buffer)
     (user-error "Dead buffer: %s" buffer))
-  (with-current-buffer buffer
+  (let ((origin (and (fboundp '+agent-view-origin-window)
+                     (+agent-view-origin-window))))
+   (with-current-buffer buffer
     (unless +portal-popup-instance-p
       (+portal-popup--save-ui))
     (setq-local +portal-popup-instance-p t)
@@ -593,18 +611,29 @@ DIRECTORY is used only when creating a buffer."
                       (if agent (intern (format "ai-%s" agent)) 'agent)
                       +portal-popup-title
                       (and agent (capitalize (format "%s" agent))))))
-      (when (fboundp '+agent-acp-tabs-mode)
-        (+agent-acp-tabs-mode -1))
-      (setq-local +agent-acp-display-buffer-function
-                  #'+portal-popup-display-buffer)
+      (+agent-acp--install-workspace-tabs buffer)
+      (setq-local +agent-acp-display-buffer-function #'+portal-popup-display-buffer)
       (+portal-popup-agent-keys-mode 1))
+    (unless (derived-mode-p 'agent-shell-mode)
+      (setq-local +buffer-hide-function #'+portal-popup-hide-buffer))
     (+portal-popup-apply-ui buffer)
     (add-hook 'kill-buffer-hook #'+portal-popup--on-kill 95 t))
   (unless (memq buffer (+portal-popup--live-buffers))
     (setq +portal-popup-buffers
           (append (+portal-popup--live-buffers) (list buffer))))
-  (select-window (+portal-popup--show-buffer buffer))
-  buffer)
+   (select-window (+portal-popup--show-buffer buffer))
+   (when (with-current-buffer buffer (derived-mode-p 'agent-shell-mode))
+     (+agent-view--record (selected-window) buffer origin)
+     (+agent-acp-touch buffer)
+     (+agent-acp-clear-attention buffer)
+     (+agent-render-flush buffer))
+   buffer))
+
+(defun +portal-popup-hide-buffer (buffer)
+  "Hide BUFFER's popup in this frame, retaining its source and height."
+  (when-let* ((window (seq-find (lambda (window) (eq (window-frame window) (selected-frame)))
+                                (+portal-popup--windows buffer))))
+    (with-selected-window window (+portal/hide-popup))))
 
 (defun +portal-popup--normal-windows ()
   "Return ordinary windows on the selected frame."
@@ -658,14 +687,9 @@ From a popup tab, use ace-window to choose the ordinary source window."
                (remote-terminal-p remote-terminal-instance))
       (remote-terminal-put-metadata remote-terminal-instance :popup nil))
     (when (derived-mode-p 'agent-shell-mode)
+      (setq-local +agent-acp-display-buffer-function nil)
       (+portal-popup-agent-keys-mode -1)
-      (when (equal tab-line-format '(:eval (+agent-acp--tab-line)))
-        (kill-local-variable 'tab-line-format))
-      (setq-local +agent-acp-display-buffer-function
-                  (lambda (session)
-                    (when (window-live-p target)
-                      (select-window target))
-                    (switch-to-buffer session)))))
+      (+agent-acp--install-workspace-tabs buffer)))
   (setq +portal-popup-buffers (delq buffer +portal-popup-buffers)))
 
 (defun +portal-popup-move-buffer-to-window (buffer target)
@@ -688,8 +712,10 @@ From a popup tab, use ace-window to choose the ordinary source window."
              (buffer-local-value '+portal-popup-fixed next)))
         (with-selected-frame (window-frame popup)
           (+portal/hide-popup))))
-    (set-window-buffer target buffer)
-    (select-window target)
+    (if (with-current-buffer buffer (derived-mode-p 'agent-shell-mode))
+        (+agent-view-embed buffer target)
+      (set-window-buffer target buffer)
+      (select-window target))
     (let ((+portal-popup--displaying nil))
       (+portal-popup--auto-hide))
     buffer))
@@ -721,7 +747,8 @@ From a popup tab, use ace-window to choose the ordinary source window."
                  (not (eq next buffer))
                  next)))
     (dolist (window windows)
-      (when (window-live-p window)
+      (when (and (window-live-p window)
+                 (not (eq buffer (bound-and-true-p +window-buffer-replacement))))
         (ignore-errors (delete-window window))))))
 
 (defun +portal-popup--create-buffer (&optional directory buffer-name)
@@ -737,6 +764,7 @@ Use BUFFER-NAME when non-nil."
                                            :name target-name :display nil)
       (+portal-popup--save-ui)
       (setq-local +portal-popup-instance-p t)
+      (setq-local +buffer-hide-function #'+portal-popup-hide-buffer)
       (setq-local +portal-popup-fixed nil)
       (setq-local
        +portal-popup-workspace-id
@@ -833,8 +861,13 @@ Signal a user error when outside a project."
   "Hide the current popup portal window."
   (interactive)
   (when-let* ((window (+portal-popup--window)))
-    (+portal-popup--record-window-height window)
-    (ignore-errors (delete-window window))))
+    (let ((origin (window-parameter window '+portal-popup-origin-window))
+          (foreground (eq window (selected-window))))
+      (+portal-popup--record-window-height window)
+      (delete-window window)
+      (when (and foreground (window-live-p origin)
+                 (eq (window-frame origin) (selected-frame)))
+        (select-window origin)))))
 
 (defun +portal/show-popup ()
   "Show the current popup portal buffer."

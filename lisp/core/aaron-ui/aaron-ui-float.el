@@ -15,7 +15,7 @@
 (cl-defstruct (aaron-ui-float--panel (:constructor aaron-ui-float--make))
   buffer frame parent key title width height owned kill-on-close on-close
   on-hide actions green-left green-right green-help
-  header-before position size expanded normal-size)
+  header-before position size expanded normal-size preview-window)
 
 (defvar aaron-ui-float--panels nil "Live Aaron UI floating surfaces.")
 (defvar-local aaron-ui-float--current nil "Floating host of this buffer.")
@@ -142,6 +142,44 @@
     (when (frame-live-p parent)
       (select-frame-set-input-focus parent))))
 
+(defun aaron-ui-float-content-window (panel)
+  "Return the window showing PANEL's own content, independent of focus."
+  (when-let* ((frame (aaron-ui-float-panel-frame panel)))
+    (get-buffer-window (aaron-ui-float--panel-buffer panel) frame)))
+
+(defun aaron-ui-float-clear-preview (panel)
+  "Remove PANEL's temporary preview window, leaving its buffer alive."
+  (when (aaron-ui-float-live-p panel)
+    (when-let* ((window (aaron-ui-float--panel-preview-window panel))
+                ((window-live-p window)))
+      (set-window-dedicated-p window nil)
+      (delete-window window))
+    (setf (aaron-ui-float--panel-preview-window panel) nil)
+    (aaron-ui-float--refit panel)))
+
+(cl-defun aaron-ui-float-preview-buffer (panel buffer &key (sidebar-width 42) on-hide)
+  "Show existing BUFFER beside PANEL's content without selecting it.
+SIDEBAR-WIDTH is the content width in columns.  ON-HIDE, when supplied,
+is the preview window's dismissal command.  No buffer is owned or copied."
+  (unless (and (aaron-ui-float-visible-p panel) (buffer-live-p buffer))
+    (user-error "Preview requires a visible panel and live buffer"))
+  (let* ((content (aaron-ui-float-content-window panel))
+         (existing (aaron-ui-float--panel-preview-window panel))
+         (window
+          (if (window-live-p existing) existing
+            (let ((window-min-width 16) (ignore-window-parameters t))
+              (split-window content
+                            (max 24 (min sidebar-width
+                                         (- (window-total-width content) 24)))
+                            'right)))))
+    (setf (aaron-ui-float--panel-preview-window panel) window)
+    (set-window-parameter window 'aaron-ui-preview t)
+    (set-window-parameter window 'aaron-ui-preview-hide-function on-hide)
+    (set-window-parameter window 'no-delete-other-windows t)
+    (unless (eq (window-buffer window) buffer) (set-window-buffer window buffer))
+    (unless (window-live-p existing) (aaron-ui-float--refit panel))
+    window))
+
 (defun aaron-ui-float-hide (&optional panel)
   "Hide PANEL while keeping its buffer and session alive."
   (interactive)
@@ -149,6 +187,7 @@
     (when (aaron-ui-float-live-p panel)
       (aaron-ui-float--remember panel)
       (posframe-hide (aaron-ui-float--panel-buffer panel))
+      (aaron-ui-float-clear-preview panel)
       (aaron-ui-float--focus-parent panel)
       (when-let* ((callback (aaron-ui-float--panel-on-hide panel)))
         (condition-case err (funcall callback panel)
@@ -176,6 +215,8 @@ An owned ETAF View is unmounted.  A caller's buffer is killed only when its
             ;; the panel and its buffer stay together.
             (progn (kill-buffer buffer) (not (buffer-live-p buffer)))
           (aaron-ui-float--remember panel)
+          (ignore-errors (posframe-hide buffer))
+          (aaron-ui-float-clear-preview panel)
           (setq aaron-ui-float--panels (delq panel aaron-ui-float--panels))
           (unless aaron-ui-float--panels
             (remove-hook 'window-size-change-functions
@@ -231,13 +272,13 @@ An owned ETAF View is unmounted.  A caller's buffer is killed only when its
   (when (and (aaron-ui-float-live-p panel)
              (aaron-ui-float--panel-owned panel)
              (fboundp 'etaf-runtime-for-buffer))
-    (when-let* ((frame (aaron-ui-float-panel-frame panel))
+    (when-let* ((window (aaron-ui-float-content-window panel))
                 (runtime (etaf-runtime-for-buffer
                           (aaron-ui-float--panel-buffer panel))))
       (condition-case err
           (etaf-runtime-refit runtime
-                              (window-body-width (frame-selected-window frame) t)
-                              nil)
+                              (window-body-width window t)
+                              (window-body-height window))
         (error (message "Aaron float View refit: %s"
                         (error-message-string err)))))))
 
@@ -281,6 +322,16 @@ This GUI-only API does not change the parent frame's window layout."
                    :green-left (plist-get options :green-left)
                    :green-right (plist-get options :green-right)
                    :green-help (plist-get options :green-help)))))
+    ;; Child frames cannot retain another invocation's parent.  Recreate only
+    ;; the display frame; keep the buffer, runtime and user state alive.
+    (when-let* ((old-frame (aaron-ui-float-panel-frame panel))
+                ((not (eq (frame-parent old-frame) parent))))
+      (posframe-hide buffer)
+      (aaron-ui-float-clear-preview panel)
+      (posframe-delete-frame buffer)
+      (setf (aaron-ui-float--panel-frame panel) nil
+            (aaron-ui-float--panel-position panel) nil
+            (aaron-ui-float--panel-size panel) nil))
     (when (and previous (not (eq previous panel)))
       (aaron-ui-float-close previous))
     (unless (memq panel aaron-ui-float--panels)

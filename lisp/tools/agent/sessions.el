@@ -13,6 +13,49 @@
 (require 'tabulated-list)
 (require 'tools/agent/acp)
 
+(defun +agent/pool (&optional choose)
+  "Recall this project's agent pool, or return from its current chat view.
+With prefix CHOOSE select a pool member.  An empty pool never starts an
+agent until the user explicitly chooses creation."
+  (interactive "P")
+  (if (and (not choose) (+agent-acp-agent-buffer-p (current-buffer)))
+      (+agent-acp-hide)
+    (let* ((root (or +agent-acp-session-root (+agent-acp-project-root)))
+           (sessions (sort (+agent-pool-sessions root)
+                           (lambda (a b) (> (or (plist-get a :last-used) 0)
+                                             (or (plist-get b :last-used) 0)))))
+           (buffer (and (not choose) (plist-get (car sessions) :buffer))))
+      (if buffer
+          (+agent-acp-show-buffer buffer)
+        (let* ((choices
+                (append (mapcar (lambda (session)
+                                  (let ((buffer (plist-get session :buffer)))
+                                    (cons (format "%s · %s [%s]"
+                                                  (plist-get session :agent)
+                                                  (buffer-name buffer)
+                                                  (plist-get session :process-state))
+                                          buffer)))
+                                sessions)
+                        '(("＋ New agent session" . :new))))
+               (choice (cdr (assoc (completing-read "Project agents: " choices nil t)
+                                   choices))))
+          (cond ((bufferp choice) (+agent-acp-show-buffer choice))
+                ((eq choice :new) (call-interactively #'+agent/start))
+                (t (user-error "No agent session selected"))))))))
+
+(defun +agent/pool-switch ()
+  "Select an existing member of the current project's agent pool."
+  (interactive)
+  (+agent/pool t))
+
+(defun +agent-pool-stop (root &optional target)
+  "Stop active work in ROOT's pool through each session's execution owner."
+  (let ((count 0))
+    (dolist (session (+agent-pool-sessions root target) count)
+      (when (plist-get session :busy)
+        (+agent-acp-stop (plist-get session :buffer))
+        (cl-incf count)))))
+
 (defun +agent-session-live-p (buffer)
   "Whether BUFFER still owns a live provider process."
   (when (+agent-acp-agent-buffer-p buffer)
@@ -21,8 +64,7 @@
 
 (cl-defun +agent-session-read (&key (prompt "Agent session: ") root live-only default copy-to-clipboard)
   "Choose an existing shared session; never resume or start one implicitly."
-  (let* ((sessions (+agent-acp-sessions))
-         (sessions (seq-remove (lambda (s) (run-hook-with-args-until-success '+agent-session-private-functions s)) sessions))
+  (let* ((sessions (+agent-pool-sessions))
          (sessions (if live-only (seq-filter (lambda (s) (+agent-session-live-p (plist-get s :buffer))) sessions) sessions))
          (sessions (sort sessions (lambda (a b)
                                     (and (equal (plist-get a :root) root) (not (equal (plist-get b :root) root))))))
@@ -47,8 +89,7 @@
   (interactive)
   (let ((buffer (+agent-acp-command-buffer buffer)))
     (unless (+agent-session--dispatch 'restart buffer)
-      (when (+agent-acp-confirm-stop buffer "restart")
-        (with-current-buffer buffer (agent-shell-restart))))))
+      (+agent-acp-restart-native buffer))))
 
 (defun +agent-session-rename (&optional buffer name)
   "Rename BUFFER to NAME without detaching shell-maker's process."
@@ -58,8 +99,8 @@
                                     (buffer-local-value '+agent-acp-session-name buffer)))))
     (when (string-empty-p (string-trim name)) (user-error "Session name is empty"))
     (unless (+agent-session--dispatch 'rename buffer name)
-      (let ((other (+agent-acp-session-buffer
-                    name (buffer-local-value '+agent-acp-session-root buffer))))
+      (let ((other (with-current-buffer buffer
+                     (+agent-acp-session-buffer name +agent-acp-session-root))))
         (when (and other (not (eq other buffer))) (user-error "Session name already exists: %s" name)))
       (+agent-acp-mark-session-buffer
        buffer name (buffer-local-value '+agent-acp-session-agent buffer)
@@ -107,29 +148,28 @@
 (defun +agent-session-list (&optional buffer)
   "List the shared sessions of BUFFER's project."
   (interactive)
-  (let ((default-directory
-         (if buffer (buffer-local-value '+agent-acp-session-root buffer) default-directory)))
-    (+agent/sessions t)))
+  (with-current-buffer (or buffer (current-buffer)) (+agent/sessions t)))
 
 (defun +agent-sessions--state (session)
   "Describe SESSION's live execution and attention separately."
-  (let* ((buffer (plist-get session :buffer))
-         (snapshot (+agent-session-snapshot buffer))
-         (process (+agent-acp-state-value buffer '(:client :process))))
-    (cond ((and (processp process) (not (process-live-p process))) "dead")
-          ((eq (plist-get snapshot :attention-kind) 'permission) "approval")
-          ((eq (plist-get snapshot :attention-kind) 'input) "answer")
-          ((eq (plist-get snapshot :attention-kind) 'failed) "failed")
+  (let ((process (plist-get session :process-state))
+        (turn (plist-get session :turn-state)))
+    (cond ((memq process '(dead disconnected)) (symbol-name process))
+          ((memq turn '(stopping stop-unconfirmed)) (symbol-name turn))
+          ((eq (plist-get session :attention-kind) 'permission) "approval")
+          ((eq (plist-get session :attention-kind) 'input) "answer")
+          ((eq (plist-get session :attention-kind) 'failed) "failed")
+          ((eq turn 'starting) "starting")
           ((plist-get session :busy) "running")
-          ((plist-get snapshot :last-error) "failed")
-          ((not process) "starting")
+          ((plist-get session :last-error) "failed")
+          ((eq process 'starting) "starting")
           (t "idle"))))
 
 (defun +agent-sessions-refresh ()
   "Render the shared in-memory registry without querying a domain service."
   (interactive)
   (let* ((selected (tabulated-list-get-id))
-         (sessions (+agent-acp-sessions +agent-sessions--root)))
+         (sessions (+agent-pool-sessions +agent-sessions--root)))
     (setq tabulated-list-entries
           (mapcar
            (lambda (session)
@@ -206,29 +246,37 @@
 (add-hook '+agent-acp-changed-functions #'+agent-sessions--changed)
 
 ;;;###autoload
-(defun +agent/sessions (&optional project)
-  "List all agent sessions, or only the current PROJECT with a prefix."
+(defun +agent/sessions-table (&optional project attention)
+  "Diagnostic/TTY list, optionally restricted to PROJECT or ATTENTION."
   (interactive "P")
-  (let ((root (and project (+agent-acp-project-root))))
+  (let ((root (and project (or +agent-acp-session-root (+agent-acp-project-root))))
+        (directory default-directory))
     (with-current-buffer (get-buffer-create "*Agent Sessions*")
       (unless (derived-mode-p '+agent-sessions-mode) (+agent-sessions-mode))
-      (setq +agent-sessions--root root +agent-sessions--attention-only nil)
+      (setq default-directory directory)
+      (setq +agent-sessions--root root +agent-sessions--attention-only attention)
       (+agent-sessions-refresh)
       (pop-to-buffer (current-buffer)))))
+
+;;;###autoload
+(defun +agent/sessions (&optional project)
+  "Open the shared sessions UI, restricted to PROJECT with a prefix."
+  (interactive "P")
+  (require 'tools/agent/manager)
+  (+agent-manager-show 'sessions project))
 
 ;;;###autoload
 (defun +agent/inbox ()
   "List live sessions with unread attention or a dead connection."
   (interactive)
-  (+agent/sessions)
-  (setq +agent-sessions--attention-only t)
-  (+agent-sessions-refresh))
+  (require 'tools/agent/manager)
+  (+agent-manager-show 'attention))
 
 ;;;###autoload
 (defun +agent/peek ()
   "Preview live agent buffers, restoring the original window before returning."
   (interactive)
-  (let* ((sessions (+agent-acp-sessions))
+  (let* ((sessions (+agent-pool-sessions))
          (choices (mapcar (lambda (session)
                             (cons (format "%s · %s · %s"
                                           (or (plist-get session :name) (buffer-name (plist-get session :buffer)))

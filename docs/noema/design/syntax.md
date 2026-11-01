@@ -47,7 +47,7 @@ directory without `.git` is reported, never indexed.  Spec:
 | File | Meaning | Owner / spec |
 | --- | --- | --- |
 | `*.md` | knowledge note (Wiki page unless `roam: off`) | this page |
-| `*.noema` | AI work document: nbformat 4.5 of work blocks, edited in JuText; never a Jupyter notebook | `AGENTS.md` D-023 |
+| `*.noema` | legacy work-document JSON, retained for model/runtime data; no dedicated editor or Jupyter path | `AGENTS.md` D-023 |
 | `*.prompt` | standalone prompt with the same leading directives, plus `@@workstream(ws_…)` and legacy single-`@` spellings | `server/lib/research-directives.mjs` |
 | `*.ipynb` | ordinary notebook, full Jupyter support | [../../design/jupyter-workflow.md](../../design/jupyter-workflow.md) |
 | `.cell/NOTE.LANGUAGE.SESSION.ipynb` | sidecar holding a note's `@@cell` sources and outputs; `LANGUAGE` is the notebook language, not the kernelspec | jupyter-workflow.md |
@@ -243,11 +243,13 @@ insertion (no old lines), or deletion (no new lines). For a final line without
 a newline, use `\ No newline at end of file` immediately after that side's
 last line; the marker is valid only at the end of the note. The card derives
 GitHub-like old/new line numbers and a blue hunk heading from the block's
-position. The compact review strip shows all changed lines when there are at
-most four. Longer edits preview the first old and first new line (two lines
-for a one-sided edit), and Details states how many changed lines are hidden.
-The heading shows total added/deleted counts; Details reveals every line and
-its context.
+position. Preview compares the old and new Markdown fragments using the
+shared renderer; Diff shows the exact source lines. Its compact source view
+shows all changed lines when there are at most four. Longer edits preview the
+first old and first new line (two lines for a one-sided edit), and Details
+states how many changed lines are hidden. The heading shows total added/deleted
+counts; Details reveals every line and its context and expands the rendered
+fragments. View controls never modify the proposal.
 Source has no file headers or absolute
 hunk coordinates to rebase.
 
@@ -261,6 +263,12 @@ for repair. The Tools panel has a file-wide review list; each card remains at
 its affected lines. Editor implementation: `src/ediff.ts`,
 `src/cm6/extensions/visual/widgets/ediff.ts`, and the org-env branch of
 `block-extras.ts`.
+
+Saved comments remain visible on the card. A commented or rejected proposal
+offers Send feedback, which saves and sends its exact range through the
+existing Noema Markdown-to-agent bridge. The agent receives the file reference
+and in-place proposal instructions; session choice and the revision request
+use the existing interaction. See [agent-context.md](agent-context.md).
 
 ### Attribute view
 

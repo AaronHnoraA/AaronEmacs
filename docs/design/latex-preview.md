@@ -12,56 +12,8 @@
   KaTeX —— 同一套语义意味着 buffer 里看到的和发布出去的一致。
 - 预览形态是**光标上方的 posframe 弹窗**,不是 inline overlay。
   `ratex-inline-preview` 保持 `nil`;不要为了"更像 Org 预览"去打开它。
-- 在 TeX 系列 major mode 和 `.noema` 的 JuText 编辑 buffer 生效。
-  JuText 的 work 正文支持 `$…$`、`$$…$$`、`\\(…\\)`、`\\[…\\]` 和数学环境；
-  控制行、代码围栏和行内代码不预览。Markdown 页面仍由 Noema 的 CM6、
-  KaTeX 和 MathLive 负责。
-
-## 支持的公式写法
-
-检测器在 `site-lisp/ratex.el/lisp/ratex-math-detect.el`。
-
-| 写法 | 样式 | 说明 |
-|---|---|---|
-| `$ … $` | inline | 单行;`\$` 转义与 `%` 注释内的 `$` 会被忽略 |
-| `$$ … $$` | display | 可跨行 |
-| `\( … \)` | inline | |
-| `\[ … \]` | display | 可跨行 |
-| `\begin{ENV} … \end{ENV}` | display | 白名单见 `ratex-math-environments`,支持同名嵌套 |
-| `#+begin_display_latex` | display | Org 专用块 |
-
-环境白名单只收引擎真正实现的那些(`align` `aligned` `alignat` `array`
-`cases` `dcases` `drcases` `equation` `gather` `gathered` `matrix` `pmatrix`
-`bmatrix` `Bmatrix` `vmatrix` `Vmatrix` `rcases` `smallmatrix` `split`
-`subarray` `darray` 及其带星变体),外加需要兼容改写的 `multline`。
-`\begin{figure}` 之类不是数学,不会被送去渲染。
-
-嵌套时取**最宽**的那个:`\[ \begin{cases} … \end{cases} \]` 选外层 `\[`,
-`\begin{align}` 里嵌 `\begin{cases}` 选 `align` —— 渲染整块才是对的。
-
-`$$`、`\[` 和 `#+begin_display_latex` 会补 `\displaystyle`;
-环境类**整体原样下发**,因为 `\begin{align}` 本身就是排版指令。
-
-## 宏:一份资产,两个渲染器
-
-`site-lisp/noema/resources/` 是数学宏和 TeX 兼容规则的唯一来源,
-Emacs 侧通过相对软链接接过来:
-
-```
-etc/katex-macros             -> ../site-lisp/noema/resources/katex-macros
-etc/prose-accepted-words.txt -> ../site-lisp/noema/resources/prose-accepted-words.txt
-templates/latex              -> ../site-lisp/noema/resources/templates/latex
-templates/tex                -> ../site-lisp/noema/resources/templates/tex
-templates/noema              -> ../site-lisp/noema/resources/templates/noema
-```
-
-这些链接**必须是相对路径**。历史上它们指向一个后来搬走的绝对路径,
-断链之后 Emacs 会把死路径通过 `NOEMA_KATEX_MACROS_DIR` 交给 Noema,
-于是两边都加载不到任何宏,而且没有任何报错。
-`+health/critical-check`(`make doctor`)现在会检查这五条链接。
-
-`lisp/lang/latex/config.el` 读同一批 `.tex`,编译成前言注入每次渲染:
-
+- 在 TeX 系列 major mode 生效。`.noema` 专用 JuText hook 已移除；
+  普通 notebook 的语言 major mode 与数学预览保持各自的配置。
 - 解析的语法子集与 `shared/katex-macros.mjs`(JS)和 `kernel/noema/katexmacros`
   (Go)一致,并由同一份 `shared/katex-macro-fixtures.json` 约束 ——
   测试在 `test/init-writing-tests.el`,不要再写第四份解析器。
@@ -82,7 +34,7 @@ templates/noema              -> ../site-lisp/noema/resources/templates/noema
 
 全局层是 Noema 自己的用户配置,不在任一 git 仓库里;`+latex--macro-files` 把它排在共享
 文件之后读入,所以 RaTeX 与 Noema 对同名宏的取舍一致。项目层与本笔记层属于某篇 Markdown,
-由 `shared/note-macros.mjs` 解析(只扫 meta 块),Emacs 的 TeX/JuText 预览不涉及。
+由 `shared/note-macros.mjs` 解析(只扫 meta 块),Emacs 的 TeX 预览不涉及。
 `physics.tex` 按 CTAN physics 宏包的命令名移植了参数个数固定的部分;需要扫描定界符的形式
 (`\qty( )`、`\mqty( )`)、带星号或可选幂次的形式,以及会改变内建命令含义的重定义
 (`\div`、`\Re`、`\sin` 等)没有移植,文件头注释列出了全部取舍。

@@ -30,6 +30,15 @@ process alive after its owning buffer is killed would require a larger change
 to agent-shell's state, callbacks, and cleanup, so buffer lifetime remains
 coupled to process lifetime.
 
+Physical restart and reconnect use Emacs's `+agent-acp-restart-native`: retain
+the native session ID, display owner, workspace environment, editable draft and
+native pending queue. An active request is never replayed. Research's restart
+adapter first requires the owning Run to reach its terminal state, then uses
+that same operation; durable identity is rebound by the existing adoption hook.
+If client creation fails after the old buffer was ended, unsent input is kept
+in `*Agent recovery*`. The Agent Manager is reached directly with `H-A` or
+`SPC a a`; hiding it or an agent view leaves execution intact.
+
 ## Mobile Remote boundary
 
 The installed `codex-acp` adapter spawns `codex app-server` over stdio for

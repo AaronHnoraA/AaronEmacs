@@ -101,6 +101,7 @@
                      (lambda (_) new))
                     ((symbol-function '+agent-acp-adopt)
                      (lambda (&rest args) (setq adopted args)))
+                    ((symbol-function '+agent-acp-show-buffer) #'ignore)
                     ((symbol-function 'agent-shell-insert)
                      (lambda (&rest args) (setq inserted args)))
                     ((symbol-function 'message) #'ignore))
@@ -755,8 +756,8 @@
                          (kill-buffer (current-buffer))
                          (with-current-buffer target
                            (rename-buffer name t)))))
-                    ((symbol-function 'agent-shell--display-buffer)
-                     (lambda (&rest _) (ert-fail "Opened another buffer"))))
+                    ((symbol-function '+agent-acp-show-buffer)
+                     (lambda (buffer) (should (eq buffer target)))))
             (+agent-shell/resume)
             (should (equal listed-cwd "/tmp/"))
             (should (equal resumed-id "saved-native-id"))
@@ -828,13 +829,15 @@
                       ((symbol-function 'agent-shell--prompt-input) (lambda () nil))
                       ((symbol-function 'noema-sessions-native-binding)
                        (lambda (&rest _) nil))
-                      ((symbol-function '+agent-acp-start)
+                      ((symbol-function 'agent-shell-restart)
                        (lambda (&rest args)
                          (setq resumed-id (plist-get args :session-id))
-                         (with-current-buffer target
-                           (setq major-mode 'agent-shell-mode
-                                 default-directory "/tmp/"))
-                         target))
+                         (let ((name (buffer-name source)))
+                           (kill-buffer source)
+                           (with-current-buffer target
+                             (setq major-mode 'agent-shell-mode default-directory "/tmp/")
+                             (setq-local agent-shell--state (agent-shell--make-state :buffer target))
+                             (rename-buffer name t)))))
                       ((symbol-function '+agent-acp-adopt) #'ignore)
                       ((symbol-function '+agent-acp-tabs-mode) #'ignore))
               (+agent-shell--resume-from-list
@@ -861,11 +864,10 @@
             (with-current-buffer source
               (setq major-mode 'agent-shell-mode
                     default-directory "/tmp/")
-              (setq-local agent-shell--state
+              (setq-local +agent-acp-session-origin 'manual
+                          agent-shell--state
                           '((:agent-config . ((:identifier . codex)))
-                            (:session . ((:id . "current")))))
-              (setq-local +agent-acp-display-buffer-function
-                          (lambda (buffer) (set-window-buffer window buffer))))
+                            (:session . ((:id . "current"))))))
             (cl-letf (((symbol-function 'agent-shell--sort-sessions-by-recency) #'identity)
                       ((symbol-function 'agent-shell--session-title)
                        (lambda (_) "Saved conversation"))
@@ -878,28 +880,24 @@
                       ((symbol-function 'agent-shell--prompt-input) (lambda () nil))
                       ((symbol-function 'noema-sessions-native-binding)
                        (lambda (&rest _) nil))
-                      ((symbol-function '+agent-acp-start)
+                      ((symbol-function 'agent-shell-restart)
                        (lambda (&rest args)
                          (setq started args)
-                         (with-current-buffer target
-                           (setq major-mode 'agent-shell-mode
-                                 default-directory "/tmp/")
-                           (setq-local +agent-acp-display-buffer-function
-                                       (plist-get args :display-function)))
-                         target))
-                      ((symbol-function '+agent-acp-adopt) #'ignore)
-                      ((symbol-function 'agent-shell-restart)
-                       (lambda (&rest _) (ert-fail "Lost manual window"))))
+                         (let ((name (buffer-name source)))
+                           (kill-buffer source)
+                           (with-current-buffer target
+                             (setq major-mode 'agent-shell-mode default-directory "/tmp/")
+                             (setq-local agent-shell--state (agent-shell--make-state :buffer target))
+                             (rename-buffer name t)))))
+                      ((symbol-function '+agent-acp-adopt) #'ignore))
               (+agent-shell--resume-from-list
                source '(((sessionId . "saved-native-id")
                          (updatedAt . "2026-09-30T00:00:00Z")))))
             (should (equal (plist-get started :session-id) "saved-native-id"))
-            (should (eq (plist-get started :origin) 'manual))
+            (should (eq (buffer-local-value '+agent-acp-session-origin target) 'manual))
             (should (eq (window-buffer window) target))
             (should-not (buffer-live-p source))
-            (should (eq (buffer-local-value
-                         '+agent-acp-display-buffer-function target)
-                        (plist-get started :display-function))))
+            (should-not (buffer-local-value '+agent-acp-display-buffer-function target)))
         (dolist (buffer (list source target))
           (when (buffer-live-p buffer) (kill-buffer buffer)))))))
 
@@ -1014,7 +1012,7 @@
             (setq major-mode 'agent-shell-mode)
             (setq-local header-line-format "Native agent header")
             (+portal-popup-apply-ui agent)
-            (should (equal tab-line-format '(:eval (+portal-popup--tab-line))))
+            (should (equal tab-line-format '(:eval (+agent-acp--tab-line))))
             (should (equal header-line-format "Native agent header"))))
       (kill-buffer terminal)
       (kill-buffer agent))))
@@ -1047,9 +1045,8 @@
               (should-not +portal-popup-instance-p)
               (should-not +portal-popup-agent-keys-mode)
               (should (equal header-line-format "Native agent header"))
-              (should (functionp +agent-acp-display-buffer-function))
-              (should-not (eq +agent-acp-display-buffer-function
-                              #'+portal-popup-display-buffer))))
+              (should-not +agent-acp-display-buffer-function)
+              (should +agent-acp-tabs-mode)))
         (+portal/hide-popup)
         (when (buffer-live-p agent) (kill-buffer agent))))))
 
@@ -1479,9 +1476,10 @@ machine's HOME, because agent-shell's caches expand `~' there."
               (with-current-buffer agent
                 (should (eq major-mode 'agent-shell-mode))
                 (should +portal-popup-instance-p)
-                (should-not +agent-acp-tabs-mode)
+                (should +agent-acp-tabs-mode)
                 (should (equal header-line-format "native ACP header"))
-                (should (eq (key-binding (kbd "C-c C-e")) #'+portal-popup/toggle))
+                (should (eq (key-binding (kbd "C-c C-e")) #'+agent-acp-focus-input))
+                (should (eq (key-binding (kbd "C-c C-o")) #'+agent-acp-hide))
                 (should (eq (key-binding (kbd "C-c E")) #'+portal-popup/cycle))
                 (should (eq (key-binding (kbd "C-c M-e")) #'+portal/toggle-fixed)))
               ;; ACP redisplay must not move the popup session to the project window.
@@ -1496,6 +1494,11 @@ machine's HOME, because agent-shell's caches expand `~' there."
               (should (buffer-live-p agent))
               (+portal-popup/toggle)
               (should (eq (window-buffer (+portal-popup--window)) agent))
+              (+agent-acp-hide agent)
+              (should-not (+portal-popup--window))
+              (should (numberp +portal-popup-last-height))
+              (should (buffer-live-p agent))
+              (+portal-popup/toggle)
               (+portal/toggle-fixed)
               (should (buffer-local-value '+portal-popup-fixed agent))))
         (+portal/hide-popup)
@@ -1553,7 +1556,8 @@ machine's HOME, because agent-shell's caches expand `~' there."
                                "/tmp/project/code/"))
                 (should (eq (plist-get started :origin) 'manual))
                 (should-not (plist-get started :focus))
-                (should (functionp (plist-get started :display-function)))
+                (should-not (plist-get started :display-function))
+                (should (eq (car (plist-get (window-parameter window '+agent-view) :previous)) source))
                 (should (equal (plist-get adopted :root) "/tmp/project/")))))
         (when (buffer-live-p source) (kill-buffer source))
         (when (buffer-live-p agent-buffer) (kill-buffer agent-buffer))))))

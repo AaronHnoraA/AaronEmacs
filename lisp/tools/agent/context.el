@@ -2,29 +2,13 @@
 
 ;;; Commentary:
 ;;
-;; gptel already owns picking context: `gptel-add' on a region, a buffer, a
-;; file or Dired marks, the overlays that keep a region tracked as the text
-;; moves, and the `*gptel-context*' review buffer.  This module reuses that
-;; selection and adds the part gptel has no notion of: handing it to one
-;; chosen, live ACP session.  There is one selection, so what you gathered for
-;; a gptel compose buffer is the same set you can send to an agent.
-;;
-;; Everything travels as a reference, never as a copy.  A region becomes
-;; `path:12-40' in the prompt text -- the form `agent-shell--get-region-context'
-;; uses for its own references -- plus one `resource_link' content block per
-;; file, which is the block agent-shell sends for a file it will not embed.
-;; The agent opens what it actually needs with its own filesystem tools, so
-;; attaching a 3000-line file costs one line of prompt.
-;;
-;; Coupling: agent-shell and ACP details stay behind `+agent-acp';
-;; session choice stays behind `tools/agent/sessions'.  This module does reach into
-;; gptel's context internals (`gptel-context--collect' and friends), which is
-;; deliberate reuse of its selection model rather than a second one.
+;; Emacs tracks selected files and regions; requests send path references and
+;; ACP resource links. Selection is independent of model clients. ACP and
+;; provider details remain behind tools/agent/acp.
 
 ;;; Code:
 
 (require 'cl-lib)
-(require 'tools/agent/upstream)
 (defvar +agent-editor-action-functions nil
   "Functions receiving OPERATION and arguments; non-nil means a domain editor handled it.")
 (defun +agent-editor-action (operation &rest arguments)
@@ -38,19 +22,8 @@
 
 (require 'tools/agent/worktree)
 
-(declare-function gptel-context-add "gptel-context" (&optional arg confirm))
-(declare-function gptel-context-add-file "gptel-context" (path))
-(declare-function gptel-context-remove-all "gptel-context" (&optional verbose))
-(declare-function gptel-context--collect "gptel-context" (&optional context-alist))
-(declare-function gptel-context--collect-regions "gptel-context" (buffer context-data))
-(declare-function gptel-context--add-region "gptel-context"
-                  (buffer region-beginning region-end &optional advance))
-(declare-function gptel-context--add-buffer "gptel-context" (buffer))
-(declare-function gptel-context--buffer-setup "gptel-context"
-                  (&optional ignore-auto noconfirm context-alist))
-(declare-function gptel-context-remove "gptel-context" (&optional context))
+(require 'tools/agent/selection)
 (declare-function which-function "which-func" ())
-(defvar gptel-context)
 
 (defgroup +agent-context nil
   "Handing editor context to an agent session by reference."
@@ -76,9 +49,9 @@ asks."
   :group '+agent-context)
 
 (defcustom +agent-context-clear-after-send nil
-  "Whether sending clears the shared gptel selection.
+  "Whether sending clears the shared editor selection.
 Off by default: the same selection usually serves several questions, and
-`gptel-context-remove-all' clears it on purpose."
+`+agent-selection-clear' clears it on purpose."
   :type 'boolean
   :group '+agent-context)
 
@@ -175,18 +148,17 @@ worktree's copy, as `+agent-worktree-redirect' explains."
 (defun +agent-context--resolve (&optional context root session)
   "Return (REFERENCES . SKIPPED) for CONTEXT, relative to session ROOT.
 Paths are the ones SESSION's agent opens; nil means an agent on this machine.
-CONTEXT defaults to the shared gptel selection.  SKIPPED describes entries
+CONTEXT defaults to the shared editor selection.  SKIPPED describes entries
 that cannot be referenced -- a buffer with no file, or one left unsaved --
 because a reference to text that is not on disk would mislead the agent."
-  (require 'gptel-context)
   (let (references skipped)
-    (dolist (entry (gptel-context--collect (or context gptel-context)))
+    (dolist (entry (+agent-selection-collect (or context +agent-selection)))
       (let ((source (car entry))
             (spec (cdr entry)))
         (cond
          ((bufferp source)
           (if-let* ((file (+agent-context--buffer-file source)))
-              (let ((regions (gptel-context--collect-regions source spec)))
+              (let ((regions (+agent-selection-regions source spec)))
                 (if (or (null regions)
                         (+agent-context--whole-buffer-p source regions))
                     (push (+agent-context--reference file root nil nil session)
@@ -299,7 +271,24 @@ is always last and does not replace the remembered session."
       (puthash root buffer +agent-context--last-session))
     buffer))
 
-(defun +agent-context--deliver (buffer blocks)
+(defvar +agent-context--session-instructions (make-hash-table :test #'equal)
+  "Bounded record of operation guidance delivered to native ACP sessions.")
+
+(defun +agent-context--instruction-key (buffer instructions)
+  "Identify INSTRUCTIONS by native session, independently of buffer names."
+  (when-let* ((id (+agent-acp-state-value buffer '(:session :id))))
+    (list (buffer-local-value '+agent-acp-session-root buffer)
+          (buffer-local-value '+agent-acp-session-agent buffer)
+          id (car instructions))))
+
+(defun +agent-context--with-instructions (blocks instructions)
+  "Copy BLOCKS and prepend the short INSTRUCTIONS entry to its first text."
+  (let ((copy (copy-tree blocks)))
+    (setf (alist-get 'text (car copy))
+          (concat (cdr instructions) "\n\n" (map-elt (car copy) 'text)))
+    copy))
+
+(defun +agent-context--deliver (buffer blocks &optional instructions)
   "Send content BLOCKS to agent BUFFER as soon as its session can take a turn."
   (cond
    ;; A session started for this send is still shaking hands with its agent.
@@ -313,16 +302,32 @@ is always last and does not replace the remembered session."
                            (+agent-acp-unsubscribe
                             :buffer buffer :subscription subscription))
                          (when (buffer-live-p buffer)
-                           (+agent-context--deliver buffer blocks))))))
+                           (+agent-context--deliver buffer blocks instructions))))))
     (message "Agent: the session is starting; your context follows"))
    ;; Mid-turn: agent-shell's own queue sends it when the turn finishes.  A
    ;; queued prompt is plain text, so the references travel as the same
    ;; `path:START-END' lines without the resource links.
-   ((+agent-acp-busy-p buffer)
-    (+agent-acp-enqueue buffer (map-elt (car blocks) 'text))
-    (message "Agent: the session is busy; your context is queued"))
    (t
-    (+agent-acp-prompt :buffer buffer :content blocks)))
+    (let* ((key (and instructions
+                     (+agent-context--instruction-key buffer instructions)))
+           (first (and key (not (gethash key +agent-context--session-instructions))))
+           (content (if first (+agent-context--with-instructions blocks instructions)
+                      blocks))
+           (accepted t))
+      (if (+agent-acp-busy-p buffer)
+          (progn
+            (+agent-acp-enqueue buffer (map-elt (car content) 'text))
+            (message "Agent: the session is busy; your context is queued"))
+        (+agent-acp-prompt
+         :buffer buffer :content content
+         :on-failure (lambda (&rest _)
+                       (setq accepted nil)
+                       (when first (remhash key +agent-context--session-instructions)))))
+      (when (and first accepted)
+        (when (>= (hash-table-count +agent-context--session-instructions) 256)
+          (remhash (car (hash-table-keys +agent-context--session-instructions))
+                   +agent-context--session-instructions))
+        (puthash key t +agent-context--session-instructions)))))
   (+agent-acp-show-buffer buffer))
 
 (defun +agent-context--report-skipped (skipped)
@@ -333,13 +338,17 @@ is always last and does not replace the remembered session."
              (if (= (length skipped) 1) "y" "ies")
              (string-join skipped "; "))))
 
-(cl-defun +agent-context--send (&key prompt pick draft references)
+(cl-defun +agent-context--send (&key prompt pick draft references instructions
+                                   session-instructions)
   "Send editor context to a session or copy it, reading PROMPT when nil.
-The context is the shared gptel selection unless REFERENCES is given: a
+The context is the shared editor selection unless REFERENCES is given: a
 function of (ROOT SESSION) returning the reference plists for exactly what the
 command names, such as one region, so a send never drags along whatever was
 gathered earlier.  PICK asks which session to use when sessions are not always
-asked for.  DRAFT puts the turn in the session's input without submitting it."
+asked for.  DRAFT puts the turn in the session's input without submitting it.
+INSTRUCTIONS adds per-request guidance. SESSION-INSTRUCTIONS is (KEY . TEXT)
+of short capability guidance delivered once per native session. Drafts and
+clipboard copies include it without consuming that session's initialization."
   (let* ((buffer (+agent-context--session pick))
          (clipboard (eq buffer 'clipboard))
          (root (if clipboard
@@ -361,18 +370,27 @@ asked for.  DRAFT puts the turn in the session's input without submitting it."
     (+agent-context--report-skipped (cdr resolved))
     (when (and (string-empty-p (string-trim prompt)) (null references))
       (user-error "Nothing to send: no question and no context"))
+    (when instructions
+      (setq prompt (concat prompt "\n\n" instructions)))
     (cond
      (clipboard
-      (kill-new (+agent-context--prompt-text prompt references))
+      (kill-new (+agent-context--prompt-text
+                 (if session-instructions
+                     (concat (cdr session-instructions) "\n\n" prompt) prompt)
+                 references))
       (message "Agent: prompt copied to clipboard"))
      (draft
-      (+agent-acp-draft buffer (+agent-context--prompt-text prompt references))
+      (+agent-acp-draft buffer (+agent-context--prompt-text
+                               (if session-instructions
+                                   (concat (cdr session-instructions) "\n\n" prompt) prompt)
+                               references))
       (+agent-acp-show-buffer buffer))
-     (t (+agent-context--deliver
-         buffer (+agent-context-content-blocks prompt references))))
+     (t (let ((blocks (+agent-context-content-blocks prompt references)))
+          (if session-instructions
+              (+agent-context--deliver buffer blocks session-instructions)
+            (+agent-context--deliver buffer blocks)))))
     (when (and (not clipboard) +agent-context-clear-after-send shared)
-      (require 'gptel-context)
-      (gptel-context-remove-all))
+          (+agent-selection-clear))
     (unless clipboard buffer)))
 
 (defun +agent-context--region-references (buffer begin end)
@@ -399,7 +417,7 @@ A region covering the whole buffer is a plain file reference."
 Reuse normal session selection, queueing and clipboard delivery.  DRAFT
 leaves the task in the session input; PICK forces the session chooser.
 FILES must be readable, saved files reachable by the selected agent.
-Neither read nor clear the shared gptel context."
+Neither read nor clear the shared editor context."
   (unless (and (stringp prompt) (not (string-empty-p (string-trim prompt))))
     (user-error "A task prompt is required"))
   (let ((files (delete-dups (mapcar #'expand-file-name files)))
@@ -420,7 +438,7 @@ Neither read nor clear the shared gptel context."
 ;;;###autoload
 (defun +agent-context-send (&optional pick)
   "Send the current editor context to an agent session as references.
-The context is the shared gptel selection, the one `gptel-add' builds.  With
+The context is the shared editor selection, the one `+agent-selection-add' builds.  With
 a prefix argument PICK, choose the session instead of reusing this project's
 last one."
   (interactive "P")
@@ -437,7 +455,7 @@ With a prefix argument PICK, choose the session."
 (defun +agent-context-send-region (&optional pick)
   "Send exactly the active region to a session.
 Only `file:LINE-LINE' travels; the agent reads the lines itself.  The shared
-gptel selection is left alone: this sends the region, not everything gathered
+editor selection is left alone: this sends the region, not everything gathered
 so far (that is `+agent-context-send').  In a Noema Markdown pane the page's own
 selection is used.  PICK is as for `+agent-context-send'."
   (interactive "P")
@@ -516,48 +534,25 @@ PICK is as for `+agent-context-send-at-point'."
        buffer (list (list (cons 'type "text") (cons 'text text))
                     (car (+agent-context--file-blocks (list reference))))))))
 
-(defvar +agent-context-review-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-c C-c") #'+agent-context-review-send)
-    (define-key map (kbd "C-c C-k") #'quit-window)
-    map)
-  "Keymap layered over gptel's context review buffer for agent sends.")
-
-(define-minor-mode +agent-context-review-mode
-  "Send the reviewed context to an agent session instead of to gptel's menu.
-
-gptel's own `C-c C-c' returns to its transient; here it hands the selection
-to a session.  Deletions flagged with \\`d' are applied first.
-
-\\{+agent-context-review-mode-map}"
-  :lighter nil
-  :keymap +agent-context-review-mode-map)
-
 (defun +agent-context-review-send ()
-  "Apply flagged deletions in the review buffer, then send to a session."
+  "Send the reviewed references through the normal session chooser."
   (interactive)
-  (require 'gptel-context)
-  (let ((doomed (delq nil (mapcar (lambda (overlay)
-                                    (and (overlay-get overlay 'gptel-context-deletion-mark)
-                                         (overlay-get overlay 'gptel-context)))
-                                  (overlays-in (point-min) (point-max))))))
-    (mapc #'gptel-context-remove doomed)
-    (setq gptel-context (gptel-context--collect)))
   (quit-window)
   (+agent-context-send))
 
 ;;;###autoload
 (defun +agent-context-inspect ()
-  "Review the current editor selection before sending it to a session.
-This is gptel's own context buffer: \\`n'/\\`p' move, \\`RET' visits, \\`d'
-flags for removal.  \\`C-c C-c' sends what is left to an agent session."
+  "Inspect selected references without loading a model client."
   (interactive)
-  (require 'gptel-context)
-  (unless gptel-context
-    (user-error "No context selected; add some with `gptel-add'"))
-  (gptel-context--buffer-setup nil nil gptel-context)
-  (when-let* ((buffer (get-buffer "*gptel-context*")))
-    (with-current-buffer buffer (+agent-context-review-mode 1))))
+  (unless (+agent-selection-collect)
+    (user-error "No context selected; use C-c A . first"))
+  (let ((root default-directory))
+    (with-current-buffer (get-buffer-create "*Agent Context*")
+      (+agent-selection-review-mode)
+      (setq default-directory root)
+      (local-set-key (kbd "C-c C-c") #'+agent-context-review-send)
+      (+agent-selection-review-refresh)
+      (pop-to-buffer (current-buffer)))))
 
 (provide 'tools/agent/context)
 ;;; tools/agent/context.el ends here

@@ -165,20 +165,30 @@ If the selected backend is `menu', prompt with `aaron-open-read-backend'."
      ((and expanded (file-name-absolute-p target)) expanded)
      (t target))))
 
-(defun aaron-open--base-window ()
-  "Return the non-minibuffer window that should be split for browser opens."
+(defun aaron-open--base-window (&optional keep-side)
+  "Return the ordinary window to split, keeping side windows intact.
+KEEP-SIDE permits an explicit same-window visit to retain its selected pane."
   (let* ((selected (selected-window))
          (base (if (window-minibuffer-p selected)
                    (ignore-errors (minibuffer-selected-window))
                  selected)))
     (cond
      ((and (window-live-p base)
-           (not (window-minibuffer-p base)))
+           (not (window-minibuffer-p base))
+           (or keep-side (not (window-parameter base 'window-side))))
       base)
-     ((frame-live-p (last-nonminibuffer-frame))
-      (frame-selected-window (last-nonminibuffer-frame)))
      (t
-      (user-error "No non-minibuffer window available for browser open")))))
+      (let* ((frame (if (window-live-p base) (window-frame base)
+                      (last-nonminibuffer-frame)))
+             (windows (and (frame-live-p frame)
+                           (seq-filter
+                            (lambda (window)
+                              (and (not (window-minibuffer-p window))
+                                   (not (window-parameter window 'window-side))
+                                   (not (window-dedicated-p window))))
+                            (window-list frame 'nomini)))))
+        (or (car (sort windows (lambda (a b) (> (window-use-time a) (window-use-time b)))))
+            (user-error "No main editing window available for opening")))))))
 
 (defun aaron-open--side-browser-window (_mode &optional reuse-selected)
   "Return (WINDOW . CREATEDP) for a browser buffer.
@@ -385,7 +395,8 @@ background Emacs stays hidden.  Never prompts."
       (setq buffer (+windows/file-open-new-frame file)
             window (get-buffer-window buffer t)))
      (t
-      (setq window (aaron-open--placement-window placement (aaron-open--base-window)))
+      (setq window (aaron-open--placement-window
+                    placement (aaron-open--base-window (eq placement 'here))))
       (with-selected-window window
         (setq buffer (aaron-open-visit-file file)
               ;; A Noema page may move itself to another window.

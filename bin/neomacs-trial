@@ -1,0 +1,23 @@
+#!/bin/bash
+# Start the optional Neomacs experiment without changing the default Emacs.
+# Usage: neomacs-trial [--app /path/to/neomacs.app] [Emacs options...]
+set -eu
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
+trial_app=${NEOMACS_APP:-/Applications/neomacs.app}
+if [ "${1:-}" = --app ]; then
+    [ $# -ge 2 ] || { echo 'neomacs-trial --app needs an application path' >&2; exit 2; }
+    trial_app=$2
+    shift 2
+elif [ ! -x "$trial_app/Contents/MacOS/neomacs" ] && [ -z "${NEOMACS_APP:-}" ]; then
+    for candidate in "$HOME"/Downloads/Compressed/neomacs-*/neomacs.app; do
+        [ -x "$candidate/Contents/MacOS/neomacs" ] && trial_app=$candidate
+    done
+fi
+if [ ! -x "$trial_app/Contents/MacOS/neomacs" ]; then
+    printf 'Neomacs not found; use --app /path/to/neomacs.app\n' >&2
+    exit 1
+fi
+
+export NEOMACS_CONFIG_TRIAL=1
+exec "$trial_app/Contents/MacOS/neomacs" --init-directory="$ROOT" "$@"

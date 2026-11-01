@@ -17,6 +17,7 @@ This configuration is designed to solve a concrete set of problems:
 
 - Project-first workflow
   `projectile`, `perspective`, `transient`, Treemacs, `show-imenu`, and popup `portal` are composed into a workspace-oriented project surface.
+  Terminals use `terminal-switcher`; agents use their existing project session pool and Agent Manager. `SPC b a` and `SPC w .` collect buffer and window actions.
 - Programming and debugging
   `lsp-mode` is the single language-server client, with target-aware automatic startup and first-class C/C++, Python, and Java/JDTLS routes. Completion, visible-region diagnostics/CodeLens/inlay hints, semantic Treemacs outlines, build/test, debugging, tree-sitter, snippets, code navigation, and an on-demand SQL/database client are already wired together.
 - Org and research writing
@@ -27,6 +28,7 @@ This configuration is designed to solve a concrete set of problems:
   Portal Web is the default in-Emacs browser and Noema host. `xwidget-webkit` loads only when selected explicitly; `eww` and macOS `open` remain available.
 - AI integration
   `gptel`, Claude Code, Codex CLI, and Copilot are integrated into the editing environment rather than bolted on as separate tools.
+  `H-A` (Option-Shift-A), `SPC a a`, or `M-x agent-manager` opens a shared Agent Manager for workspace sessions, attention, native history and lifecycle actions.
 - Recoverable dependency management
   Bootstrap, lock export, state backup/restore, and health checks are part of the operational model, so new-machine setup and recovery are treated as normal workflows.
 

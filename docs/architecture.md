@@ -56,6 +56,10 @@ early-init.el → init.el → lisp/init-modules.el（唯一的模块顺序）
 
 ### 目录职责
 
+Pi 的主／项目助手管理由 Noema 的 `noema-pi-router` 提供，独立 Session 记录由
+`noema-pi-sessions` 持有，物理连接复用 Emacs `tools/agent/acp`。Dashboard、
+Ibuffer 和 Agent Manager 只展示这些实际状态，见 [Pi 会话与项目助手](design/pi-sessions.md)。
+
 ```text
 lisp/init-modules.el  aaron! 声明：全部模块、分类与加载顺序
 lisp/core/            核心，以 Doom 的 doom-lib/doom-emacs/doom-modules 为模板；含 aaron-*.el、
@@ -120,7 +124,7 @@ Raycast ──(var/noema/host.json → loopback /api)──▶ Node host
 | 页面文本给 Emacs 工具 | `noema-md-bridge` | 页面保存的选区 |
 | 搜索与引用 | `noema/search` | `kernel/noema/wikisearch`、`references.go` |
 | Agenda | `noema-agenda`、`noema/bridge/agenda-*` | `server/lib/agenda-*`、`kernel/noema/agenda` |
-| `.noema` 工作文档 | `noema-research*`（JuText、Graph Board） | `kernel/noema/research`、`server/Features/Research` |
+| 保留的研究模型 | `noema-research`（纯模型）与现有记录管理 | `kernel/noema/research`、`server/Features/Research` |
 | Agent | `tools/agent/*` 通用运行时与 UI；`noema-agent-*` Research 适配 | `kernel/agent`、`kernel/mcp` 与研究持久记录 |
 | Jupyter（`.ipynb`） | `noema/jupyter/*`、`tools/jupyter` | `server/Features/Jupyter`、`server/jupyter/`、`jupyter/` |
 | 数学宏 | `lang/latex`（RaTeX） | `resources/katex-macros`、`shared/katex-macros.mjs` |
@@ -140,12 +144,16 @@ Noema 维护 Markdown、知识库、研究 DAG、冻结 Run、Proposal 和 Findi
 | 命令 | 作用 | 规格 |
 | --- | --- | --- |
 | `bin/emacs-app` | 后台 Emacs 的唯一入口：start/restart/kill/show/hide/status、白名单动作 `act`、`frame`、`terminal`、登录项 | `AGENT.md` “Background application”，[daily-usage.md](guide/daily-usage.md) “Emacs 作为后台应用” |
+| `bin/neomacs-trial` | 独立试验入口：选择 Neomacs 并启用专用启动 patch，不改 GNU、Raycast 或登录项 | [neomacs-compat.md](design/neomacs-compat.md) |
 | `bin/emacsopen` | 在运行中的 Emacs 打开文件，供 agent、脚本与终端调用：位置 `-o`/`-l`/`-r`/`-a`/`-b`/`-f`（其他窗口、四向分割、新 frame；默认选中窗口，`here`/`-o` 复用已显示该文件的窗口），`+行[:列]` 或 `文件:行[:列]`，`-n` 不抢焦点；每个文件输出一行 JSON（buffer、窗口、frame、是否复用与定位），失败退出非零；不依赖 Ghostty。实现 `aaron-open-place`（`lisp/core/aaron-open.el`）；`~/.local/bin/emacsopen` 链到这里 | `emacsopen --help` |
 | `bin/install-remote-ikernel` | 安装 `site-lisp/remote_ikernel` | [jupyter-workflow.md](design/jupyter-workflow.md) |
 | `bin/sage-jupyter-kernel` | SageMath kernel 启动包装，日志写 `var/log/`；由 Noema 的 sagemath kernelspec 模板调用 | — |
 | `make <target>` | 编译、测试、锁文件、健康检查；`make help` 列出全部 | [maintenance.md](ops/maintenance.md) |
 
 Raycast 扩展只调用 `bin/emacs-app`；新增外部入口放进 `bin/`，并在这张表里占一行。
+
+`bin/neomacs-trial` 通过 `NEOMACS_CONFIG_TRIAL=1` 启用 `os/neomacs/trial`。
+普通启动不加载这份 patch，`emacs-app` 与 `emacsopen` 继续使用原来的 GNU 入口。
 
 ## 改动落点速查
 

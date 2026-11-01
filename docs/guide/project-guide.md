@@ -79,6 +79,11 @@ marker 仍然直接探测。这个改写对本地同样有效，因此不按 tar
   打开当前项目 Magit
 - `SPC p v`
   打开当前项目专属 portal
+- `M-t` / `M-x terminal-switcher`
+  使用已有终端选择器选择或明确新建终端。
+- `C-c a` / `M-x +agent/pool`
+  召回当前项目的 Agent 会话，再次执行收起并返回编辑区。`C-u C-c a` 选择项目
+  会话，新建调用 `+agent/start`。跨项目总览使用 `M-x agent-manager`。
 - `SPC c i`
   打开 `show-imenu`
   左侧 Treemacs smart toggle，并跟随当前文件和光标所在符号
@@ -95,7 +100,7 @@ marker 仍然直接探测。这个改写对本地同样有效，因此不按 tar
 - Search
   项目内 ripgrep、跨已知项目找文件、项目 Magit
 - Open / Shell
-  项目根目录、项目 portal
+  项目根目录、项目 portal、Jupyter SSH 项目
 - Manage
   退出当前项目、手动加项目、批量发现项目、彻底移除项目、关闭当前项目的文件 buffer
 

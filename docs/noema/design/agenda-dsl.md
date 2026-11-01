@@ -87,7 +87,7 @@ for remaining integrations, including Apple and remote projects.
 
 ### WorkNode planning
 
-WorkNode planning is written visibly in the primary JuText cell with the same
+Retained WorkNode source stores planning in its primary cell with the same
 native planning commands used by Markdown. There is no `@@agenda` command and
 no JSON-only compatibility form. For example:
 
@@ -102,7 +102,7 @@ no JSON-only compatibility form. For example:
 Continue from the reversible-operator assumptions…
 ```
 
-JuText can edit this text directly. Noema recognizes only the leading visible
+The former JuText editor is retired. Explicit API clients may update retained source. Noema recognizes only the leading visible
 planning region of the primary cell, keeps the remaining prompt intact, and
 never sends `@@todo`/`@@clock` lines to the Agent. Removing `@@todo` removes the
 node from task rows while preserving the WorkNode and project DAG. Fields are
@@ -134,7 +134,7 @@ removal command refuses while a clock is running.
 
 Only `depends` blocks scheduling; lineage remains graph ancestry. Dropped parents
 do not satisfy dependencies. Multiple cells still project one task, and a node
-without cells opens in Graph Board. Completion preserves prompts, outputs and
+without cells retains its model identity; the former Graph Board navigation is retired. Completion preserves prompts, outputs and
 scientific outcomes. WorkNode repeats require an occurrence model and are
 currently rejected rather than resetting historical work.
 

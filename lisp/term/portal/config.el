@@ -354,8 +354,8 @@ the native Portal view with SSH running inside it."
   (interactive)
   (+portal-create :directory default-directory))
 
-(defalias 'terminal #'portal-terminal
-  "Open a native Ghostty terminal in the selected Emacs window.")
+(defalias 'terminal #'+portal/terminal
+  "Open a terminal on the current execution target in this window.")
 
 (defvar +terminal-selector-placement 'current
   "Window placement requested from the terminal minibuffer.")
@@ -552,9 +552,7 @@ in a visible window are omitted from the choices."
   (let* ((source (current-buffer))
          (source-directory default-directory)
          (popup (bound-and-true-p +portal-popup-instance-p))
-         (origin (if popup
-                     (car (+portal-popup--normal-windows))
-                   (selected-window)))
+         (origin (aaron-open--base-window))
          (candidates (+terminal-selector-candidates
                       (and (or popup (derived-mode-p 'portal-terminal-mode))
                            source)))
@@ -568,28 +566,32 @@ in a visible window are omitted from the choices."
          (selected (cdr (assoc choice candidates))))
     (unless selected
       (user-error "No terminal selected"))
-    (cond
-     ((eq +terminal-selector-placement 'frame)
-      (if (eq selected :new)
-          (+portal-open-external source-directory)
-        (+terminal-selector-move-to-new-frame selected)))
-     ((and (bufferp selected)
-           (buffer-local-value '+portal-popup-instance-p selected))
-      (+portal-popup/select-buffer selected))
-     (t
-      (unless origin
-        (user-error "No ordinary window for a terminal"))
-      (let ((target (pcase +terminal-selector-placement
-                      ('right (split-window origin nil 'right))
-                      ('below (split-window origin nil 'below))
-                      (_ origin))))
-        (select-window target)
-        (if (eq selected :new)
-            (let ((default-directory source-directory))
-              (portal-terminal-new))
-          (+portal-move-buffer-to-window selected target)
-          (when (derived-mode-p 'portal-terminal-mode)
-            (portal-terminal-focus))))))))
+    (let ((configuration (current-window-configuration)))
+      (condition-case err
+	  (cond
+	   ((eq +terminal-selector-placement 'frame)
+	    (if (eq selected :new)
+		(+portal-open-external source-directory)
+              (+terminal-selector-move-to-new-frame selected)))
+	   ((and (bufferp selected)
+		 (buffer-local-value '+portal-popup-instance-p selected))
+	    (+portal-popup/select-buffer selected))
+	   (t
+	    (unless origin
+              (user-error "No ordinary window for a terminal"))
+	    (let ((target (pcase +terminal-selector-placement
+			    ('right (split-window origin nil 'right))
+			    ('below (split-window origin nil 'below))
+			    (_ origin))))
+              (select-window target)
+              (if (eq selected :new)
+		  (+portal-create :directory source-directory)
+		(+portal-move-buffer-to-window selected target)
+		(when (derived-mode-p 'portal-terminal-mode)
+		  (portal-terminal-focus))))))
+	((error quit)
+	 (set-window-configuration configuration)
+	 (signal (car err) (cdr err)))))))
 
 (defalias 'terminal-switcher #'+portal/terminal-selector
   "Choose an existing terminal or create a new one.")
@@ -627,11 +629,7 @@ in a visible window are omitted from the choices."
 
 (defun +portal-open-external (&optional path command)
   "Open PATH or COMMAND in a Portal terminal in a new Emacs frame."
-  (let* ((frame (when (display-graphic-p)
-                  (if (fboundp '+background-make-frame)
-                      (+background-make-frame)
-                    (make-frame))))
-         (path (and path (expand-file-name path)))
+  (let* ((path (and path (expand-file-name path)))
          (directory (if path
                         (if (file-directory-p path)
                             path (file-name-directory path))
@@ -641,12 +639,22 @@ in a visible window are omitted from the choices."
                            (if (file-executable-p path)
                                (list path)
                              (list "/bin/zsh" path)))))
-         buffer)
-    (when frame (select-frame frame))
-    (setq buffer (+portal-create :directory directory :command program))
-    (when frame
-      (set-frame-parameter frame '+portal/terminal buffer))
-    buffer))
+         (origin (selected-frame))
+         frame buffer completed)
+    (unwind-protect
+        (progn
+          (when (display-graphic-p)
+            (setq frame (if (fboundp '+background-make-frame)
+                            (+background-make-frame)
+                          (make-frame)))
+            (select-frame frame))
+          (setq buffer (+portal-create :directory directory :command program))
+          (when frame (set-frame-parameter frame '+portal/terminal buffer))
+          (setq completed t)
+          buffer)
+      (unless completed
+        (when (frame-live-p frame) (delete-frame frame t))
+        (when (frame-live-p origin) (select-frame-set-input-focus origin))))))
 
 (defun +portal-terminal-kill-h ()
   "Close the owning frame or vacate windows before this terminal exits."

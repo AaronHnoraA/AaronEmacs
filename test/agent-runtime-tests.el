@@ -57,18 +57,23 @@
         (should (eq (plist-get snapshot :process-state) 'dead))
         (should (equal (+agent-sessions--state snapshot) "dead"))))))
 
-(ert-deftest agent-runtime-c10-ordinary-compose-reuses-gptel ()
+(ert-deftest agent-runtime-c10-markdown-task-send-uses-session-references ()
   (with-temp-buffer
+    (markdown-mode)
+    (setq buffer-file-name "/tmp/task.md")
     (let ((+agent-editor-action-functions nil) sent)
-      (cl-letf (((symbol-function 'gptel-send) (lambda (arg) (setq sent arg))))
+      (cl-letf (((symbol-function '+agent-context--buffer-file) (lambda (_) buffer-file-name))
+                ((symbol-function '+agent-context--send) (lambda (&rest args) (setq sent args))))
         (+agent/compose-send 'explicit)
-        (should (eq sent 'explicit))))))
+        (should (eq (plist-get sent :pick) 'explicit))
+        (should (functionp (plist-get sent :references)))
+        (should (string-match-p "Markdown" (plist-get sent :prompt)))))))
 
 (ert-deftest agent-runtime-c10-domain-editor-is-explicitly-adapted ()
   (let* (seen
          (+agent-editor-action-functions
           (list (lambda (operation &rest _) (push operation seen) t))))
-    (cl-letf (((symbol-function 'gptel-rewrite) (lambda () (ert-fail "Domain editor handled the action"))))
+    (cl-letf (((symbol-function '+agent-context-send-region) (lambda () (ert-fail "Domain editor handled the action"))))
       (+agent/compose-rewrite)
       (should (equal seen '(rewrite))))))
 
@@ -176,14 +181,14 @@
       (should (equal (buffer-string) "Prompt> draft")))))
 
 (ert-deftest +agent-runtime-clear-after-send-clears-only-the-shared-selection ()
-  (require 'gptel-context)
+  (require 'tools/agent/selection)
   (let ((+agent-context-clear-after-send t) (+agent-context-always-ask-session nil) cleared)
     (cl-letf (((symbol-function '+agent-context--session) (lambda (_) 'buffer))
               ((symbol-function 'buffer-local-value) (lambda (_ _) "/project/"))
               ((symbol-function '+agent-context--resolve)
                (lambda (&rest _) (cons '((:kind file :relative "a" :file "/a")) nil)))
               ((symbol-function '+agent-context--deliver) #'ignore)
-              ((symbol-function 'gptel-context-remove-all)
+              ((symbol-function '+agent-selection-clear)
                (lambda (&rest _) (setq cleared t))))
       ;; An explicit reference leaves what was gathered alone.
       (+agent-context--send :prompt "q" :references (lambda (&rest _) nil))

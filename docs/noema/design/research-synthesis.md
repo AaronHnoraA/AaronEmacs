@@ -1,23 +1,18 @@
 # Research synthesis and Proposals
 
 Phase F keeps model output outside authoritative research state until a human
-reviews it. Magent and the future Pi supervisor submit the same typed Proposal
+reviews it. Magent and Pi adapters submit the same typed Proposal
 envelope; neither adapter can create a Finding, Research IR version, Problem
 Model version, Task, or notebook cell directly.
 
 ## Emacs workflow
 
-In a saved JuText research notebook, run
-`M-x noema-research-propose-with-magent` (bound to `C-c C-r`). Magent performs
-one gptel sample with provider tools disabled. The selected region, or the
-current cell body, is enclosed as untrusted research data and the response must
-be one bare JSON object. A selection or current cell marked `local_only` is
-rejected before the sampler is called.
-
-Pending `cell.create` Proposals appear as dashed diamond nodes in Graph Board.
-They are not editable notebook cells. Open Attention with `a` in Graph Board or
-`C-c C-a` in JuText to accept or reject a Proposal. The authenticated research
-control page presents the same versioned actions.
+The former JuText/Magent command and Graph Board presentation are retired.
+Typed Proposal services, Attention review and immutable evidence remain.
+Use the actual Research API to submit a typed proposal and inspect its result;
+ordinary Markdown writing uses the separate versioned document review API.
+`noema-research-propose-memory-from-run` still proposes memory from an existing
+Run's Handoff source. A proposal alone is not an accepted Finding.
 
 A cell acceptance uses three durable states:
 
@@ -37,8 +32,7 @@ cell are idempotent. A concurrent rejection cannot cross the reservation.
 `proposedBy=agent:pi:supervisor` and `sourceAdapter=pi-supervisor-hook`, rejects
 review/decision fields, and calls only Proposal creation. It is a transport
 hook, not a claim that a real Pi supervisor RPC exists. The locally installed
-`pi-acp` remains an ordinary ACP execution adapter until a supported supervisor
-transport is installed and validated.
+`pi-acp` remains an ordinary ACP execution adapter without claiming a provider-specific supervisor transport.
 
 ## Workstream export
 

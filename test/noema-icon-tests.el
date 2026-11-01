@@ -49,11 +49,7 @@
   (should-not (equal +noema-work-icon-file (material-icon-get-icon-for-file "proof.md")))
   (should-not (equal +noema-work-icon-file (material-icon-get-icon-for-file "folder.noema" t))))
 
-(ert-deftest noema-icon-font-provider-covers-modeline-and-research-mode ()
-  (require 'nerd-icons)
-  (let ((expected (substring-no-properties (nerd-icons-mdicon "nf-md-graph_outline"))))
-    (should (equal expected (substring-no-properties (nerd-icons-icon-for-file "proof.noema"))))
-    (should (equal expected (substring-no-properties (nerd-icons-icon-for-mode 'noema-research-mode))))))
+
 
 (ert-deftest noema-icon-tab-label-keeps-file-identity-and-click-target ()
   (require 'ui/tabbar/config)
@@ -69,3 +65,8 @@
   (should (treemacs-get-icon-value "noema")))
 
 ;;; noema-icon-tests.el ends here
+
+(ert-deftest noema-icon-font-provider-keeps-the-legacy-file-extension ()
+  (require 'nerd-icons)
+  (let ((expected (substring-no-properties (nerd-icons-mdicon "nf-md-graph_outline"))))
+    (should (equal expected (substring-no-properties (nerd-icons-icon-for-file "proof.noema"))))))

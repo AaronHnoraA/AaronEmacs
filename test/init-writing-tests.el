@@ -4,8 +4,9 @@
 (require 'checkers/grammar/config)
 (require 'lang/latex/config)
 
-(ert-deftest +noema-jutext-registers-ratex-preview ()
-  (should (memq #'ratex-turn-on noema-research-mode-hook)))
+(ert-deftest +latex-preview-keeps-generic-writing-hooks ()
+  (should-not (boundp 'noema-research-mode-hook))
+  (should (memq #'ratex-turn-on LaTeX-mode-hook)))
 
 (defun +test-languagetool-response ()
   "Return a small LanguageTool response used by diagnostics tests."

@@ -167,7 +167,7 @@ protocol 保持不变。
 
 `web-host.mjs` 向 Emacs xwidget/Appine 提供 `dist/pages`，页面只执行一次
 `pages/main.ts -> createEditor(host)`。Emacs 是唯一第一方 UI/UX：window、buffer、
-minibuffer、Graph Board、JuText、Inspector、Attention、agent-shell、vterm、审批、输入和
+minibuffer、项目管理、Attention、agent-shell、vterm、审批、输入和
 Proposal 复核都由 Emacs 拥有。CM6 只负责私有 Markdown 文档面及其 document widgets，
 不得出现第二套工作流 GUI、应用标题栏、原生窗口菜单或 Electron preload API。
 
@@ -228,10 +228,8 @@ Graph 和 related Knowledge 共用该投影。standalone 文件打开后仍扫�
 host 还复用笔记库的单个递归 watcher，把 250 ms 合并后的 Markdown 变更路径推送给已连接页面；
 Emacs 内的 ACP agent 完成一轮时，Noema 订阅 agent-shell 的 `turn-complete` 事件，
 包括裸启动的 Claude 会话；对已打开的 Markdown 页面各查一次文件时间戳，只有变化时
-才让页面读取正文。可见和最近的 JuText buffer 同时由自己的磁盘同步器检查一次；
-无草稿时重新投影外部正文变更，有草稿时保留本地内容并合并运行输出。
-ACP 回合完成只先查 JuText 文件时间戳；没有变化就不读取或哈希整份 `.noema`。
-本地文件通知携带实际写入信号，即使时间戳相同也核对内容修订。
+才让页面读取正文。`.noema` 的 JuText 磁盘同步、Graph Board 和 Work Output 专用接线已移除；
+普通 notebook 的文本投影、会话快照和 Jupyter 输出同步继续使用独立路径。
 Emacs 网关的 `noema.command` 只把 `detail` 内的 `file`、`mtimeMs`、`clientId`
 转发给页面；顶层 `command`、`client` 属于 host 路由协议。
 页面仅在无草稿时自动重读当前文件；所有重读在异步结果返回时再次核对文件与
@@ -265,7 +263,7 @@ lisp/noema/bridge/config.el
 lisp/noema/bridge/portal.el
   Portal Web 页面、client 复用、焦点与宿主消息
 site-lisp/noema/lisp/noema-md-bridge.el
-  Portal / xwidget 共用的页面选区、保存回执、Emacs 源 buffer 与 agent / gptel 动作
+  Portal / xwidget 共用的页面选区、保存回执、Emacs 源 buffer 与 Agent 动作
 site-lisp/noema/lisp/noema-xwidget-keys.el
   md/xwidget 输入、焦点、Undo/Redo、Shift-Tab 与 Emacs windmove 焦点修复
 ```
@@ -273,7 +271,7 @@ site-lisp/noema/lisp/noema-xwidget-keys.el
 Noema 默认在 Portal Web 中打开。任务管理器、Wiki Home、导出、页面工具和
 AI 发送都经页面 client 的宿主命令路由，不依赖 xwidget 的脚本执行。
 发送选区、光标行或整篇笔记时，页面先保存并报告范围；Emacs 只在收到
-该 client 的保存回执后读取磁盘和启动 agent / gptel。Emacs 源 buffer 保存后
+该 client 的保存回执后读取磁盘和启动 Agent。Emacs 源 buffer 保存后
 通知显示同一笔记的 Portal 与 xwidget 页面重载，页面有未保存草稿时仍保留草稿。
 当外部修改使页面保存发生版本冲突时，发送操作报告具体的保存错误并保留草稿。
 普通刷新先尝试保存；版本冲突时打开磁盘版本与页面草稿的比较视图，由人选择

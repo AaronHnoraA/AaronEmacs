@@ -270,5 +270,43 @@
                            '("make lint" "/tmp/a/" nil)))))
       (set-frame-parameter nil '+output-last-runs previous))))
 
+(ert-deftest c27-output-popup-policy-covers-frame-names-and-renamed-buffers ()
+  (require 'shackle)
+  (dolist (name '("*run F9001*" "*test F9001*" "*task F9001*"
+                  "*compilation*" "renamed workflow result"))
+    (with-temp-buffer
+      (rename-buffer name t)
+      (compilation-mode)
+      (let ((policy (shackle-match (current-buffer))))
+        (should (eq (plist-get policy :align) 'below))
+        (should (eq (plist-get policy :select) t))
+        (should (equal (plist-get policy :size) +display-rules-bottom-size))))))
+
+(ert-deftest c27-output-popup-below-editor-keeps-existing-agent-dock ()
+  "The shared policy displays actual frame output beside an existing dock."
+  (require 'shackle)
+  (let ((editor (generate-new-buffer "c27-editor"))
+        (dock-buffer (generate-new-buffer "*Agent · c27-dock*"))
+        (output (generate-new-buffer "*run F9002*")))
+    (save-window-excursion
+      (unwind-protect
+          (progn
+            (delete-other-windows)
+            (switch-to-buffer editor)
+            (let* ((main (selected-window))
+                   (dock (display-buffer-in-side-window
+                          dock-buffer '((side . right) (window-width . 0.3)))))
+              (with-current-buffer output (compilation-mode))
+              (select-window dock)
+              (let ((window (display-buffer output)))
+                (should (window-live-p window))
+                (should (eq (window-buffer window) output))
+                (should (eq (window-buffer main) editor))
+                (should (eq (window-buffer dock) dock-buffer))
+                (should (> (nth 1 (window-edges window))
+                           (nth 1 (window-edges main)))))))
+        (dolist (buffer (list editor dock-buffer output))
+          (when (buffer-live-p buffer) (kill-buffer buffer)))))))
+
 (provide 'init-output-frame-tests)
 ;;; init-output-frame-tests.el ends here

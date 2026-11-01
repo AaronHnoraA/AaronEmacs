@@ -31,8 +31,10 @@ reconstructing the system from scattered Elisp:
 - `docs/guide/project-guide.md` and `docs/guide/research-notes-workflow.md` cover their
   respective domains.
 
-If code and docs disagree, inspect the current code, make the minimal correct
-change, and update stale docs when that is part of the task.
+
+If code and documentation disagree, inspect the current implementation and
+make the smallest correct change. Update outdated documentation when doing so
+falls within the task's scope.
 
 ## Project Model
 
@@ -58,16 +60,14 @@ Noema/Jupyter bridge under `lisp/noema/`, the Remote library and its modules
 under `lisp/remote/`.  Only the core is flat (`lisp/core/aaron-*.el`), as
 Doom's is.
 
-`.noema` files are D-023 AI prompt/workflow documents, not Jupyter notebooks.
-Their work blocks run through the ACP agent boundary and persist the latest
-reply in nbformat outputs; they have no kernelspec, programming code cells,
-Result cells, kernel controls, or Run All. The Jupyter bridge below applies to
-ordinary `.ipynb` and Markdown `@@cell` sidecars. Node also enforces this
-boundary if a generic Jupyter command is invoked from a `.noema` buffer.
-JuText therefore has no LSP client: Company routes work control directives to
-Noema's project capability CAPF and ordinary prose to dabbrev; Yasnippet is
-manual there. Flymake shows Noema's existing structural validation, and RaTeX
-previews prose math while skipping controls and code examples.
+Project Agent work uses ordinary Markdown, `AGENTS.md` and `.agent/` records.
+The `.noema`-specific JuText editor, Company/CAPF, Flymake, Graph Board,
+templates and Work Output adapters are retired. Keep the underlying research
+models, RunSpecs, context/memory optimizations, Session records and evidence.
+Existing `.noema` and `.noema.ipynb` data remains plain source and must not
+enter a Jupyter kernel or its output page. Ordinary `.ipynb` source projection,
+Markdown `@@cell`, notebook completion/LSP, Jupyter rich output, generic
+Company and RaTeX retain their independent behavior.
 
 A Noema Project is not a Git or `project.el` concept (Noema D-038).
 `noema.toml` may declare a Wiki repository (top-level `repository_id`, written
@@ -78,11 +78,9 @@ can hold many Projects.  A Project's agents run in its optional `workspace`
 (`noema-project-workspace`), which may be a code repository elsewhere.
 Resolve through `noema-project-root` / `noema-project-scope` rather than adding
 another fallback chain, and hand the Noema host native paths only
-(`noema-project-client-path` projects `/fs:`).  Visiting a `.noema` never
-creates a Project, because previews and programs visit files too.  Creating a
-`.noema` or running a work block goes through `noema-project-ensure`, which
-asks first, offering the file's directory and its ancestors: a code
-repository's root is proposed, a vault's is not.  Do not add silent
+(`noema-project-client-path` projects `/fs:`).  Visiting a file never creates a Project. Explicit operations that need one
+use `noema-project-ensure`, offering the file's directory and its ancestors:
+a code repository's root is proposed, a vault's is not. Do not add silent
 `noema-project-enable` calls to visit paths.  The same project boundary
 authorizes an ordinary native `.ipynb` outside the Noema notes root: Jupyter
 requests carry `projectRoot`, and only explicit commands (never visit,
@@ -95,12 +93,21 @@ attention and notification policy. Noema primarily owns Markdown and knowledge
 components; Research owns its DAG, frozen RunSpec, results, Proposals and
 Findings, and calls/organizes the common agent layer. Read
 `docs/design/agent-management.md` before changing either side. Shared
-implementations and gptel/Magent sources are maintained by Emacs;
+implementations and optional gptel/Magent sources are maintained by Emacs;
+Noema context and document review do not depend on gptel. Prompt documents
+reuse existing Markdown through the project Pi Skill.
 `site-lisp/noema/lisp/noema-agent-acp.el` is the thin Research association
 adapter. ECA is a source study, not a
 runtime dependency. Preserve Remote, Aaron UI and window lifecycle contracts
 when adapting upstream interaction logic. Notifications go through
 `tools/agent/notifications` and `aaron-notify`; routine completion is quiet.
+The daily front door is `agent-manager` (`H-A`, `SPC a a`), an Aaron ETAF
+float over the shared registry; closing its view must never end execution.
+Native restart/reconnect goes through `+agent-acp-restart-native`, retaining
+the native ID and unsent input without replaying an active request. Research
+must finish its owning Run before restart. Input/hide keys are `C-c C-e` /
+`C-c C-o` in both the dock and Portal popup. Lifecycle contracts C11-C16 and
+their regression tests live in the agent management design document.
 
 When adding a module:
 
@@ -273,8 +280,9 @@ Keep these rules:
 
 This configuration runs on GNU Emacs 31 and, in principle, on Neomacs, which
 tracks the GNU Emacs 31.1 Lisp layer but not its C/Objective-C runtime.  The
-Neomacs migration is paused at 0.0.18 and Neomacs is not installed; keep the
-rules below when touching the boundary so the work stays reusable.
+Neomacs 0.0.20 is an optional startup trial through `bin/neomacs-trial` only;
+its patches live in `lisp/os/neomacs/trial.el`. GNU Emacs remains the default.
+Keep the rules below when touching the boundary so the work stays reusable.
 
 - `lisp/os/neomacs/config.el` is the only module allowed to know which build is
   running.  It exposes `+neomacs-p` and is loaded right after
@@ -282,10 +290,10 @@ rules below when touching the boundary so the work stays reusable.
   `(featurep 'ns)`, or `native-comp-available-p` to pick behaviour; extend the
   compatibility layer instead.  The one accepted exception is a genuinely
   build-specific command such as `+mac-swap-option-and-command`.
-- Neomacs has no `mac-*-modifier` variables and no Hyper bit at all: its input
-  bridge hard-codes Option to Meta and Command to Super.  The `H-` layer is
-  restored by renaming modifiers in `key-translation-map`, not by rewriting
-  bindings.  Keep new keybindings written for the GNU layout (Option as Hyper,
+- In the opt-in trial, Neomacs builds exposing `neomacs-set-modifier-policy` honour the native
+  `mac-*-modifier` aliases and Hyper. Do not double-translate their input.
+  Older builds use the compatibility module's `key-translation-map` fallback.
+  Keep new keybindings written for the GNU layout (Option as Hyper,
   Command as Meta).
 - Neomacs has no native compilation.  Anything that fans out over
   `num-processors` needs a cap that is automatic on interpreted builds and
@@ -310,6 +318,9 @@ This config already has maintenance and workflow entry points. Reuse them:
 - Projects: `project-menu`, `+project/switch`,
   `+project/open-workbench`, `+project-search-paths`, Projectile,
   Perspective, Transient, and `show-imenu`.
+- Terminals and agents keep their own entry points: `terminal-switcher`,
+  `+agent/pool`, `+agent/start` and `agent-manager`. Reuse those owners for
+  selection, creation and display; do not add a mixed tool manager.
 - Remote files: `remote-files` is a Dired/Dirvish menu over `remote-transfer`,
   not a screen: the other side is picked in a pop-up Dired, and jobs are
   claimed as tasks by `+activity/board` (queue detail in
@@ -716,7 +727,14 @@ Browser and Portal:
 - Closing follows `docs/design/window-lifecycle.md`: `Cmd-W` (`+windows/close-window`)
   closes the current pane, or only its view when it is the sole pane, without
   killing the buffer or frame. `Cmd-Shift-W` keeps Perspective's interactive
-  buffer-kill picker; `H-q` ends the current buffer. Fallback never shows a
+  buffer-kill picker; `H-q` ends the current buffer. A buffer's resource owner
+  registers `+buffer-end-function` for confirmation and cleanup; a refusal
+  never falls through to a generic kill. Display names do not decide lifecycle.
+  `+buffer-hide-function` delegates view hiding to its display owner. Agent
+  confirmation and close observers also live in native buffer query/kill hooks,
+  so Ibuffer and native kills obey the same policy. Generic post-kill window
+  repair completes synchronously; physical replacement respects C30.
+  Fallback never shows a
   single-instance buffer that is on screen elsewhere.  Window rules ask
   `+buffer-single-instance-p`, never a mode or a package variable; a new
   native-view or xwidget mode joins `+single-instance-modes`.

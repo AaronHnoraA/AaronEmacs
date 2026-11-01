@@ -99,8 +99,6 @@ different answer rebuilds the Dashboard.")
 
 (with-eval-after-load 'nerd-icons
   (setf (alist-get "noema" nerd-icons-extension-icon-alist nil nil #'equal)
-        '(nerd-icons-mdicon "nf-md-graph_outline" :face nerd-icons-purple))
-  (setf (alist-get 'noema-research-mode nerd-icons-mode-icon-alist)
         '(nerd-icons-mdicon "nf-md-graph_outline" :face nerd-icons-purple)))
 
 (declare-function material-icon-create-icon-image "material-icon-utils" (icon-path))
@@ -933,6 +931,22 @@ request, and only the first may render its answer."
                    [triple-wheel-right]))
     (define-key dashboard-mode-map event #'+dashboard/ignore-horizontal-wheel)))
 
+(defun +dashboard-initial-buffer ()
+  "Return the explicit home buffer for a cold application start."
+  (require 'ui/windows/config)
+  (+window-dashboard-buffer))
+
+(defun +dashboard-configure-startup-choice ()
+  "Select Dashboard for a plain application launch; preserve file arguments."
+  (when (and (not noninteractive) (= (length command-line-args) 1))
+    (setq initial-buffer-choice #'+dashboard-initial-buffer)))
+
+(defun +dashboard/open-pi-sessions (&rest _)
+  "Open Pi's independent conversation manager."
+  (interactive)
+  (require 'noema-pi-sessions)
+  (noema-pi-sessions))
+
 (use-package dashboard
   :ensure t
   :init
@@ -949,10 +963,13 @@ request, and only the first may render its answer."
            (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-pulse") "M")
             "monitor" "Open runtime performance monitor"
             ,#'+dashboard/open-monitor)
+           ("Pi" "pi" "Manage Pi conversations"
+            ,#'+dashboard/open-pi-sessions)
            (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-download") "♺")
             "upgrade" "Upgrade archive and VC packages, then refresh the lock file"
             ,#'+dashboard/upgrade-packages success))))
   
+  (+dashboard-configure-startup-choice)
   (dashboard-setup-startup-hook)
 
   :config

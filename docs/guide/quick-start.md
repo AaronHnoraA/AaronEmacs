@@ -207,36 +207,26 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 
 ### AI 助手
 
-[lisp/tools/agent/config.el](../../lisp/tools/agent/config.el) 提供 Noema 的统一 AI/agent 入口。
-gptel、agent-shell、acp.el、shell-maker、Magent 及现有 CLI 兼容代码均完整内化在
-`site-lisp/noema/upstream/`，不再从 `package.el`、VC package 或旧 workbench 目录加载。
+共享配置入口是 [lisp/tools/agent/config.el](../../lisp/tools/agent/config.el)。
+Emacs 管理 Agent 的连接、队列、权限、上下文与视图；Noema 提供 Markdown 和知识服务。
+agent-shell、acp.el、shell-maker 使用固定版本的 package-vc 依赖，可选上游源码
+见 `site-lisp/AGENT-UPSTREAMS.md`。Noema 的这些交互不依赖 gptel。
 
-**Noema AI/agent**
+- 打开 Emacs 主程序进入 Dashboard，常驻 Pi 后台初始化；进入项目时复用项目 Pi。
+- `M-x noema` / `C-c A W` 打开项目 Pi；`M-x noema-pi-emacs-open` 打开主 Pi。
+- Dashboard 的 `pi` / `M-x noema-pi-sessions` 管理 Pi 历史；Ibuffer 的 Pi 组列出实际 buffer。
+- `C-c A a` 选择并启动普通 Agent；`C-c A S` 打开共享 Agent Manager。
+- `C-c A c` 通过项目 Pi Skill 创建并打开普通 Markdown prompt 文档，编辑保存后
+  用 `C-c A s` 发给已有 Agent；`C-c A m` 打开会话菜单。
+- `C-c A .` 添加上下文，`C-c A ,` 检视，`C-c A x/v/B/f/@` 发送上下文、选区、
+  buffer、文件或光标位置的引用。
+- `C-c A r` 请求改写；Noema 通过文档 API 生成审阅提案，用户接受或反馈。
+- `C-c A p` 仅用于普通任务 Agent 的 Research 关联，Pi 会话单独管理。
 
-- `M-x noema` / `C-c A W` — 打开 Noema（默认进入 Magent 的 agent-shell 会话）
-- `M-x +agent/start` / `C-c A a` — 选择并启动 Magent、Codex、Claude、OpenCode 或 Pi agent-shell 会话
-- `M-x +agent/compose` / `C-c A c` — 使用完整 gptel UI 打开任意 buffer compose
-- `C-c A s` — 从当前 buffer 发送；`C-c A m` — gptel transient；`C-c A .` / `C-c M-a` — 添加上下文
-- `C-c A r` — 使用 gptel rewrite/diff 预览；`C-c A p` — 把当前 agent-shell 会话纳入 Noema research
-- `C-c A x` / `v` / `B` / `@` — 把上下文、选区、buffer、光标位置交给某个 agent 会话；
-  发出去的是 `文件:行-行` 引用和 `resource_link`，不拷贝正文
-- `C-c A S` / `C-c A b` — 列出 / 切换该项目的全部 agent 会话（含 popup 与裸
-  `M-x agent-shell` 开的）
-- CLI sampler 只作为 gptel backend 的降级，不再提供第二套 interaction Hub/transcript/session UI；region、buffer、file 一律从 gptel compose/context 发送。
-- profile 与 prompt 模板在 `etc/noema/`；Magent session/audit 状态在 `var/noema/`
-
-Noema 不重写 gptel 或 agent-shell。gptel 提供 compose/context/rewrite UI，agent-shell + ACP
-持有结构化外部 agent 会话，Magent 提供本地 agent、queue、ledger 与 gptel adapter；Noema
-把这些能力连接到 Project、WorkNode、Run 和 Artifact。
-
-Claude/Codex 的兼容源码仍在 Noema `upstream/`，但不再绑定全局快捷键；从
-`C-c A a` 的 agent-shell 入口选择它们。
-- 需要先在终端 `npm install -g @anthropic-ai/claude-code` 或 brew 安装 claude CLI
-
-**Codex CLI**（可选）
-
-- 入口前缀：`C-c c`
-- 需要 `codex` 可执行文件在 PATH 中
+完整流程见 [Pi 会话与项目助手](../design/pi-sessions.md)、
+[Agent 管理](../design/agent-management.md) 和
+[Noema 交互](../noema/design/interaction-plan.md)。Skill／pack 按项目方法、Emacs 操作
+和 Markdown 分为 `noema-project`、`noema-emacs`、`noema-md`。
 
 ### 运行时状态目录
 

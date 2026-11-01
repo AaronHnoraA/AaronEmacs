@@ -75,7 +75,6 @@
 (autoload '+noema/publish-deploy       "noema/bridge/publish" nil t)
 (autoload '+noema/publish-clean        "noema/bridge/publish" nil t)
 (autoload 'noema-project-overview "noema-project-overview" nil t)
-(autoload 'noema-research-workflow-preview "noema-research-workflow" nil t)
 (autoload 'noema-history-search "noema-history-search" nil t)
 (autoload 'noema-findings "noema-findings" nil t)
 
@@ -1710,6 +1709,11 @@ This is a memory-only check; it never opens an inactive project or reads disk."
    (+noema--agenda-source-request params client)))
 (remote-gateway-register-method
  "noema.event" #'+noema--gateway-event)
+(remote-gateway-register-method
+ "noema.pi"
+ (lambda (params _client)
+   (require 'noema-pi-router)
+   (noema-pi-api params)))
 (remote-gateway-register-method
  "noema.file.read" #'+noema--external-file-read)
 (remote-gateway-register-method
@@ -3565,16 +3569,6 @@ and every renderer uses the same `runHostCommand' pause implementation."
 
 (defalias 'noema-agenda #'+noema/agenda
   "Open the native Noema Agenda for the knowledge vault and current project.")
-
-(defun +noema/agenda-plan-node (scheduled deadline)
-  "Include the current DAG node in Agenda with SCHEDULED and DEADLINE dates."
-  (interactive (list (read-string "Schedule (YYYY-MM-DD [HH:MM], optional): ")
-                     (read-string "Deadline (YYYY-MM-DD [HH:MM], optional): ")))
-  (require 'noema-api)
-  (let ((patch (make-hash-table :test #'equal)))
-    (unless (string-empty-p scheduled) (puthash "sche" scheduled patch))
-    (unless (string-empty-p deadline) (puthash "ddl" deadline patch))
-    (noema-set-node-agenda (noema-current-node) patch)))
 
 (defun +noema--gateway-hash-value (value)
   "Convert decoded gateway VALUE into hash-table object representation."

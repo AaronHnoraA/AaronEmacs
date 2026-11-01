@@ -11,7 +11,7 @@ Noema 的文档不在本仓库：它们和 Emacs 配置的文档一起放在 `~/
 
 ```text
 Emacs（唯一 UI）
-├── lisp/noema-*.el          产品 Elisp：.noema 模型与 JuText、Graph Board、Agent、能力管理
+├── lisp/noema-*.el          产品 Elisp：研究模型、Agent、能力管理与 Markdown 桥
 └── xwidget/Appine 页面 ← dist/pages（由 pages/ + src/ 构建）
         │ HTTP/SSE
 Node host  web-host.mjs + server/
@@ -28,10 +28,10 @@ Go kernel  kernel/（二进制 noema）
 | `src/` | ~50k 行 TS | 可复用渲染与编辑核心。`src/cm6/` 是 CodeMirror 6 编辑器（composition root 在 `extensions/index.ts`，渲染构件统一在 `extensions/visual/constructs/`）；其余是 Markdown/数学/TikZ/HTML 导出/Jupyter rendermime 等纯模块 |
 | `pages/` | ~43k 行 TS | Emacs 宿主页面：笔记编辑页（`main.ts`）、Wiki、Agenda、Jupyter 输出、Config、Slides；宿主键盘与焦点契约（`host-keyboard.ts`、`xwidget-key-guard.ts`）；Vim 层（`vim-lite.ts`）。构建到 `dist/pages` |
 | `shared/` | ~5k 行 `.mjs` | 浏览器与 Node 共用的语法/身份/宏规则，配 `*-fixtures.json` 契约（Go 侧按同一 fixture 校验） |
-| `server/` | ~44k 行 `.mjs` | Node host。`Features/*/api.mjs` 是功能控制器（Assets、Emacs、Filesystem、Jupyter、MarginNote、Prose、Research、Session、Tasks）；`infrastructure/` 是 transport 无关的 router；`jupyter/` 是 Jupyter 协议客户端；`lib/` 是领域实现与旧 facade（仍在逐步拆入 Features） |
+| `server/` | ~44k 行 `.mjs` | Node host。`Features/*/api.mjs` 是功能控制器（Agent、Assets、Emacs、Filesystem、Jupyter、MarginNote、Prose、Research、Session、Tasks）；`infrastructure/` 是 transport 无关的 router；`jupyter/` 是 Jupyter 协议客户端；`lib/` 是领域实现与旧 facade（仍在逐步拆入 Features） |
 | `web-host.mjs` | | HTTP/SSE、静态资源、router 装配；写 `host.json` |
 | `kernel/` | Go | headless 内核，派生自 SiYuan（AGPL）。`noema/` 是 Noema 自有包：`research`（WorkNode DAG、Proposal、Finding）、`wikisearch`（唯一搜索实现）、`agenda`、`planning`、`latex`、`bibliography`、`vaultgit`、`markdown`、`metadata` 等；`mcp/` 是 MCP 服务与工具；`agent/` 是 Agent 运行记录；`model/`、`api/`、`sql/`、`av/`、`treenode/` 等大多继承自上游 |
-| `lisp/` | ~32k 行 Elisp | 随产品发布的 Emacs 包。`noema-research*` 是 `.noema`/JuText/Graph Board；`noema-agent-*` 是 ACP 边界、worker、worktree、会话面板；`noema-capability-*`、`noema-skill-upstream-ui` 是 Skill/MCP 管理；`noema-interaction-*` 是 CLI Agent 工作台；`noema-agenda*` 是原生 Agenda；`noema-xwidget-keys`、`noema-md-bridge` 是页面输入与文本桥 |
+| `lisp/` | ~32k 行 Elisp | 随产品发布的 Emacs 包。`noema-research` 保留纯研究模型，专用编辑投影已退役；`noema-agent-*` 是 ACP 边界、worker、worktree、会话面板；`noema-capability-*`、`noema-skill-upstream-ui` 是 Skill/MCP 管理；`noema-interaction-*` 是 CLI Agent 工作台；`noema-agenda*` 是原生 Agenda；`noema-xwidget-keys`、`noema-md-bridge` 是页面输入与文本桥 |
 | `resources/` | | 共享资源的唯一来源：`katex-macros/`、`templates/`、`skills/`、拼写白名单；Emacs 配置通过 `etc/`、`templates/` 中的链接读取 |
 | `jupyter/` | | kernelspec 模板与安装脚本（Emacs 的 Jupyter Board 调用） |
 | `plugins/noema-copilot/` | | Copilot Node 插件，单向调用 kernel |
@@ -59,8 +59,9 @@ Go kernel  kernel/（二进制 noema）
 | 浏览器与 Node 共用的语法 | `shared/` + fixture；Go 侧同步 |
 | HTTP/SSE 端点 | `server/Features/<Feature>/api.mjs`，领域逻辑不再加进 `server/lib/runtime.mjs` |
 | 搜索、引用文本、索引、Markdown 保存 | `kernel/noema/` 下的 Go 包 |
-| `.noema` 结构与研究语义 | `kernel/noema/research` 与 `lisp/noema-research*.el`，两侧测试一起改 |
-| Agent/ACP 行为 | `lisp/tools/agent/acp.el` 边界之后，不重写 gptel/agent-shell；上下文契约见 [design/agent-context.md](design/agent-context.md) |
+| 保留的研究模型语义 | `kernel/noema/research` 与纯模型 `lisp/noema-research.el`，两侧测试一起改 |
+| 主／项目 Pi 与独立会话 | `lisp/noema-pi-router.el`、`lisp/noema-pi-sessions.el`；连接复用 Emacs `tools/agent/acp`，见 [Pi 会话与项目助手](../design/pi-sessions.md) |
+| Agent/ACP 行为 | `lisp/tools/agent/acp.el` 边界之后，复用 agent-shell 与实际 provider；上下文契约见 [design/agent-context.md](design/agent-context.md) |
 | Skill/MCP 能力 | `noema-capabilities.mjs` 与 `lisp/noema-capability-*`，见 [design/capabilities.md](design/capabilities.md) |
 | 宏、模板、Skill 内容 | `resources/` |
 
@@ -69,7 +70,7 @@ Go kernel  kernel/（二进制 noema）
 通用 agent 的物理会话、渲染、配额、worktree、compose/context 和管理视图由
 Emacs `lisp/tools/agent/` 维护，通用测试在 Emacs `test/agent-*.el`。
 Noema 保留 Research worker、持久业务会话、promote/takeover 和知识库适配；
-`noema-agent-acp.el` 通过显式钩子附加身份和业务动作。完整 gptel/Magent 源码由
+`noema-agent-acp.el` 通过显式钩子附加身份和业务动作。可选 Magent/gptel 适配源码由
 Emacs `site-lisp/` 维护。职责契约见 [Agent 管理](../design/agent-management.md)。
 
 - `server/lib/` 仍承载大部分领域实现，`Features/` 迁移未完成（见

@@ -560,7 +560,8 @@ a buffer-local entry is passed a window."
 (defun +ibuffer-buffer-frame-ids (buffer)
   "Return IDs of frames that have visited user-facing BUFFER."
   (when (and (buffer-live-p buffer)
-             (+tab-line-visible-buffer-p buffer))
+             (or (+tab-line-visible-buffer-p buffer)
+                 (with-current-buffer buffer (derived-mode-p 'agent-shell-mode))))
     (sort
      (cl-loop for frame in (frame-list)
               when (memq buffer (+frame-buffer-list frame t))

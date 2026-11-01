@@ -45,6 +45,24 @@ same Noema index used by Emacs. The MCP endpoint remains
 loopback-only and uses the kernel's normal authentication, administrator, and
 read-only checks.
 
+## 渐进式本地 API
+
+`scripts/agent-mcp.mjs` 提供 stdio MCP，只注册 `noema_api` 和 `noema_call`。
+前者分页搜索运行中 host 的所有已注册 channel 名字，或查看一个 channel 的参数
+及实际处理器；后者调用相同的后端，保留既有检查与通知。目录不内嵌完整 schema。
+
+Pi 默认使用这个入口。其他新会话可选全局 `noema-api` 能力；已经运行的会话用
+`node ~/.config/emacs/site-lisp/noema/scripts/agent-api.mjs help`，无需重启原生对话。
+客户端每次重新解析活跃 `host.json`，不固定随机端口；调用不自动重放。
+参数通过标准输入以位置 JSON 数组提交，避免把文档正文插进 shell 命令。
+
+Markdown 修改使用 `agent:document:read` 读取版本和范围，再用
+`agent:document:propose` 创建或修订审阅提案。它调用已有 `notes:save`，保留 CAS、
+索引和页面保存通知。`emacs:pi` 提供主／项目 Pi 的
+`list/status/ensure/send/resume/new/archive`；会话所有权和原生恢复见
+[Pi 会话与项目助手](../../design/pi-sessions.md)。
+这些接口仅注册在本地模式，公共 Server 的只读边界保持不变。
+
 ## Public Server mode MCP
 
 Server mode exposes a separate, unauthenticated Streamable HTTP endpoint at
@@ -76,3 +94,6 @@ patch their configuration in `noema-capabilities.json`. Run preparation copies
 the resolved active definitions into the immutable RunSpec; the Emacs ACP worker
 does not rediscover them. Persistent definition/configuration is separate from
 live runtime state. See [Project Skills and MCP capabilities](capabilities.md).
+
+Agent 的调用统一经过 `agent:call`，再调用原有处理器；权限审批、用户回答和
+Proposal 审核接口仍可查询说明，调用会明确返回仅供人类决策，不让 Pi 自授权限。

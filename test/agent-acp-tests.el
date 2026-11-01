@@ -257,7 +257,7 @@
                                           :content '(((type . "text") (text . "Next request")))))
                 (agent-shell--update-text :state agent-shell--state :block-id "reply"
                                           :text "\nNext reply\n" :create-new t)
-                (should-error (+agent-acp-focus-input buffer) :type 'user-error)
+                (should (+agent-acp-request-active-p buffer))
                 (if (equal outcome "failed")
                     (funcall (plist-get wire :on-failure) "offline" '((message . "offline")))
                   (funcall (plist-get wire :on-success) `((stopReason . ,outcome))))
@@ -347,7 +347,9 @@
                      ((type . "resource") (resource . ((uri . "file:///proof") (text . "frozen context"))))))
           displayed requests)
       (cl-letf (((symbol-function 'agent-shell--update-fragment)
-                 (lambda (&rest args) (setq displayed args)))
+                 (lambda (&rest args)
+                   (when (equal (plist-get args :block-id) "submitted-input")
+                     (setq displayed args))))
                 ((symbol-function 'acp-send-request)
                  (lambda (&rest args)
                    (should displayed)
@@ -461,7 +463,7 @@
       (kill-buffer buffer))))
 
 (ert-deftest +agent-acp-hides-client-stderr-buffer ()
-  "The acp.el stderr buffer is hidden like the agent buffer it serves."
+  "The acp.el stderr buffer is internal even when its agent is user-visible."
   (let* ((agent (generate-new-buffer " *noema-acp-test-agent*"))
          (stderr (generate-new-buffer "acp-client-stderr(noema-test)-1"))
          (process (make-process :name "acp-client(noema-test)-1"
@@ -522,7 +524,7 @@
                      ("C-c C-k" . +agent-acp-close)
                      ("C-c C-w" . +agent-session-rename)
                      ("C-c C-d" . +agent-session-archive)
-                     ("C-c C-z" . +agent-acp-menu)
+                     ("C-c C-z" . +agent-session-menu)
                      ("?" . +agent-acp-help-or-insert)))
     (should (eq (lookup-key +agent-acp-tabs-mode-map (kbd (car binding)))
                 (cdr binding))))
@@ -530,7 +532,7 @@
     (insert "Codex> ")
     (setq-local comint-last-prompt (cons (copy-marker 1) (copy-marker (point))))
     (let (helped)
-      (cl-letf (((symbol-function '+agent-acp-help) (lambda () (setq helped t))))
+      (cl-letf (((symbol-function '+agent-session-menu) (lambda () (interactive) (setq helped t))))
         (let ((last-command-event ??))
           (+agent-acp-help-or-insert))
         (should (equal (buffer-string) "Codex> ?"))
@@ -629,7 +631,8 @@
     (setq-local major-mode 'agent-shell-mode
                 shell-maker--busy nil
                 +agent-acp-session-origin 'run
-                agent-shell--state (list (cons :pending-prompts nil)))
+                agent-shell--state (list (cons :pending-prompts nil)
+                                         (cons :init-finished t)))
     (let ((buffer (current-buffer)))
       (should (= (+agent-acp-pending-prompt-count buffer) 0))
       (should (+agent-acp-auto-stoppable-p buffer))

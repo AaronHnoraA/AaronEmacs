@@ -243,9 +243,5 @@
   "r p" '(:def +test/project :which-key "project tests")
   "r T" '(:def +test/rerun :which-key "rerun test"))
 
-;; Popup rule for this module's buffers (see ui/popup).
-(defvar +display-rules-bottom-size)
-(set-popup-rule! "\\*test\\*" :select t :align 'below :size +display-rules-bottom-size :regexp t)
-
 (provide 'tools/test/config)
 ;;; tools/test/config.el ends here

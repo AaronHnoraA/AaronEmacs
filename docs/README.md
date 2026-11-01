@@ -54,6 +54,8 @@ changed.
 
 ## Core Architecture
 
+Pi 的会话所有权与工作流程见 [Pi 会话与项目助手](design/pi-sessions.md)。
+
 The [Remote framework](design/remote-framework.md) is the repository's core execution
 model, not an SSH-only feature. Filesystem-, project-, process-, environment-,
 LSP-, service-, and socket-aware development must use it from the start, with
@@ -101,7 +103,7 @@ No active workbenches. The ignored upstream clones remain under `works/doom-temp
 - [modeline.md](design/modeline.md) Doom modeline state block, theme colors, and native input ownership.
 - [window-lifecycle.md](design/window-lifecycle.md) Windows, buffers and closing: the shown/undisplayed/ended state machine, close actions as verbs, single-instance buffers, and what a window falls back to.
 - [macos-boundary.md](design/macos-boundary.md) The boundary between Emacs and macOS: what Finder, drops and quit requests hand to Emacs, what Emacs hands to the system, and the one layer both cross.
-- [neomacs-compat.md](design/neomacs-compat.md) Running this configuration on Neomacs: the modifier-rename layer, fringe and startup-frame fixes, Elsa concurrency, and why the 0.0.18 migration was paused. Neomacs is not installed; the layer is inert on GNU Emacs.
+- [neomacs-compat.md](design/neomacs-compat.md) Optional Neomacs startup trial: native modifiers with an older-build fallback, an isolated opt-in entry patch, and unverified native integrations. GNU Emacs remains the default.
 
 ## acceptance/ — what done means
 
@@ -120,6 +122,9 @@ Dated and append-only. Read them for why something is the way it is, never for h
 
 - [code-audit-2026-10.md](records/audits/code-audit-2026-10.md) Line and contract audit of the Emacs configuration: what was read, what was fixed, what stays open.
 - [eca-hq-agent-management-2026-10.md](records/audits/eca-hq-agent-management-2026-10.md) Source audit of ECA, eca-emacs and agent-shell-hq against Emacs agent ownership, management, interaction and notification contracts.
+- [agent-manager-lifecycle-2026-10.md](records/audits/agent-manager-lifecycle-2026-10.md) Direct Agent Manager, Aaron UI workspace grouping and popup integration, with restart, cancellation, recycling and callback lifetime verification.
+- [agent-manager-workflow-2026-10.md](records/audits/agent-manager-workflow-2026-10.md) Unified management views and native chat preview, source groups including Noema/Pi, Emacs-owned retention, and real protocol/GUI workflow verification.
+- [agent-project-pool-display-2026-10.md](records/audits/agent-project-pool-display-2026-10.md) Project-wide agent pools, window-owned placement and return, restart/resume races, and real multi-frame navigation audit.
 - [doom-template-2026-10.md](records/audits/doom-template-2026-10.md) Completed Doom-template restructuring workbench.
 - [doom-template-comparison-2026-10.md](records/audits/doom-template-comparison-2026-10.md) Source-by-source Doom audit and optional behavior differences.
 - [entrypoint-audit-2026-10.md](records/audits/entrypoint-audit-2026-10.md) Current entry map, comparisons with Lunarymacs, Doom, Spacemacs and Prelude, and the ongoing command and lifecycle review.

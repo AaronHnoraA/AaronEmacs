@@ -298,8 +298,7 @@
           (ibuffer-do-sort-by-frame)
           (ibuffer-update nil t)
           (should (equal (mapcar #'car ibuffer-filter-groups)
-                         '("Noema" "xwidget" "Code" "Dired"
-                           "Shell" "Emacs")))
+                         (mapcar #'car (cdr (assoc "default" ibuffer-saved-filter-groups)))))
           (should (eq ibuffer-sorting-mode 'frame))
           (should (string-match-p
                    "frame-sort-visited[[:space:]]+F[0-9]+"

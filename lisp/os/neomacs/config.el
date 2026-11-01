@@ -274,4 +274,10 @@ keeps its own."
   (add-hook 'kill-emacs-hook #'+neomacs--cancel-reveal-timer))
 
 (provide 'os/neomacs/config)
+
+;; Experimental fixes are opt-in through bin/neomacs-trial.  Normal startup
+;; does not load the trial patch or install any of its runtime advice.
+(when (and +neomacs-p (equal (getenv "NEOMACS_CONFIG_TRIAL") "1"))
+  (require 'os/neomacs/trial))
+
 ;;; os/neomacs/config.el ends here

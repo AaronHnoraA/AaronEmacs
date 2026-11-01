@@ -363,7 +363,7 @@
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (delete-directory directory t))))
 
-(ert-deftest +noema-latex-intervention-is-not-an-agent-workspace-tab ()
+(ert-deftest +noema-latex-intervention-is-managed-in-the-project-pool ()
   (require 'tools/agent/acp)
   (let ((ordinary (generate-new-buffer " *noema-ordinary-agent*"))
         (intervention (generate-new-buffer " *noema-intervention-agent*")))
@@ -377,8 +377,12 @@
                         #'+noema--latex-intervention-display))
           (cl-letf (((symbol-function '+agent-acp-agent-buffer-p)
                      (lambda (buffer) (memq buffer (list ordinary intervention)))))
-            (should (equal (+agent-acp--project-buffers "/project/")
-                           (list ordinary)))))
+            (let ((pool (+agent-acp--project-buffers "/project/")))
+              (should (= 2 (length pool)))
+              (should (memq ordinary pool))
+              (should (memq intervention pool))))
+          (should (eq (buffer-local-value '+agent-acp-display-buffer-function intervention)
+                      #'+noema--latex-intervention-display)))
       (kill-buffer ordinary)
       (kill-buffer intervention))))
 

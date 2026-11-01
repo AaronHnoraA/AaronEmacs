@@ -67,7 +67,7 @@ Ibuffer 与普通 buffer 打开入口选中 Eshell 时也走浮窗。TTY 使用�
 | 动词 | 键 / 命令 | buffer | 窗口 |
 | --- | --- | --- | --- |
 | 关视图 | `SPC b z`；最后一个 frame 上的 `H-w`；唯一主窗格上的 `Cmd-W`（`+windows/close-view`） | 当前窗口撤下 buffer；若无别的窗口显示它则变为未显示 | 回退（见下）；popup 由原生 quit 精确返回来源 |
-| 结束 | `H-q` `+windows/kill-buffer-dwim`；`C-c w d`（浏览后端） | → 已结束；终端程序运行中先确认（Portal 的 kill 询问）。只读或 `*…*` 的普通 buffer 只关视图 | 回退 |
+| 结束 | `H-q` `+windows/kill-buffer-dwim`；`C-c w d`（浏览后端） | → 已结束；终端程序运行中先确认。没有文件与单实例归属的只读 / special-mode buffer 只关视图；显示名称不影响动作 | 回退 |
 | 关窗口 | `Cmd-W`（`M-w`）`+windows/close-window`；`H-0` `delete-window` | 它的最后一个窗口消失时：显示中 → 未显示 | `Cmd-W` 删选中的侧窗格或多余主窗格；唯一主窗格时关视图，frame 保留 |
 | 关 frame | `H-w` `aaron/delete-frame-dwim`（多于一个 frame 时） | frame 中各 buffer 若无别的窗口显示则变为未显示；终端 buffer 保留 | 多于一个 frame 时 frame 消失；只有一个 frame 时只关当前视图 |
 
@@ -78,6 +78,14 @@ popup 按原生 `quit-window` 返回来源。Eshell 的 Aaron UI child frame 是
 显示的 Eshell 仍走窗格动作。
 `Cmd-Shift-W`（`M-W`）继续调用 Perspective 的 buffer 选择器，选定后才结束 buffer；
 它不参与 `Cmd-W` 的关闭动作。Noema 未显示页面的数量清理另见下文。
+
+资源 owner 可以通过 buffer-local 的 `+buffer-end-function` 接管结束动作，接收当前
+buffer；无论它结束还是拒绝，都不再追加通用 kill。Agent 会话登记
+`+agent-acp-close`，与会话菜单共用忙碌、待发队列和草稿确认。改名不改变结束语义。
+关视图通过 `+buffer-hide-function` 交回显示 owner；Agent 使用自己的窗口返回记录，
+Portal popup 使用本 frame 的来源窗口。关窗格保持窗格动作，关视图保持资源。
+Ibuffer、Perspective 和原生 `kill-buffer` 的结束也经过 Agent 的原生 buffer
+query/cleanup hooks；批量清理跳过进程、单实例视图和登记了结束 owner 的 buffer。
 
 ### Command-W 两键的分支
 
@@ -96,7 +104,7 @@ popup 按原生 `quit-window` 返回来源。Eshell 的 Aaron UI child frame 是
 ### 回退：窗口失去 buffer 后显示什么
 
 触发点有三个：`quit-window`（advice `+window-quit-return-a`）、kill
-（`kill-buffer-hook` 中的 `+window-kill-buffer-h`；Portal 终端由 Portal 侧自行
+（`+window-kill-buffer-a` 在原生 kill 完成后同步处理；Portal 终端由 Portal 侧自行
 收尾）、bury（`+windows/window-bury-current-buffer`，关视图走这里）。关窗口不回退。
 
 1. **选候选**（`+window--return-buffer`）：按该窗口的 `window-prev-buffers`
@@ -111,6 +119,9 @@ popup 按原生 `quit-window` 返回来源。Eshell 的 Aaron UI child frame 是
 3. **修复**（`+window--repair-after-close`）：窗口最终显示的是重复可见的 buffer、
    `*scratch*`、Dashboard 或主目录 Dired 时，改为第 1 步的候选；没有候选时删掉这个
    多余窗口；最后一个主窗口打开项目目录（主目录或无项目时打开 Dashboard）。
+
+结束回退在该次原生 kill 返回前完成；取消 kill 不修复窗口。不留下延迟回调去修改
+后来已被其他命令使用的窗格。物理执行替换继续按 C30 交给其 owner。
 
 ### 原生视图的键盘归属
 
@@ -128,6 +139,43 @@ Emacs 里，直到回车 / 点击进入视图，或者移到别的窗口或 buff
 选区。切回原工作区不恢复旧选区；buffer 内容与 mark 位置不变。内部临时切换
 （`persp-switch` 的 `norecord` 路径）不触发这项清理。
 
+### 终端与 Agent 的窗口归属
+
+终端使用 `terminal-switcher`（`M-t`）选择已有会话或明确新建，窗口位置由终端
+选择器决定；popup 由 Portal 自己开关。关视图和关窗格保留终端 buffer 与进程。
+
+Agent 使用现有会话层的 `+agent/pool`（`C-c a`）召回或收起当前项目的会话，
+前缀参数选择池成员，明确新建调用 `+agent/start`。候选直接来自 Agent 注册表，
+项目与 target 隔离沿用 Agent 的池查询；显示与返回统一交给 Agent 显示控制器。
+返回记录保存在实际视图窗口的 `+agent-view` 参数中，按 frame 与 buffer 校验，
+不另设终端 / Agent 混合管理入口。详细契约见
+[Agent 管理](agent-management.md)。
+
+| 操作 | 普通 buffer | 终端 | Agent |
+| --- | --- | --- | --- |
+| 新建 / 选择 | 文件入口、Consult / Ibuffer | 现有终端选择器，明确新建 | 项目会话池、管理器，明确新建 |
+| 显示位置 | 用户选择的窗格 | 选择器放置，原生视图保持单实例 | 本 frame 的聊天窗格，必要时增加 dock |
+| 收起 | 撤下内容并回退 | 保留 shell；popup 返回本 frame 来源 | 保留会话、草稿、队列，按窗口记录返回 |
+| 关窗格 / frame | 保留 buffer | 保留 shell | 保留会话 |
+| 结束 | 原生保存与 kill query | 原生终端确认与清理 | 所有结束入口共用忙碌、队列、草稿确认与清理 |
+
+选择器取消不创建资源、不改变布局。终端创建失败时恢复当次布局，关闭未完成的
+新 frame；不得拆动其他已有终端或 Agent 窗格。Portal popup 池仍为全局池，
+Agent 池仍按项目与 target 隔离；两者的作用域由各自的既有工具决定。
+
+`buffer-actions-menu`（`SPC b a`）集中提供文件、scratch、克隆、全局与工作区选择、
+隐藏、结束和清理；`window-actions-menu`（`SPC w .`）提供分屏、移动、交换、
+最大化与恢复，以及关闭窗格。它们直接调用现有动作，沿用原来的保存询问和生命周期。
+最大化以主编辑窗格为目标；从侧窗格调用时使用同 frame 的主编辑区。每个 frame
+保存自己的最大化前布局，再按恢复；固定 popup 不会让第二次按键失去恢复能力。
+布局撤销／重做仍由 Winner 单独提供。
+
+### 编译与任务输出
+
+run、test、task 与普通 compilation-mode 输出共用 `tools/output` 声明的底部
+popup 规则，沿用统一高度并选中结果。规则按 mode 匹配，覆盖 `*run F1*` 等
+frame 名称和用户改名后的 buffer；业务模块不再各自维护名字正则。
+
 ### 共享 popup 顶栏
 
 Portal 终端与 agent-shell 使用同一行 popup 标签，放在 Emacs 的 tab line。
@@ -141,6 +189,13 @@ Portal 终端与 agent-shell 使用同一行 popup 标签，放在 Emacs 的 tab
 文字；共享的 app buffer 不计入。检查在 Noema 活动快照的去抖转换里进行
 （`+noema--trim-detached-pages`）。
 
+### 首次主程序入口
+
+无文件参数启动 Emacs 主程序时，`initial-buffer-choice` 明确返回 Dashboard；
+原有 Dashboard startup hook 继续负责排版和初始化。命令行指定文件时保留原有
+打开行为。后台 Pi 初始化不提交任务、不改变首个窗口；Ibuffer 和 Pi Sessions
+仍可发现其真实 buffer。对应测试：`pi-workflow-c3-*`、`pi-workflow-c4-*`。
+
 ## 契约
 
 编号稳定；测试名以编号开头或在此列出。
@@ -152,7 +207,8 @@ Portal 终端与 agent-shell 使用同一行 popup 标签，放在 Emacs 的 tab
 - **C3** 关视图 / 结束 / quit 之后，窗口不会停在已在别处显示的 buffer、Dashboard
   或 xwidget 页面上。测试：`+window-fallback-skips-xwidget-after-kill`、
   `+window-fallback-skips-dashboard-on-quit`、`…-on-kill`。
-- **C4** 关掉唯一可见的 frame 只隐藏 Emacs。测试：缺（G6）。
+- **C4** 关掉唯一可见的 frame 只隐藏 Emacs。测试：
+  `c4-closing-the-sole-visible-frame-hides-and-keeps-buffers`。
 - **C5** 关 frame 不结束其中的 buffer，终端 frame 也一样。测试：
   `+portal-deleting-frame-keeps-terminal-session`。
 - **C6** 同一个动词在所有种类的 buffer 上做同一个状态转移。测试：
@@ -210,15 +266,61 @@ Portal 终端与 agent-shell 使用同一行 popup 标签，放在 Emacs 的 tab
   不关闭其他窗口。测试：`c18-wdired-finish-quits-result-view`、
   `c18-wgrep-finish-quits-only-after-complete-apply`。
 
+- **C19–C22** 已并入各工具的契约：终端沿用 Portal 的选择与生命周期，Agent
+  的项目隔离、选择、显示与返回见 Agent 管理 C23–C27；不设置混合管理入口。
+- **C23** buffer 与窗口菜单调用既有命令；新增键位不覆盖原有入口。
+  测试：`c23-buffer-window-*`。
+- **C24** 用户的 agent-shell 会话出现在全局 Ibuffer 与日常 buffer 选择器中；
+  Ibuffer 使用独立的 Agent 分组，Frame 列照常显示访问记录。全局 tab 排除由
+  tab-line 的标志控制，不使用内部 buffer 的空格名前缀。
+- **C25** 从侧窗格发起分屏时，在同一 frame 最近使用的主编辑窗格分屏，保留
+  工具侧窗。列表打开条目时保留原列表和选中行；普通分屏提供 Ibuffer 选择目标。
+  普通编辑窗格上的分屏行为不变，失败恢复原布局。
+- **C26** 结束动作不依赖 buffer 名称；有资源 owner 时只调用其结束入口，拒绝
+  确认后不追加 kill。Agent 与会话菜单共用确认，关视图仍保留会话。
+  测试：`c26-ending-*`。
+- **C27** 编译输出的 popup 规则由 `tools/output` 统一声明，匹配实际 frame 名称
+  和改名后的 compilation-mode buffer。测试：`c27-output-*`。
+- **C28** 已撤销：不再为终端与 Agent 设置混合快捷入口。
+- **C29** 终端与 Agent 的命令直接调用各自的已有选择、创建和显示接口；Agent
+  会话层不依赖项目工具模块。删除混合入口不改变 Ibuffer、侧窗分屏、结束确认
+  与输出规则。测试：`agent-display-c27-*`、`c24-*` 至 `c27-*`。
+
+- **C30** 执行 owner 同步替换物理 buffer 时，以 `+window-buffer-replacement`
+  标明当次被替换的确切 buffer；通用结束回退与 popup 撤窗不得抢先拆掉这些
+  视图。替换 owner 恢复原窗格、每个窗口的来源与焦点，并处理启动失败。
+  动态标记随命令退出，不影响其他 buffer 的正常关闭。
+- **C31** 结束后的通用回退同步完成；取消结束不改窗口；后续命令的窗格不被旧的
+  延迟关闭回调修改。测试：`c31-*`。
+- **C32** 收起 Agent / popup 交回显示 owner，保留资源并准确返回本 frame 的
+  来源；自动收起后台 popup 不抢焦点。测试：`c32-*`。
+- **C33** 批量清理保留有进程、单实例或结束 owner 的 buffer；显式结束仍走各自
+  确认。测试：`c33-*`。
+- **C34** 终端选择取消或启动失败恢复原布局和焦点，不遗留空分屏或新 frame。
+  测试：`c34-*`。
+- **C35** 最大化／恢复按 frame 成对保存布局；侧窗格入口使用主编辑区，固定侧窗
+  仍在时可恢复，且不依赖最近一次其他 Winner 操作。测试：`c35-*`。
+- **C36** `H-w` 计算普通顶层 frame 的数量，不把管理器 child frame 当作第二个
+  编辑 frame；唯一顶层 frame 上仍只关视图。测试：`c36-*`。
+
 窗口测试文件：`test/init-window-lifecycle-tests.el`、`test/init-windows-tests.el`，
-由 `make ui-test` 运行。popup 顶栏测试在 `test/popup-agent-tests.el`；Noema 页面
+由 `make ui-test` 的窗口组与 Agent、popup、输出和物理会话测试在同一进程运行，
+避免分组通过掩盖跨模块回退问题。popup 顶栏测试在 `test/popup-agent-tests.el`；Noema 页面
 转交测试在 `site-lisp/noema/tests/xwidget-key-guard.test.ts`；工作区选区测试在
 `test/init-workspaces-tests.el`。
+
+Agent 的选择、取消和窗口返回测试在 `test/agent-display-audit-tests.el`；
+终端选择器的窗口放置测试在 `test/init-windows-tests.el`。
 
 ## 实现位置
 
 | 部分 | 位置 |
 | --- | --- |
+| Agent 选择、召回与返回 | `lisp/tools/agent/sessions.el`、`lisp/tools/agent/views.el` |
+| buffer / 窗口动作菜单 | `lisp/ui/windows/actions.el` |
+| 侧窗分屏的主编辑窗格选择 | `lisp/core/aaron-open.el`、`lisp/ui/windows/config.el` |
+| Ibuffer 的 Agent 分组与 Frame 列 | `lisp/core/aaron-base.el`、`lisp/config/default/config.el` |
+| 编译、run / test / task 输出的 popup 规则 | `lisp/tools/output/config.el` |
 | 单实例判定、跳过规则、回退候选、修复 | `lisp/ui/windows/config.el` “Buffer management helpers” |
 | 关视图 `+windows/close-view`、关窗格 `+windows/close-window`、结束 `+windows/kill-buffer-dwim`、全局 `M-w` | `lisp/ui/windows/config.el` |
 | `H-w` | `lisp/core/aaron-base.el` `aaron/delete-frame-dwim` |
@@ -235,7 +337,6 @@ Portal 终端与 agent-shell 使用同一行 popup 标签，放在 Emacs 的 tab
 
 - **G5** C9 只对 Portal 终端有测试；Noema 页面（每个 frame 有自己的编辑页）与
   Portal Web 是否满足 C9 尚未核对。
-- **G6** C4 没有测试。
 
 ## 待定设计
 

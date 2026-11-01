@@ -25,6 +25,73 @@ Research 的逻辑 Session 和 Run ID 不可互换。关闭视图只改变显示
 通用实现位于 Emacs。Noema 通过薄适配关联 Research 身份和文档动作；普通会话
 操作不会启动 Noema host，也不会创建研究项目。
 
+### 日常入口与视图
+
+`C-c a` 召回当前项目最近实际使用的会话，在聊天里再次执行返回编辑区；
+`C-u C-c a` 选择池成员，空池先选择新建，再选择 agent，取消不启动进程。
+`H-A`（macOS Option-Shift-A）、`SPC a a` 和 `M-x agent-manager` 打开项目池管理器，
+加前缀查看所有项目；从管理器里再次执行返回。`C-c A S/G/U` 分别选择同一浮窗的
+All、Inbox、Usage 页签。GUI 使用 Aaron ETAF，按 target/workspace 分组；
+Interactive、Portal、Worktrees、Pi、Noema Research及 Previous generations
+是会话行上的来源标签。左侧是可折叠的会话
+导航，右侧直接显示原生聊天 buffer，保留其工具、审批、表单与输入。单击、Tab
+或 j/k 导航时只预览，不清未读；Return 确认进入正常会话窗口，q 返回来源。
+浮窗不占用来源窗格；TTY 使用 `+agent/sessions-table` 后备。
+
+`i` 输入，`a` 定位待审批/问答，`n` 在选中会话的执行目录新建，`h` 原生历史，
+`/` 筛选，`p` 当前项目/全部，`z` 折叠组，`g` 刷新。`.` 或 `C-c C-z` 打开共享
+Transient：停止、重连、改名、结束、按能力提供 fork、模型与原生队列；支持时
+另有 Research 的工作导航、归档和上下文换代。`S` 停止同 target、workspace
+项目池中的当前工作，各会话仍经过自己的业务 owner。聊天正文 `?` 打开同一菜单，
+输入区保留问号；ETAF 的 `?` 显示原生快捷键帮助。
+
+选择、搜索、滚动和折叠属于视图状态，刷新保留稳定实体。隐藏退订事件并释放
+计时器及临时预览窗口；关闭还释放 UI Runtime。两者都保留 agent 进程、输入与队列。
+Usage 仅读取已上报数据；未知值不显示为零。`+agent-top` 的 GUI 入口也指向该页签；
+需要完整配额、远程控制诊断时，在操作菜单选 Detailed usage 或调用
+`+agent-top-report`。这类显式诊断保留原有取数与控制能力。
+
+普通会话默认显示在当前 frame 的右侧 Agent dock。A 切到 B 复用当前聊天窗格，
+不改其他手工分屏；没有当前聊天时先复用本 frame 的已有视图，再分配空闲侧窗。
+所有来源共用项目标签；显式移入/移出 popup、here 和领域干预保留放置意图。
+返回点属于实际窗口，隐藏 embedded 视图恢复原编辑内容，隐藏 dock 撤下窗格。
+各入口统一使用
+`C-c C-e` 聚焦输入，`C-c C-o` 隐藏并返回，`C-c C-l` 打开管理器。原生常驻
+输入区在生成过程中仍可编辑，提交走 provider 的 steering 或 agent-shell 队列。
+通用收起通过 `+buffer-hide-function` 进入 Agent 控制器；控制器按实际窗口的
+popup / dock / embedded 类型返回，Portal 保留用户调整后的高度。
+
+同一项目新建两个会话，就有两个真实 buffer 和两个 client；标签、管理器预览与
+多窗口展示只引用这些会话，不合并对话，也不为显示另起执行。终端的原生视图保持
+单实例；Agent 的普通 Emacs buffer 可由用户在多个窗口展示，各窗口独立返回。
+
+### 生命周期
+
+| 操作或状态 | 执行与输入 | 视图与资源 |
+| --- | --- | --- |
+| starting | 握手未结束，不能当作空闲或自动回收 | 展示真实初始化状态 |
+| 隐藏 / 关闭管理器 | 执行、会话、草稿和队列保留 | 返回来源，释放该 UI 的订阅和计时器 |
+| 隐藏聊天 | 执行保持，原生 buffer 保留 | 撤下该视图，不终止 client |
+| 停止回合 | 先交给业务 owner，否则发送一次原生取消 | stopping；5 秒没有确认则 stop-unconfirmed |
+| 停止未确认 | 仍可能运行，不伪造完成或自动重放 | 可检查、重启或明确结束；不自动杀其他回合 |
+| 重启 / 重连 | 同一原生 ID，保留草稿、原生待发队列和 workspace 环境；活动请求不重放 | 保留显示归属；启动异常的未发送输入进入 `*Agent recovery*` |
+| Research 重启 | 先停止 Run 并等待业务终态，再调用同一物理重启 | 原有 adoption hook 关联持久身份 |
+| 结束会话 | 经过忙碌、队列和草稿确认；native cleanup 结束 client | 释放 buffer 订阅和计时器，provider 历史保留 |
+
+Agent buffer 以 `+buffer-end-function` 登记 `+agent-acp-close`，使通用的
+`H-q` 结束动作与会话菜单使用同一确认和清理；改名不影响动作。取消确认保留
+原会话、进程和草稿。关视图与 Agent 收起仍只改变显示。
+Agent 的工作确认登记在本 buffer 的 `kill-buffer-query-functions`，视图与业务
+关闭观察者登记在 `kill-buffer-hook`。菜单、Ibuffer、Perspective 与原生 kill
+共用这些检查；已确认的内部强制结束只跳过 query，仍执行相同清理。原生
+agent-shell 保留物理 client 的 cleanup；通用层不重复实现执行清理。
+
+取消观察绑定当时的物理 state 和执行 token；新输入、回合结束和清理撤销观察。
+订阅回调只在原 buffer 与原 state 仍匹配时执行。延迟登记和旧会话退役各自持有
+计时器；buffer 结束时取消。退役回调重新检查身份、握手、活动、队列、草稿与可见性。
+自动回收必须同时满足握手结束、无协议/业务活动、无待发队列和草稿、未显示且
+来源允许回收，不能以静默或单个 busy 标志判断。
+
 ### 通知
 
 agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策略：
@@ -77,16 +144,87 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
   管理不加载 Noema。项目目录、会话登记后的业务绑定、元数据、关闭清理和业务
   动作通过显式钩子扩展。普通项目的列表、改名、重启、原生 fork、预览和停止
   使用同一套 Emacs 会话数据；Noema 的持久归档及工作块导航只在业务适配中添加。
+- **C11 管理入口直接且统一。** `H-A`、`SPC a a`、`agent-manager` 打开同一
+  管理器；分组包含 target/workspace，筛选不改执行事实。GUI 使用 ETAF 公共组件，
+  原生列表作为 TTY 后备。测试：`agent-manager-c11-*`。
+- **C12 管理器只拥有视图。** 关闭或隐藏不结束 agent；选择和刷新不清未读，
+  隐藏释放 UI 事件与计时器，重新打开补画。测试：`agent-manager-c12-*`。
+- **C13 重启保留意图。** 原生重启传同一 session ID，保留显示归属、环境、草稿
+  和原生队列；活动请求不重放。Research 的 Run 尚未终结时先要求停止。创建失败
+  时保存未发送输入供恢复。测试：`agent-manager-c13-*`。
+- **C14 回收保护所有工作。** 初始化、RPC、审批、问答、Run、队列、草稿或可见
+  任一条件成立时不得自动回收。测试：`agent-manager-c14-*`。
+- **C15 取消与回调有归属。** 重复停止不重复发送；超时只表达未确认。新回合、
+  清理和 state 更换使旧观察与回调失效；订阅在所属 buffer 中执行。
+  测试：`agent-manager-c15-*`。
+- **C16 返回不破坏布局。** 普通会话只增加一个右侧 dock；聊天和 popup 的输入、
+  隐藏按键一致。隐藏返回来源窗口并保留执行。测试：`agent-manager-c16-*`。
+- **C17 日常管理共享一个界面。** `C-c A S/G/U` 分别打开同一管理器的会话、
+  待处理与用量视图；项目可折叠，选择、筛选和折叠在刷新后保留。表格仅作 TTY
+  后备与显式诊断入口。新建默认使用选中会话的 workspace。
+- **C18 预览保留原生交互。** 管理器左侧选择，右侧显示同一真实 agent buffer。
+  单击和 j/k 只预览；RET 确认进入，q 返回来源。预览不清未读，不接管显示归属，
+  隐藏、关闭及会话失效均释放预览窗口，不让隐藏 frame 阻碍自动回收。
+- **C19 操作菜单可发现。** 管理器的 `.` 与聊天正文的 `?` 使用同一分组 Transient；
+  `C-c C-z` 两处通用。ETAF 的 `?` 保留原生快捷键帮助，聊天输入区仍可输入问号。
+  待审批/问答可以直接定位原生控件，决定由用户提交。
+  状态不支持的动作不得伪装成可用。全流程需覆盖真实 stdio 与原生聊天控件。
+- **C20 各来源共享会话管理。** 普通、Portal、worktree 和 Noema Research 会话
+  都由 Emacs 的注册表管理。领域适配只提供只读分组标签、业务身份和能力；快照
+  不查询或启动 Noema host。旧物理代际单独标识，不能混作同名活动会话。
+  会话切换复用当前视图，不删除用户手工保留的其他窗口；管理器临时预览不改变
+  常规视图的来源与位置。
+- **C21 提交上下文可展开。** 聊天先显示用户正文；引用、Skill 和记忆放在原生
+  可折叠的 Context 区，默认收起。展示摘要不改变冻结输入、协议负载或持久来源。
+- **C22 回收调度归 Emacs。** 通用层按 target/workspace 保留后台可恢复会话，
+  使用一个有归属的单次计时器；没有后台候选或 Emacs 退出时取消。每次真正回收前
+  重新检查初始化、RPC、Run、请求、草稿、队列、可见性与原生恢复能力。
+  Pi 不参与暖会话清扫，个人会话默认保留。旧 Noema 设置和清扫命令为兼容入口，
+  不再维持第二个周期计时器；Noema 仍决定研究项目何时结束。
+- **C23 一个项目一个会话池。** 池以 Remote target 与规范化的已登记项目根为
+  身份，成员来自同一物理会话注册表；普通、popup、here、worktree、Noema worker
+  和 Pi 不按来源分割成另一个池。来源是行上的标签。池切换不创建进程；池停止
+  逐个调用各执行 owner。私有导出会话不进入日常池。
+- **C24 显示只改目标视图。** 从 agent A 切换 B 时复用当前聊天窗格，默认不由
+  B 曾经的 popup/here 回调重新决定位置。其他手工分屏的会话和编辑窗格保持原样。
+  编辑器发起显示时复用本 frame 的已有 agent 视图，未有时才增加右侧 dock。
+  明确的新建、移入/移出 popup、独立干预窗口保留显式放置意图。
+- **C25 返回按窗口维护。** 来源属于实际视图窗口，并与 frame 及显示的 buffer
+  校验；A→B 不丢失来源。隐藏 dock 删除其视图；隐藏 embedded 视图恢复非 agent
+  内容；绝不以 buffer 历史里的另一会话充当返回。失效窗口不重建，旧来源不抢占
+  已被用作编辑器的窗格。没有来源历史的最后主窗格走通用项目目录/首页回退。
+  每个 frame 独立维护。
+- **C26 预览只拥有临时窗口。** 从预览发起任何会话的常规显示先回到所属父 frame，
+  不在 child frame 新建 dock。从其他 frame 打开管理器重新定位到调用方，退出回到
+  当次来源；旧预览、焦点和订阅不跨 frame 留存。
+- **C27 日常入口召回项目池。** `C-c a` 召回当前项目最近会话，在 agent 中再次
+  执行返回编辑区；加前缀选择池成员，空池明确选择或新建，不隐式启动。会话层
+  直接查询 `+agent-pool-sessions`，新建调用 `+agent/start`，显示和返回调用
+  `+agent-acp-show-buffer` / `+agent-acp-hide`。管理器为池总览与跨项目检查入口。
+- **C28 所有结束入口一致。** 原生 buffer query 保护忙碌、队列和草稿，拒绝后
+  不改视图、通知业务或结束 client；确认后关闭观察者与视图清理各执行一次。
+  通用收起使用 Agent 显示控制器。测试：`c32-*`、`agent-close-c28-*`。
+- **C29 既有入口覆盖原生输入。** `C-c a` 和 `C-c A` 从 Portal 原生终端转交到
+  同一 Agent 命令及前缀；普通 Emacs 的 Normal、Insert、Emacs 状态保留同一入口。
+  不另增混合管理键。测试：`agent-entry-c29-*`。
+
+Agent 的真实聊天 buffer 是用户 buffer，名称不使用 Emacs 内部 buffer 的空格前缀。
+它们进入全局 Ibuffer 的 Agent 分组和日常 Consult buffer 选择器；不进入全局 tab
+只由 `tab-line-exclude` 控制。加载会话层时会迁移已有的旧管理名称，并同步
+shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
 
 ## 实现位置
 
 | 职责 | 文件 |
 | --- | --- |
 | 依赖、Remote 接入与配置登记 | `lisp/tools/agent/config.el` |
-| 物理会话、能力快照、窗口与队列 | `lisp/tools/agent/acp.el` |
+| 物理会话、能力快照、项目池、队列与暖会话回收 | `lisp/tools/agent/acp.el` |
+| 常规视图放置、来源返回、frame 边界与物理替换 | `lisp/tools/agent/views.el` |
 | 会话列表、Inbox、可取消预览与通用操作 | `lisp/tools/agent/sessions.el` |
+| ETAF Agent Manager、分组筛选和 UI 生命周期 | `lisp/tools/agent/manager.el` |
+| 按能力提供的原生会话与领域动作菜单 | `lisp/tools/agent/menu.el` |
 | 渲染、用量、活动和工作树 | `lisp/tools/agent/{render,top,activity,worktree,worktree-board}.el` |
-| gptel Compose 与引用式上下文 | `lisp/tools/agent/{compose,context}.el` |
+| 原生引用式上下文与 Markdown prompt 文档入口 | `lisp/tools/agent/{compose,context}.el` |
 | 完整 gptel/Magent 源码与来源 | `site-lisp/{gptel,magent}/`、`site-lisp/AGENT-UPSTREAMS.md` |
 | 通用通知策略与原生 ACP 事件订阅 | `lisp/tools/agent/notifications.el` |
 | Noema 事件到通用通知的适配 | `lisp/noema/bridge/agent-notifications.el` |
@@ -95,14 +233,18 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
 | Research 语义事件、持久会话与工作流 | `site-lisp/noema/lisp/{noema-agent-worker,noema-sessions}.el` |
 
 会话快照包含 provider/native session、target/workspace、真实进程状态、busy、
-attention、unread、错误事实、usage 和原生 list/load/fork/steer 能力。Noema 通过显式钩子补充业务 ID、
+attention、unread、错误事实、来源组、退役代际、usage 和原生 list/load/resume/fork/steer 能力。Noema 通过显式钩子补充业务 ID、
 注意原因、动作和菜单；通用选择器不启动或恢复会话。原生 fork 需要正向能力报告。
 
-`C-c A S` 打开共享会话列表，`C-c A G` 只看需要注意的会话，`C-c A b` 使用
+`H-A` / `SPC a a` 打开日常管理器；`C-c A S/G/U` 选择同一视图的页签，`C-c A b` 使用
 Consult 在原窗口预览真实 buffer。取消或确认时先恢复原窗口、位置和滚动，确认后
 才执行正常显示。列表只在可见时合并刷新。Noema 的持久记录仍由其业务视图管理。
 
 ## 已知差距
+
+G4–G9 与 G11 的项目池、显示归属、返回、预览及物理替换问题已按 C23–C27
+修复；原始复现和真实多 frame 验证见
+[项目池与窗口审计](../records/audits/agent-project-pool-display-2026-10.md)。
 
 - **G1 提供商事件覆盖。** 普通 ACP 的 elicitation 已映射为 input；没有报告
   结构化事件的提供商仍不能通过解析聊天正文推断等待回答。
@@ -113,3 +255,11 @@ Consult 在原窗口预览真实 buffer。取消或确认时先恢复原窗口�
   避免改名使已存在的分支失去归属。它们不要求 Noema 运行。
 
 原生 transcript 与 Noema 的不可变 RunSpec 保留各自的权威，不新增完整对话副本。
+
+## Pi 与 Markdown 文档入口
+
+Pi 的独立 Session 管理、主／项目助手关系与生命周期见
+[Pi 会话与项目助手](pi-sessions.md)；按需披露 API 和 prompt 文档 Skill
+见 [Noema 交互](../noema/design/interaction-plan.md)。普通上下文由
+`tools/agent/selection` 维护，Noema 提问和改写不加载 gptel；现有 Markdown
+编辑器承载 prompt，不再维护专用 Compose 编辑器。

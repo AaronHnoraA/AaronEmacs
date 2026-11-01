@@ -45,8 +45,9 @@ and writes it before the source projection opens. An empty file is not JSON,
 so without that step neither the projection nor a kernel could read it. The
 kernelspec recorded there is `+noema-jupyter-notebook-new-kernelspec` (a
 registered setting, Python 3 by default); its `language` entry also selects the
-major mode the new notebook opens in. A new `.noema` work document keeps its
-own initialization and still asks for its Noema project first.
+major mode the new notebook opens in. Legacy `.noema` and `.noema.ipynb`
+work documents remain plain source: they are not initialized, projected or
+shown by the Jupyter output page.
 
 Opening any `*.ipynb` automatically composes the language major mode (for
 example `sh-mode`) with the `NCell` minor mode and Noema Jupyter header. Old

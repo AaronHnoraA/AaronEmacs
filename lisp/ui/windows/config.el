@@ -43,22 +43,81 @@
 (defvar dashboard-buffer-name)
 
 (defun +open-entry-in-split (side open)
-  "Split the selected window on SIDE and run OPEN in the new pane.
+  "Split a main window on SIDE and run OPEN in the new pane.
 The source list stays open.  Remove the new pane if opening fails."
   (let* ((origin (selected-window))
-         (target (split-window origin nil side))
+         (source (current-buffer))
+         (base (aaron-open--base-window))
+         (target (split-window base nil side))
          completed)
     (unwind-protect
         (progn
           (set-window-point target (window-point origin))
           (select-window target)
-          (prog1 (funcall open)
+          (prog1 (if (eq base origin)
+                     (funcall open)
+                   (prog1 (with-current-buffer source (funcall open))
+                     (set-buffer (window-buffer (selected-window)))))
             (setq completed t)))
       (unless completed
         (when (window-live-p target)
           (delete-window target))
         (when (window-live-p origin)
           (select-window origin))))))
+
+(defun +windows--split (side size)
+  "Split toward SIDE with SIZE, routing tool panes to the main editing area."
+  (let* ((origin (selected-window))
+         (base (aaron-open--base-window))
+         (picker (or (not (eq base origin))
+                     (+buffer-single-instance-p (window-buffer base))))
+         (configuration (current-window-configuration)))
+    (condition-case err
+        (let ((target (with-selected-window base
+                        (if (eq side 'right) (split-window-right size)
+                          (split-window-below size)))))
+          (when picker
+            (select-window target)
+            (ibuffer))
+          target)
+      ((error quit)
+       (set-window-configuration configuration)
+       (signal (car err) (cdr err))))))
+
+(defun +windows/split-right (&optional size)
+  "Split right; from a tool side window, choose a buffer beside the editor."
+  (interactive "P")
+  (+windows--split 'right size))
+
+(defun +windows/split-below (&optional size)
+  "Split below; from a tool side window, choose a buffer below the editor."
+  (interactive "P")
+  (+windows--split 'below size))
+
+(defun +windows-split-from-main-a (fn &rest args)
+  "Run a package's splitter FN from the main area when selected in a side pane."
+  (let ((origin (selected-window))
+        (base (aaron-open--base-window)))
+    (if (eq origin base)
+        (apply fn args)
+      (condition-case err
+          (progn (select-window base) (apply fn args))
+        ((error quit)
+         (when (window-live-p origin) (select-window origin))
+         (signal (car err) (cdr err)))))))
+
+(after! evil
+  (advice-add 'evil-window-split :around #'+windows-split-from-main-a)
+  (advice-add 'evil-window-vsplit :around #'+windows-split-from-main-a))
+
+(after! portal-input
+  (advice-add 'portal-input--split :around #'+windows-split-from-main-a))
+
+(map! :map global-map
+      [remap split-window-right] #'+windows/split-right
+      [remap split-window-horizontally] #'+windows/split-right
+      [remap split-window-below] #'+windows/split-below
+      [remap split-window-vertically] #'+windows/split-below)
 
 (defun +windows/dired-open-right ()
   "Open the Dired or Dirvish entry in a new pane on the right."
@@ -327,13 +386,25 @@ Otherwise, use `ace-window' to choose the target window."
 (setopt window-combination-resize t)
 
 (defun +windows/toggle-delete-other-windows ()
-  "Delete other windows, or restore the previous layout if already sole window.
-Relies on `winner-mode' (enabled below) to undo a prior delete."
+  "Maximize this frame's main editor, or restore its saved layout.
+Side-window callers use the main editing area. Protected side windows do not
+prevent restoration; unrelated Winner history never selects the restore point."
   (interactive)
-  (if (and winner-mode
-           (eq (selected-window) (next-window)))
-      (winner-undo)
-    (delete-other-windows)))
+  (let* ((frame (selected-frame))
+         (base (aaron-open--base-window))
+         (saved (frame-parameter frame '+windows-maximized-layout))
+         (main-windows (seq-remove (lambda (window) (window-parameter window 'window-side))
+                                   (window-list frame 'nomini))))
+    (cond
+     ((and (window-configuration-p saved) (= (length main-windows) 1))
+      (set-window-configuration saved)
+      (set-frame-parameter frame '+windows-maximized-layout nil))
+     ((> (length main-windows) 1)
+      (let ((configuration (current-window-configuration)))
+        (select-window base)
+        (delete-other-windows base)
+        (set-frame-parameter frame '+windows-maximized-layout configuration)))
+     (t (select-window base)))))
 
 (general-define-key
  :keymaps 'global
@@ -396,6 +467,15 @@ moves it.  See docs/design/window-lifecycle.md (Q2, C8)."
 (defvar-local +buffer-single-instance nil
   "Non-nil when this buffer can be shown in only one window at a time.
 For buffers whose major mode is not in `+single-instance-modes'.")
+
+(defvar-local +buffer-end-function nil
+  "Owner function receiving this buffer when the user requests its end.
+It owns confirmation and cleanup.  Returning without ending the buffer is
+a veto; the caller must not fall through to a generic kill.")
+
+(defvar-local +buffer-hide-function nil
+  "Display owner's function receiving this buffer when its view is hidden.
+It preserves resources and returns through the owner's actual window state.")
 
 (defun +buffer-single-instance-p (buffer)
   "Return non-nil when BUFFER can be shown in only one window at a time.
@@ -507,27 +587,36 @@ CLOSING itself listed: reopening it would undo the close."
   (unless (advice-member-p #'+window-quit-return-a 'quit-window)
     (advice-add 'quit-window :around #'+window-quit-return-a)))
 
-(defun +window--repair-killed-buffer (closing windows directory &optional listing)
-  "Settle WINDOWS after CLOSING, which listed LISTING, is actually killed."
-  (unless (buffer-live-p closing)
-    (dolist (entry windows)
-      (+window--repair-after-close
-       (car entry) closing (cdr entry) directory listing))))
+(defvar +window-buffer-replacement nil
+  "Buffer being synchronously replaced by its execution owner.
+The owner must restore the live views and handle failure.  This suppresses
+generic post-kill layout repair only for that exact buffer.")
 
-(defun +window-kill-buffer-h ()
-  "Record visible windows before the current buffer is killed."
-  (unless (derived-mode-p 'portal-terminal-mode)
-    (let* ((closing (current-buffer))
-           (windows (mapcar (lambda (window)
-                              (cons window
-                                    (+window--return-buffer window closing)))
+(defun +window-kill-buffer-a (original &optional buffer-or-name)
+  "Settle visible windows synchronously after ORIGINAL kills BUFFER-OR-NAME.
+Cancellation leaves the layout alone.  Terminal and physical replacement
+owners settle their own windows.  No old close can mutate a later command."
+  (let* ((closing (if buffer-or-name (get-buffer buffer-or-name) (current-buffer)))
+         (owned (and (buffer-live-p closing)
+                     (or (eq closing +window-buffer-replacement)
+                         (with-current-buffer closing
+                           (derived-mode-p 'portal-terminal-mode)))))
+         (windows (unless (or owned (not (buffer-live-p closing)))
+                    (mapcar (lambda (window)
+                              (cons window (+window--return-buffer window closing)))
                             (get-buffer-window-list closing nil t))))
-      (when windows
-        (run-at-time 0 nil #'+window--repair-killed-buffer
-                     closing windows default-directory
-                     (+window--listed-directory closing))))))
+         (directory (and windows (buffer-local-value 'default-directory closing)))
+         (listing (and windows (+window--listed-directory closing))))
+    (prog1 (funcall original buffer-or-name)
+      (unless (buffer-live-p closing)
+        (dolist (entry windows)
+          (+window--repair-after-close
+           (car entry) closing (cdr entry) directory listing))))))
 
-(add-hook 'kill-buffer-hook #'+window-kill-buffer-h)
+;; Remove the deferred predecessor when this module is reloaded.
+(remove-hook 'kill-buffer-hook #'+window-kill-buffer-h)
+(unless (advice-member-p #'+window-kill-buffer-a 'kill-buffer)
+  (advice-add 'kill-buffer :around #'+window-kill-buffer-a))
 
 (defun +windows/window-bury-current-buffer ()
   "Bury the current buffer and settle a scratch/dashboard fallback."
@@ -551,10 +640,10 @@ spare window without one.  A popup returns exactly where it came from."
         (previous (window-parameter nil 'quit-restore-prev)))
     ;; Native quit owns exact popup restoration; its advice repairs the
     ;; fallback.  Otherwise bury, which settles the fallback itself.
-    (if (or (eq (nth 3 restore) closing)
-            (eq (nth 3 previous) closing))
-        (quit-window)
-      (+windows/window-bury-current-buffer))))
+    (cond (+buffer-hide-function (funcall +buffer-hide-function closing))
+          ((or (eq (nth 3 restore) closing)
+               (eq (nth 3 previous) closing)) (quit-window))
+          (t (+windows/window-bury-current-buffer)))))
 
 (defun +windows/close-window ()
   "Close the selected window and keep its buffer alive.
@@ -572,16 +661,17 @@ An active minibuffer is dismissed before any window is closed."
 
 (defun +windows/kill-buffer-dwim ()
   "End the current buffer, or only close its view when it is special.
-A single-instance buffer (terminal, page) and a file buffer are ended;
-the terminal asks first while its program runs.  A read-only or `*…*'
-buffer is only taken out of view, as with `+windows/close-view'."
+A buffer owner handles its own confirmation and cleanup.  Otherwise a
+single-instance buffer (terminal, page) or file buffer is ended.  Other
+read-only or special-mode buffers only leave view.  Names have no effect."
   (interactive)
-  (if (and (not (+buffer-single-instance-p (current-buffer)))
-           (or buffer-read-only
-               (and (string-prefix-p "*" (buffer-name))
-                    (not (buffer-file-name)))))
-      (+windows/close-view)
-    (kill-current-buffer)))
+  (cond
+   (+buffer-end-function (funcall +buffer-end-function (current-buffer)))
+   ((and (not (+buffer-single-instance-p (current-buffer)))
+         (not buffer-file-name)
+         (or buffer-read-only (derived-mode-p 'special-mode)))
+    (+windows/close-view))
+   (t (kill-current-buffer))))
 
 (defun +windows/kill-other-buffers ()
   "Kill all buffers except the current one and important special buffers."
@@ -591,6 +681,8 @@ buffer is only taken out of view, as with `+windows/close-view'."
     (dolist (buf (buffer-list))
       (unless (or (eq buf current)
                   (string-prefix-p " " (buffer-name buf))
+                  (+buffer-single-instance-p buf)
+                  (buffer-local-value '+buffer-end-function buf)
                   (get-buffer-process buf))
         (when (kill-buffer buf)
           (cl-incf killed))))
@@ -606,6 +698,8 @@ modified file buffer still asks before it goes."
     (dolist (buf (buffer-list))
       (unless (or (get-buffer-window buf t)
                   (string-prefix-p " " (buffer-name buf))
+                  (+buffer-single-instance-p buf)
+                  (buffer-local-value '+buffer-end-function buf)
                   (get-buffer-process buf))
         (when (kill-buffer buf)
           (cl-incf killed))))
@@ -623,6 +717,8 @@ modified file buffer still asks before it goes."
             (killed 0))
         (dolist (buf bufs)
           (unless (or (eq buf current)
+                      (+buffer-single-instance-p buf)
+                      (buffer-local-value '+buffer-end-function buf)
                       (get-buffer-process buf))
             (when (kill-buffer buf)
               (cl-incf killed))))
@@ -892,6 +988,13 @@ upstream call shapes delegate unchanged."
                 #'+bookmark-write-file-on-client-a)))
 
 
+
+(autoload 'buffer-actions-menu "ui/windows/actions" nil t)
+(autoload 'window-actions-menu "ui/windows/actions" nil t)
+
+(define-leader-key!
+  "ba" '(:def buffer-actions-menu :which-key "buffer actions")
+  "w." '(:def window-actions-menu :which-key "window actions"))
 
 (provide 'ui/windows/config)
 ;;; ui/windows/config.el ends here

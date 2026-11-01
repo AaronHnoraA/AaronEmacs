@@ -33,11 +33,9 @@ that name and source then appear in provenance:
 }
 ```
 
-JuText keeps its `@@skill` completion on this resolver's selectable project
-records. The manager also shows invalid, disabled and unavailable records for
-repair; those cannot be inserted as a runnable Skill. While the asynchronous
-resolution is pending, Company does not substitute prose or Yasnippet entries
-for Skill ids. Its prose completion and manual snippets remain separate.
+`.noema` 专用的 Company/CAPF 已移除。Noema 的 Skill 检索、能力管理器与
+Agent 输入中的引用草稿继续使用同一解析结果；普通 notebook 的补全与 LSP
+保持原有路径。
 
 Every definition has a stable id. A Skill's `name` frontmatter is its id, with
 the directory name retained as a reference alias. An MCP uses its `id`.
@@ -296,9 +294,10 @@ the patch value. Reserved identity/provenance fields cannot be patched.
 Persistent configuration, the resolved effective value, and transient MCP
 runtime state remain distinct.
 
-## Work-cell syntax
+## 保留的 Run 控制区语法
 
-Noema parses these leading directives:
+现有 Run 服务仍解析这些前导指令；`.prompt` 与显式旧数据调用继续使用它们。
+Markdown 不会因出现这些字符串而变成可执行工作块：
 
 ```text
 @@agent(codex)
@@ -425,31 +424,22 @@ historical observation, separate from an agent session's live `Runtime` state.
 OAuth-only endpoints may report an authentication error; the test does not
 launch an authorization flow or manage a running agent's connections.
 
-## Company completion
+## 编辑器入口与分类
 
-In a work block's leading control region, type `@@` to choose `@@agent`,
-`@@session`, `@@ctx`, `@@skill` or `@@pack`. Selecting a name inserts parentheses.
-`@@pack(` offers selectable packs with their description and member list.
-`@@skill(` offers valid selectable Skills with description, scope and state;
-explicitly disabled Skills are excluded, while available Skills do not need
-to be enabled for the whole project. `@@ctx(file:` completes project paths,
-`@@ctx(cell:` completes document Cell ids, and `@@ctx(result:` completes work
-output references; the bare `@@ctx(` list also offers `lineage:2`,
-`lineage:3` and `none` (turn off automatic context). Session names and
-`parent:child` prefixes are supported.
-Knowledge-note and artifact ids remain explicit references.
+Noema 不为旧 `.noema` 提供专用 Company、Flymake、JuText 或 OutputArea。
+普通 notebook、Markdown 和 Agent 输入保持各自的编辑与补全路径。
+`noema-skill` 继续检索有效 Skill 与 pack，管理入口继续负责显式配置写入。
 
-The typing path reads memory only. Capabilities are prefetched on idle and
-cached per project for 30 seconds, with one outstanding refresh per project.
-Old responses cannot replace a newer resolution. Candidate descriptions are
-reused until resolution changes. File candidates come from asynchronous,
-nonrecursive directory queries (30-second cache, at most 2,000 names).
-Manager writes reuse the returned resolution, and saving a Skill or capability
-configuration invalidates completion data. Use `g` for an immediate refresh.
+| pack | 职责 | 成员 |
+| --- | --- | --- |
+| `noema-project` | 项目 Agent 方法、上下文、记忆、交接和并行工作 | `project-agent-management`、`noema-parallel-runs` |
+| `noema-emacs` | Emacs 中的 Noema 操作与 API | `noema-emacs-workflow`、`noema-elisp-api` |
+| `noema-md` | Markdown 源语法与原位审阅 | `noema-authoring-syntax`、`noema-ediff-review` |
+| `emacs-noema-dev` | 修改 Emacs 与 Noema 实现 | `emacs-config`、`noema-development`、`rendered-construct` |
 
-The manager's inspect buffer displays resolver output directly, including the
-base source, shadowed definitions, ordered patches, selection reasons,
-validation and runtime state.
+前三类按操作目的选择，不自动互相加载。领域写作、验证和可视化保留原有 pack；
+pack 仍只列平面的 Skill id。项目指导可直接使用，无需工作文档或服务；机制
+实际执行与否以宿主工具和回执为准。
 
 ## Agent construction
 

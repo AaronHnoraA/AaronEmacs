@@ -232,10 +232,10 @@ the same catalog without putting filesystem work on the expansion hot path."
 (defconst +yas-emacs-math-snippets
   '((tex-mode
      (";" "$${1:a}$ $0" "Inline math"
-      (not (derived-mode-p 'markdown-mode 'noema-research-mode))
+      (not (derived-mode-p 'markdown-mode))
       ("LaTeX local"))
      (":" "$$\n${1:a}\n$$\n$0" "Display math"
-      (not (derived-mode-p 'markdown-mode 'noema-research-mode))
+      (not (derived-mode-p 'markdown-mode))
       ("LaTeX local")))
     (markdown-mode
      (";" "\\\\($1\\\\) $0" "Inline math" nil ("Noema local"))

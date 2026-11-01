@@ -1,21 +1,48 @@
-# Guided research workflow
+# 项目 Agent 工作流
 
-Noema now has two starting templates: `empirical` (literature → experimental design → reproduction → evidence → paper) and `theoretical` (literature → proof plan → derivation/review → evidence → paper). Both are ordinary `.noema` WorkDocuments, not Jupyter notebooks. Their graph has stable WorkNode identities and lineage edges. The template is materialized in one validated file write only after the user accepts the preview; agent-generated structural changes still require the existing `graph.declare` Proposal and revision-fenced review path.
+项目工作使用 `AGENTS.md`、普通 Markdown 和实际代码、数据、论文等文件。
+需要跨会话接续时，按需在 `.agent/` 保存任务、记忆和交接记录；已有管理器的
+数据库、对象库和原生 Session 记录仍由管理器维护。无需创建 `.noema`。
 
-Open `M-x noema-project-overview` and select **New workflow**, or run `M-x noema-research-workflow-preview`. Choose the type, target file and title. Inspect the nine stages, then press `C-c C-c` to create or `q` to cancel. An existing target is never overwritten.
+## 开始与接续
 
-In the document, `C-c j N` visits the first unfinished stage. Run a work block with the normal `C-c C-c`; the template's `@@skill(...)` selects the relevant reusable research Skill and Noema resolves its dependencies before preparing the Run. Mark finished work `done` with the existing `C-c C-t` state action. At a review checkpoint, a person verifies the source material, then presses `C-c j A` and confirms. The approval marker is written into the checkpoint's source as an undoable document edit. A later template-stage Agent Run is refused until preceding work is done and checkpoints have been reviewed. This is a guided, local workflow gate; it does not pretend to authorize scientific claims or replace the existing Proposal/permission review paths.
+用共享 Agent Manager 打开或恢复项目会话。`M-x noema-project-overview` 汇总现有
+Session、Run、任务、Attention 与能力；`M-x noema-sessions` 管理项目内的命名会话。
+普通会话也可在未声明 Noema Project 的目录使用；持久 Noema 项目服务仍使用
+`noema.toml` 的 `[project]` 与可选 `workspace`。
 
-Evidence is not inferred from prose. Save literature notes and raw experiment or proof artifacts, use `evidence-synthesis` to propose Findings backed by content-addressed evidence spans, and accept Findings through Attention. `M-x noema-findings` lets you inspect accepted claims, verification levels and exact artifact byte ranges. When a Finding turns out to be wrong or outdated, press `x` on it there (`noema-findings-retire`), choose `disputed`, `refuted` or `superseded`, and give a reason. The Finding keeps its evidence and stays in the list under its new status; it is no longer recalled into agent Runs. Retirement is recorded as a `finding.retired` event with the reviewer and reason, and it is one-way: proposing the same statement again lands on the retired Finding and does not revive it. The final checkpoint asks a human to check claim–evidence alignment, figure/table provenance, citations, reproducibility and venue requirements before submission. `M-x noema-sessions` reuses named agent conversations; `M-x noema-capability-manager` controls global and project Skills/MCPs. `M-x noema-history-search` searches the project-scoped FTS5 index of native agent transcripts without changing those originals.
+`noema-project` pack 提供主／子 Agent 分工、上下文、记忆和交接指导。主 Agent
+检查整体目标和实际交付，子 Agent 获得必要资料、写入边界和完成条件。工具和
+宿主负责实际执行；Skill 不模拟后台能力或强制增加工作文档。
 
-The template does not automatically dispatch every Run or submit a paper. Agent execution, data access, citations, and final publication remain explicit user actions. Existing non-template `.noema` documents keep their prior behavior.
+## 围绕 Markdown 工作
 
-## 查看和管理 Run 上下文
+在 Noema Markdown 页面选中正文，发送给已有 Agent 会话。问答直接回复；请求
+改写时，可以在原位置生成 `ediff` 修改建议，比较排版或源码后接受、拒绝或评论。
+保存评论后使用 Send feedback 继续交互。`noema-md` pack 提供语法与审阅指导。
+普通 Jupyter notebook 和 Markdown `@@cell` 使用原有的执行、补全、LSP 与输出面。
 
-运行前在工作块按 `C-c j p`，查看选中的 Session、显式及自动引用、各项字节数、截取或省略原因和窗口压力。用 `@@ctx(...)` 明确指定需要的源文件、工作块或结果；用 `@@ctx(none)` 关闭自动附加的 DAG 上游和记忆。`depends` 的输出需显式指定 `@@ctx(depends)` 或 `result:<work-node-id>`。
+## 记忆与证据
 
-Run 写出后按 `C-c j i`，在 Inspector 的 **Run context** 查看冻结的 RunSpec 回执，并在 **Upstream now** 对照当前已保存的上游结果。Agent 可以用 `research_run {action: "context", id: RUN_ID}` 查看有界回执，需要原文时再用研究工具读取。这里显示的是 Noema 当时选入的上下文；会话的原生历史和 Agent 后续自行读取的内容另由 ACP/Agent 管理。
+会话回忆与已验证结论分别标识。当前问题只召回相关材料；用原文与实际产物
+核查重要结论，记录适用条件、来源版本、检查结果和不确定性。确认后的知识
+整理进项目 Markdown，交接记录引用这些材料。
 
-上下文来源、64 KiB 预算、合流分配、截取、记忆筛选、会话换代和回执边界由 [Agent 上下文管理设计](../design/agent-context.md) 维护。普通会话与研究 Run 共享的未核实记忆后端见 [自动记忆](../design/hy-memory.md)。
+已有 Noema 服务继续提供冻结 RunSpec、上下文预算与回执、原生历史检索、CAS
+产物和 Finding 审核。`M-x noema-history-search` 检索项目历史，`M-x noema-findings`
+查看证据及审核状态。`M-x noema-research-propose-memory-from-run` 可从现有 Run 的
+Handoff 原文提出记忆 Proposal，仍需证据审核。服务的 workstream 身份约束保持
+原样；普通文档工作无需为此构造 Cell 或 WorkNode。
 
-To turn an exact excerpt from a completed Run's Handoff into a reusable decision or lesson, run `M-x noema-research-propose-memory-from-run`. Enter the Run id, kind, excerpt and disclosure. The command records a pending `finding.create` Proposal with the exact Handoff byte range as evidence. Open Attention, read its **Handoff evidence** button, and accept only after checking the statement. Acceptance records `supported` and `human_reviewed`, including when it confirms a prior provisional Finding with the same statement. A rejected or `local_only` proposal never enters automatic recall. The command requires an existing Handoff artifact and does not synthesize a statement from the Run transcript. When the workstream already holds a Finding that says nearly the same thing in other words, the command names it with its status, including a refuted or superseded one. This is a notice for the reviewer: the proposal is recorded either way, and an identical statement is still deduplicated by the kernel on acceptance.
+## 能力与界面
+
+`M-x noema-capability-manager` 管理 Skill、pack 与 MCP；在 Agent 输入中可以检索
+并起草引用，审阅后再发送。`noema-emacs` pack 只包含 Emacs 操作和受支持的 API，
+维护源码使用 `emacs-noema-dev`。
+
+旧 `.noema` 文件保留为源数据。专用 JuText、Graph Board、诊断／补全和 Work Output
+接线已经移除；访问不会初始化项目、启动 Agent 或进入 Jupyter。
+
+上下文机制见 [Agent 上下文管理](../design/agent-context.md)，记忆后端见
+[自动记忆](../design/hy-memory.md)，操作与能力边界见
+[交互](../design/interaction-plan.md)和[能力管理](../design/capabilities.md)。

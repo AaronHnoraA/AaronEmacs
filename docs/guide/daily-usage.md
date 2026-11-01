@@ -167,6 +167,10 @@
   运行 profile / 测试菜单 / 调试菜单 / `olivetti-mode`
 - `F9` / `F10`
   Noema 日程 / popup `portal`
+- `H-A`（Option-Shift-A） / `SPC a a`
+  当前项目的 Agent Manager，再按一次返回；加前缀查看全部项目，也可用 `M-x agent-manager`
+- `C-c a` / `C-u C-c a`
+  召回项目 agent 池的最近会话 / 选择池成员；在聊天中 `C-c a` 返回编辑区。空池须明确新建
 
 ### macOS Option `H-`
 
@@ -187,7 +191,7 @@
 - `H-i` / `H-u` / `H-j` / `H-n` / `H-N`
   `show-imenu` / language server 菜单 / 调试菜单 / 最近测试 / output 菜单
 - `H-\`` / `H-q` / `H-Q` / `H-w`
-  `popper-toggle` / 结束当前 buffer（终端程序运行中会先确认；只读或 `*…*` buffer 只关视图）/ 退出 Emacs / 关当前 frame；若只剩一个 frame，`H-w` 只关当前视图
+  `popper-toggle` / 结束当前 buffer（终端程序运行中会先确认；Agent 沿用会话结束确认；无文件的只读 / special-mode buffer 只关视图，名字不影响动作）/ 退出 Emacs / 关当前 frame；若只剩一个 frame，`H-w` 只关当前视图
 - `H-0` / `H-1` / `H-2` / `H-3`
   关当前窗口 / 单窗口切换 / 上下分屏 / 左右分屏
 - `H-o` / `H-O` / `H-k` / `H-K`
@@ -347,17 +351,10 @@ xwidget buffer 本身没有正文，所以作用于“当前 buffer 文本”的
 | `C-x u`、`undo-redo` | 页面 undo / redo |
 | `refresh-file`、`revert-buffer`、`H-o !f` | `noema-refresh-file`：从磁盘重载 |
 
-`M-x refresh-file` 在任何能 revert 的 buffer 里都是“从磁盘重载”：Noema 页面走
-`noema-refresh-file`，`.noema` 笔记本重新投影 JuText，`*Noema DAG*` 重载源笔记本
-并重绘；Lisp/C/shell/SCSS 仍是原来的格式化并保存。
-Emacs 内的 Claude、Codex 等 ACP agent 完成一轮时，会检查已打开的 Noema Markdown
-页面及可见、最近的 JuText 文件；JuText 的未修改 buffer 会接收已有区块的外部正文编辑，
-有未保存编辑时保留本地草稿并合并运行输出。无需手动刷新，也不按时间轮询。
-Markdown 页面先检查文件时间戳；
-笔记库另有共享目录 watch 接收文件变更。没有未保存修改且文件确实更新的页面会自动
-从磁盘重载；有草稿时保留页面内容并提示冲突。Emacs 保存同一个 Markdown
-文件（例如接受 gptel rewrite）也会通知页面。`noema-refresh-file` 可在漏掉文件事件时
-手动重载；它不会先把页面草稿写回磁盘，有未保存修改时会拒绝，`C-u` 则丢弃草稿后重载。
+`M-x refresh-file` 在 Noema 页面调用 `noema-refresh-file` 从磁盘重载。
+Agent API 保存和目录 watch 会通知页面；没有草稿的页面自动重载，有草稿时保留
+内容并提示冲突。手动刷新不会先覆盖磁盘；`C-u` 明确丢弃草稿后重载。
+旧 `.noema` 只保留原始数据，专用编辑、Graph Board 和输出适配已移除。
 
 普通本地文件及远程文件 buffer 在 agent 写回磁盘后会自动刷新：支持推送通知的路由
 即时接收文件事件，其余远程路由在 ACP 回合结束时对可见及最近的文件检查一次，
@@ -629,6 +626,9 @@ Agenda 卡片在启动画面最下面（Recent Files / Projects 之后、footer 
 
 ### Buffer / Bookmark `SPC b`
 
+- `SPC b a` / `M-x buffer-actions-menu`
+  buffer 动作菜单：打开或输入新文件名、持久与项目 scratch、间接克隆、全局与工作区
+  buffer 选择、改名、重载、隐藏、结束和清理。沿用现有命令的保存询问与关闭规则。
 - `SPC b b`
   与 `C-x b` 相同的 Consult buffer 入口；跨所有 frame/workspace 搜索，
   包含 `*Messages*` 和 Eshell，略过不适合日常进入的黑名单 buffer
@@ -973,7 +973,8 @@ Helpful 页里的源码位置链接会在发起帮助的窗口打开文件，Hel
 弹窗终端的标签左键切换，右键可重命名、关闭或移动标签位置。
 `Agent` 子菜单（也可点击 `+Agent`）提供 Claude / Codex / OpenCode；它们使用
 原生 `agent-shell` / ACP buffer，不在 portal 里运行 CLI，共用同一个顶部弹窗、
-标签池、自动收起和固定逻辑。`C-c C-e` 折叠/打开，`C-c E` 切换标签，
+标签池、自动收起和固定逻辑。终端用 `C-c C-e` 折叠/打开；Agent 用
+`C-c C-e` 聚焦输入、`C-c C-o` 隐藏返回。`C-c E` 切换标签，
 `C-c M-e` 固定。Agent 原有的模型、会话模式和权限提示保留；仅点击启动时
 加载 Agent 依赖。ACP adapter 沿用现有 agent-shell 配置；在远端 `/fs:` 工作区里
 启动时，agent 进程直接运行在该 target 上，只要 target 的 PATH 里有对应二进制
@@ -1506,8 +1507,26 @@ wdired 中按 `C-c C-c` 完成文件名修改后，会退出目录列表窗；Di
 
 ## 6. 窗口和弹出层
 
+统一的操作含义：收起和关窗格保留 buffer、终端进程及 Agent 草稿／队列；结束才
+释放资源。Agent 菜单、Ibuffer 和原生 buffer 结束共用工作确认，取消后保持会话。
+批量清理保留原生视图、进程及登记了资源 owner 的会话。关闭回退在本次操作内完成，
+不由旧的延迟回调改动后续窗格；终端创建失败恢复原布局。
+
+- `SPC w .` / `M-x window-actions-menu`
+  窗口动作菜单：左右／上下分屏、选择和交换窗口、最大化／恢复、布局撤销／重做、
+  关闭窗格，以及已有的终端选择器、Agent 管理器和工作区入口。
+  从 Agent 等侧窗格分屏时，在主编辑区创建窗格并打开 Ibuffer 选择目标，工具侧窗保留。
+  Ibuffer、Dired 和文件选择器从侧窗格打开条目时，也在主编辑区分屏。
+- `M-t` / `M-x terminal-switcher`
+  沿用终端选择器选择已有会话或明确新建，并选择当前窗格、分屏或新 frame。
+- `C-c a` / `M-x +agent/pool`
+  沿用 Agent 会话层召回当前项目最近会话；在会话中再次执行则收起并返回编辑区。
+  `C-u C-c a` / `M-x +agent/pool-switch` 选择项目会话，明确新建调用已有的
+  `+agent/start`；取消不改变布局，不启动进程。跨项目管理用 `M-x agent-manager`。
+  原生 Portal 终端中的 `C-c a` 与 `C-c A` 也会转交给同一套 Agent 入口。
 - `C-x 1`
-  `+windows/toggle-delete-other-windows` — 最大化当前窗口，再次执行恢复先前布局（依赖 winner-mode）
+  `+windows/toggle-delete-other-windows` — 最大化本 frame 的主编辑窗格，再次执行恢复
+  最大化前布局；从侧窗格调用也使用主编辑区，固定 popup 保留时仍可恢复。
 - `M-o`
   `ace-window`；Noema xwidget 里的目标编号会显示在页面左上角
 - `M-O`
@@ -1565,6 +1584,10 @@ Show or Start Emacs 叫出已有窗口或重新启动，并可继续使用独立
 
 Emacs 常驻运行,平时没有可见 frame,需要时再叫到前台。入口是
 `bin/emacs-app`,Raycast 扩展只是调用它:
+
+日常入口继续使用 GNU Emacs。Neomacs 试验只从 `bin/neomacs-trial` 启动；可用
+`--app /完整路径/neomacs.app` 指定应用。它单独启用试验 patch，不更换日常入口、
+Raycast 或登录项。范围与限制见 [Neomacs 兼容层](../design/neomacs-compat.md)。
 
 - `bin/emacs-app start --background`
   启动并留在后台;Emacs 已经在运行时什么都不做。隐藏在启动完成后才执行
@@ -1759,26 +1782,27 @@ ETAF 只在第一次打开这个整页时加载，常驻 mode line 和 Dashboard
 
 ## 8. Noema AI 与 agent
 
-Emacs 通用 agent 层统一管理轻量模型交互与结构化 coding-agent 会话，Noema Research 调用并组织它们。gptel 是直接复用的 compose/context/rewrite UI；agent-shell + ACP 是结构化 session/stream/permission 路径；Magent 提供本地 agent、queue、ledger 和 gptel adapter。
+Emacs 通用 agent 层统一管理轻量模型交互与结构化 coding-agent 会话，Noema Research 调用并组织它们。上下文由 Emacs Agent 层维护；Noema 改写走版本化文档 API；agent-shell + ACP 是结构化 session/stream/permission 路径；Magent 提供本地 agent、queue、ledger 和 gptel adapter。
 
 | 键 | 功能 |
 |----|------|
-| `C-c A W` | 打开 Noema（默认 Magent agent-shell） |
+| `H-A` / `SPC a a` / `C-c A RET` | Agent Manager 浮窗；再次调用隐藏返回 |
+| `C-c A W` | 打开当前项目 Pi |
 | `C-c A a` | 选择 Magent/Codex/Claude/OpenCode/Pi agent-shell |
 | `C-c A w` | 在当前 Project 仓库的新 Git worktree 里启动 Codex/Claude/OpenCode 会话 |
 | `C-c A n` | 同一任务交给几个 agent 并行尝试，各自一个 worktree |
 | `C-c A A` | 并行尝试看板：比较各尝试的状态与改动 |
-| `C-c A c` | 打开 gptel compose buffer；在 Noema 页面里带上选区（没有选区则整篇笔记）作为 context |
-| `C-c A s` | 从当前 buffer 发送 gptel 请求；在 Noema 页面里同 `C-c A c` |
-| `C-c A m` | 打开 gptel transient 设置 |
-| `C-c A .` | 把 region/buffer/file 加入 gptel context；在 Noema 页面里加入选区，没有选区则加入整篇 |
-| `C-c A r` | gptel rewrite/diff 预览；在 Noema 页面里改写选区（没有选区则光标所在行） |
+| `C-c A c` | 请求项目 Pi 创建并打开普通 Noema Markdown prompt 文档 |
+| `C-c A s` | 将保存的 Markdown 任务文档作为引用发送给已有 Agent |
+| `C-c A m` | 打开普通 Agent 会话菜单 |
+| `C-c A .` | 把 region/buffer/file 加入 Agent context；在 Noema 页面里加入选区，没有选区则加入整篇 |
+| `C-c A r` | 请 Agent 改写选区；Noema 用 API 生成原地审阅提案 |
 | `C-c A e` | 在 Emacs 源 buffer 里打开 Noema 页面的笔记，并选中页面选区 |
 | `C-c A p` | 把当前 agent-shell session 纳入 research |
-| `C-c A S` | 共享会话列表；`C-u` 仅看当前项目 |
-| `C-c A G` | 共享 Inbox：待审批、待回答、失败或连接终止 |
+| `C-c A S` | Agent Manager 会话页；`C-u` 仅看当前项目 |
+| `C-c A G` | 同一管理器的 Inbox：待审批、待回答、失败或未读结果 |
 | `C-c A b` | 在当前窗口预览真实会话，取消时恢复原窗口和位置 |
-| `C-c A U` | agent 总览（abtop）：额度、会话状态/模型/上下文/token/费用，停止、强制终止、跳转 |
+| `C-c A U` | 同一管理器的 Usage 页；详细额度诊断用 `M-x +agent-top-report` |
 | `C-c A O` | 编排面板：Task / Job / Worker / Delegation / 事件 |
 | `C-c A x` | 把当前上下文发给某个 agent 会话（引用，不拷贝正文）|
 | `C-c A v` | 只把选区发给某个会话；在 Noema Markdown 页里直接使用网页选区 |
@@ -1788,14 +1812,22 @@ Emacs 通用 agent 层统一管理轻量模型交互与结构化 coding-agent �
 | `C-c A ,` | 发送前检视/删减上下文 |
 | `C-c A d` | 同 `C-c A x`，但只塞进输入区不提交 |
 
+Agent Manager 按 target、workspace 分组并标注来源；Noema Research、Pi、Portal、
+普通和 worktree 会话都由 Emacs 管理。左侧单击或 `j/k` 选择，右侧预览原生聊天；
+`RET` 进入，`i` 输入，`a` 定位审批/问答，`n` 在选中 workspace 新建，`h` 原生历史，
+`/` 搜索，`p` 限当前项目，`z` 折叠组，`q` 返回。`.` / `C-c C-z` 打开操作菜单，
+`?` 显示快捷键帮助；Tab / Return 也能操作控件。隐藏和关闭管理器都不结束 agent。
+TTY 使用共享表格；`M-x +agent/sessions-table` 可显式打开诊断列表。
+
 Noema Markdown 页的选区工具栏有 **Agent** 和 **Rewrite** 按钮，`...` 里还有
-Add to AI context、gptel compose、在 Emacs 源 buffer 中选中；`H-o %` 是同一组操作的
+Add to AI context、项目 Pi prompt 文档、在 Emacs 源 buffer 中选中；`H-o %` 是同一组操作的
 Transient。Portal 与 xwidget 页面都先保存笔记，发送整篇笔记也等待保存回执，
 再把选区的准确位置（行 + 字符列）交给
-`noema-md-bridge`，由它在笔记的 Emacs 源 buffer 上运行对应的 gptel / agent UI。
-Rewrite 的 diff / ediff / accept 审阅在源 buffer 里完成；源 buffer 处于
-`noema-md-bridge-source-mode`（mode line `Noema↔`），修改在空闲
-`noema-md-bridge-autosave-delay` 秒后保存，页面随即重载；`C-c C-c` 保存并回到页面。
+`noema-md-bridge`，由它在笔记的 Emacs 源 buffer 上运行对应的 Agent 操作。
+Rewrite 通过文档 API 创建或修订原地审阅卡片，保存通知更新页面；接受、拒绝和
+评论在现有 Markdown 界面完成。同一原生 Session 后续只需发送要求与范围引用。
+手动编辑源 buffer 时使用 `noema-md-bridge-source-mode`（mode line `Noema↔`），
+`C-c C-c` 保存并回到页面。
 页面没有选区等无法完成的情况会直接在 echo area 说明原因；页面
 `noema-md-bridge-answer-timeout` 秒内没有应答时 Emacs 也会提示（通常是页面需要
 `H-o r` 刷新或 `H-o B` 重建）。
@@ -1834,19 +1866,22 @@ Visual 模式借鉴 LaTeX 的段落节奏：首个空行清楚分段，连续空
 
 ### 所有 agent 会话按项目统一登记
 
-`.noema` work 块起的会话、popup 里的 agent、`C-c A a` 手动开的、以及直接
+保留的 Research Run 会话、popup 里的 agent、`C-c A a` 手动开的、以及直接
 `M-x agent-shell` 开的，全部会被登记到同一个按项目组织的注册表：有项目 root、
 有会话名（例如 `popup/claude`、`foreign/codex-2`）、有来源标记。因此
 `C-c A S`（列表）和 `C-c A b`（切换）能看到并管理全部会话，`C-c A x` 这类
 命令也可以点名把上下文交给其中任意一个。
 
-共享会话列表（`C-c A S`）显示真实进程状态、会话名、agent、模型和工作目录。
-`RET` 显示会话，`s` 停止，`k` 关闭，`r` 改名，`R` 重启，`f` 在提供商或业务明确
-支持时分支，`g` 刷新。`C-c A G` 只显示需要处理的会话。普通会话改名和重启无需
-Noema 项目；归档和工作块导航只由有业务关联的 Research 会话提供。
+`C-c a` 日常召回、收起项目池，`C-u C-c a` 选择池里的会话；普通、popup、here、
+Noema worker 和 Pi 同池管理，执行 target 不同则隔离。共享管理器（`C-c A S`）
+显示真实进程与待处理状态；旧物理代际在行上标记 Previous generations，不挤占日常标签。
+停止、重启、改名和结束都经过共享 adapter；普通会话
+无需 Noema 项目。`.` 菜单仅在有业务关联时提供 Research 归档、工作块导航和换代。
 
 Noema 持久会话另见 `M-x noema-sessions`：保留 Last Run、失败类型、已读标记、
 Research fork 与上下文重建。它读取业务记录，和物理会话列表分工明确。
+Pi 的历史与活跃指针由 `M-x noema-pi-sessions` 独立管理，Dashboard 的 `pi`
+按钮也可进入；Pi 不建立 Research Session 关联。
 
 多个 work 块可以同时执行（`noema-agent-worker-max-concurrent-runs`，默认 3，
 设为 1 即完全串行）；mode line 的 `Noema[▶2 ⋯1 !1]` 分别是执行中、等待执行
@@ -1898,7 +1933,8 @@ Magit status；`d` 显示它从分出时起的全部改动（已提交和未提�
 参数，否则一份都不删）；分支一律保留。分组信息记在各分支的 Git 配置里
 （`branch.<分支>.noemaGroup`），重启 Emacs 后照样在；挑中的结果由你自己用 Magit 合并。
 
-`C-c A U` / `M-x +agent-top` 打开 btop 风格的 agent 总览（aaron-ui 配色），三块面板：
+`C-c A U` / `M-x +agent-top` 在 GUI 打开统一 Usage 页。操作菜单的 Detailed usage
+或 `M-x +agent-top-report` 打开完整诊断报告（TTY 的 `+agent-top` 也使用它），包含：
 - **quota**：三个工具的额度总是全部列出，每个工具列出它应有的窗口（`5h`/`7d`），显示已用比例、重置倒计时
   和数据年龄；还没有数据的窗口显示为一行说明，而不是消失。
   - claude：两个来源写进同一张表。一是 claude-agent-acp 在 `usage_update` 里附带的 `_claude/rateLimit`
@@ -1918,7 +1954,7 @@ Magit status；`d` 显示它从分出时起的全部改动（已提交和未提�
 
 按键：`RET`/`o` 打开会话，`s` 停止当前工作（取消 Run 或中断本轮），`K` 强制终止（进程和 buffer
 一起结束），`x` 关闭，`R` 重启，`r` 重命名，`C` 在下个 Run 滚动到最新 handoff，`l` 该项目的会话
-列表，`t` 切换项目范围（`C-u C-c A U` 直接只看当前项目），`TAB` 在面板标题上折叠/展开（其他位置跳到
+列表，`t` 切换项目范围（`C-u M-x +agent-top-report` 直接只看当前项目），`TAB` 在面板标题上折叠/展开（其他位置跳到
 下一个会话），`1`/`2`/`3` 折叠 quota/sessions/session，`g` 刷新。光标不在会话行上时，操作作用于详情面板里的会话。
 数据全部来自 Emacs 已有的状态（`+agent-acp-usage`）：不扫进程、不轮询；面板在可见的 frame 上显示时，
 会话开启/关闭、模型切换、开始/结束一轮、上报用量之后合并 1 秒重绘一次。面板被切走、埋掉或 frame 最小化后，
@@ -1936,22 +1972,21 @@ vault 清单不算项目），没有就退回普通项目根目录；**不会**�
 
 ### 会话不会被后台自动关掉
 
-自动回收只有两条路径：每 5 分钟的 warm-buffer 清扫（空闲超过
-`noema-agent-worker-warm-idle-seconds`，默认 30 分钟），以及项目最后一个 `.noema`
-关闭 `noema-pi-stop-delay` 秒后的项目收尾。Pi 是项目管理会话，不参与 warm-buffer 清扫；
-项目收尾仍会关闭它。两条路径都先问
+普通执行 Agent 的自动回收使用通用 warm-buffer 规则。Pi 的会话生命周期独立，
+不会因为离开项目或关闭文档而被当成执行 Agent 回收。`M-x noema-pi-sessions`
+查看当前与历史 Pi 对话，`RET` 恢复、`n` 新建、`a` 归档、`i` 导入旧记录。
+Dashboard 的 `pi` 和 Ibuffer 的 Pi 分组均可找到它；关闭项目 Pi 不关闭执行 Agent。
+
 `+agent-acp-auto-stoppable-p`：会话必须空闲（没有进行中的回答或 Run）、不在
-任何窗口可见，且来源属于 `+agent-acp-auto-stop-origins`（默认 `run`、`probe`、
-`pi`）。空闲时间从 buffer 最后一次变化（输入或输出）算起，而不是上次被显示的
+任何窗口可见，且来源属于 `+agent-acp-auto-stop-origins`（执行来源如 `run`、`probe`、`side`、`latex-export`；Pi 由独立控制器管理）。空闲时间从 buffer 最后一次变化（输入或输出）算起，而不是上次被显示的
 时间。所以你自己开的会话（popup、`C-c A a`、裸 `M-x agent-shell`）只会在你
 `C-c C-k` 或交互式 `noema-pi-close-project` 时关闭；进行中的回答任何时候都不会被
 自动停止。被停止的会话名与 native id 仍在，下次可恢复。
 
 ### 把 buffer / 选区 / 光标交给会话
 
-上下文的挑选仍然是 gptel 那一套（`C-c A .` / `C-c M-a` 的 `gptel-add`：选区、
-buffer、文件、Dired 标记，带 overlay 高亮），**只有一份**选择，既可以给 gptel
-compose 用，也可以用 `C-c A x` 交给某个 ACP 会话。
+`C-c A .` / `C-c M-a` 选择 region、buffer、文件或 Dired 标记，选区用 overlay
+跟踪；`C-c A ,` 查看和移除，`C-c A x` 发送。此流程不依赖 gptel。
 
 交出去的**永远是引用，不是正文**：选区变成 prompt 里的一行 `path:12-40`（就是
 agent-shell 自己写引用的格式），每个文件再附一个 `resource_link` 内容块
@@ -1984,23 +2019,32 @@ Noema 已登记的原生 session ID 会沿用原会话名。Codex 与 Claude 的
 项目目录、target、环境和会话登记。
 `C-u C-u M-x agent-shell` 保留上游的已有会话选择器。
 
-同一项目的 agent/session 以 tab 形式共用右下角一个 Agent 窗口；每个 tab 都是
+同一项目的 agent/session 以 tab 形式共用当前聊天窗格，默认使用右侧 Agent dock；
+A 切 B 不删除其他手工分屏。popup 与 here 也能选择同一项目池，隐藏返回该窗口的
+原编辑区，不从 buffer 历史里跳回另一个 agent。每个 tab 都是
 真正的 agent-shell buffer，可以直接输入、`C-c C-c` 中断。Noema Run 结束后会补回
 输入提示符，`C-c C-e`（任意位置 `C-c A i`）跳到输入处。这些 buffer 不进入全局
-tab-line/tab-bar。
+tab-line/tab-bar，但会出现在 Ibuffer 的 Agent 分组和日常 buffer 选择器中；
+每个会话都是独立的一行，Frame 列显示访问过它的 frame。
 
 | Agent 窗口按键 | 作用 |
 |----|------|
 | 左键 / 右键 tab | 切换 session / 管理菜单（含关闭已退役 tab） |
-| `?`（输入区外）、`C-c ?` | 全部按键帮助 |
+| `?`（输入区外） / `C-c ?` | 会话操作菜单 / 全部按键帮助 |
 | `C-c C-a` / `C-c C-n` / `C-c C-p` | 选择 / 下一个 / 上一个 session |
 | `C-c C-e` | 聚焦输入提示符 |
+| `C-c C-o` / `C-c C-l` | 隐藏并返回来源 / 打开 Agent Manager |
 | `C-c C-x` | 停止当前 Run 或回合 |
 | `C-c C-r` | 重启 session 并恢复原对话 |
 | `C-c C-k` / `C-c M-k` | 关闭当前 tab / 关闭其他 tab（名字与历史保留） |
 | `C-c C-w` / `C-c C-f` / `C-c C-d` | 重命名 / fork / 归档 session |
 | `C-c C-t` | 当前原生 ACP 对话树 |
-| `C-c C-j` / `C-c C-l` / `C-c C-z` | 跳到最近的 work 块 / session 列表 / 管理菜单 |
+| `C-c C-j` / `C-c C-z` | 跳到最近的 work 块 / 会话操作菜单 |
+
+生成过程中仍可用 `C-c C-e` 编辑常驻输入，提交由原生 steering / 队列处理。
+停止先显示 stopping；五秒未收到确认显示 stop-unconfirmed，表示仍可能运行。
+重启恢复同一原生对话并保留草稿和待发队列，不重放旧的活动请求；启动异常时，
+未发送输入保存在 `*Agent recovery*`。Research 会话须先让 Run 停止并确认终态再重启。
 
 `C-c A T` 可从当前项目上下文打开 agent 的对话树；Sessions 列表中按 `T`
 打开光标所在会话的树，已关闭的原生会话会先恢复。树里 `g` 发现和更新分支，
@@ -2015,73 +2059,29 @@ Run 声明新命名会话，与树里的原生 `f` 不同；WorkNode DAG 仍描�
 
 重跑同一个 work 块会按上游重新开始，不会叠在上一次尝试后面（独占的 session 沿用原名换新一代）。
 
-`.noema` 的 DAG 里，`!` 把选中的 work 标成 `regressed`——「本来验证过、被后来的改动打坏了」。
-它会问你什么坏了（记在该节点上），并把状态传给合并工作 DAG 里所有 `done` 的下游节点
-（lineage 与 `depends` 都算）：下游要重新声明 done，而不是继承。进行中和已放弃的工作不受影响。
-regressed 节点不会被变暗也不会被自动折叠，画上用 `✗` 和警示描边标出。通用的 `t`（状态）
-命令选 `regressed` 走的是同一条传播路径。
+项目工作以 `AGENTS.md`、Markdown 和必要的 `.agent/` 记录组织。
+`noema-project`、`noema-emacs`、`noema-md` 分别提供项目协作、Emacs 操作和
+Markdown 语法审阅指导；维护实现使用 `emacs-noema-dev`。Skill 库位于
+`~/Documents/Noema/public/README/Skills/`，深度参考按需读取。
 
-`.noema` 的 DAG（Graph Board）：`f` 以选中节点为根聚焦（`^` 根上移一层、`[`/`]` 调深度、
-`b` 回到上一个焦点）；`h/j/k/l` 按画面移动，`H`/`L` 到 lineage 父/第一个子，`{`/`}` 到兄弟，
-`/` 按标题跳转。work 块里 `@@ctx(lineage:2)` 扩大祖先范围，`@@ctx(none)` 关闭自动附加的上下文；
-自动附加的上游结论超出 64 KiB 预算时会被截断或省略（写进 RunSpec），不会让 Run 失败。
-运行前可在 work 块上按 `C-c j p`（或右键 Preview context）预演：显示将用的 agent、会话、
-推导原因，以及每条上下文的字节数、是否自动附加（auto）/被截断（cut）、被省略的条目和总量；
-不会真的运行或触发 compaction。
-Noema Sessions 的 Context 列显示上下文窗口占用与 token 总量，`c` 让该会话下一次
-Run 从最近 Handoff 重建对话。普通会话使用共享列表即可查看、停止、改名和重启；
-原生 fork 按能力启用，Research 归档和 compact 仍需要持久业务记录。
-项目内的读写与执行自动批准；项目外和网络请求会弹出 Noema Attention 由你批准。
+Emacs 启动后有一个隐藏的主 Pi；明确进入本地项目后复用项目子 Pi，不抢焦点、
+不自动发送模型请求。`M-x noema-pi-emacs-open` 打开主 Pi，`C-c A P` 打开项目 Pi。
+`C-c A c` 根据 `noema-prompt-document` Skill 申请普通 Markdown 文档；保存后
+`C-c A s` 才交给 Agent 执行。没有额外 Compose 界面。
 
-Inspector（节点上 `C-c C-i`）现在除了结构错误，还会提示**没有依据的断言**：标了 done 却
-既没有 Run 也没有 outcome、标了 done 但最近一次 Run 是失败的、done 压在一个 regressed
-上面、标了 active 却没有任何 Run。这些只是提示——它们走的是 warning 通道，`structure-edit`
-只回滚新引入的 error，所以提示永远不会挡住你的编辑。
+Noema 页面发送选区时，每个真实 Session 只初始化一次简短 API 入口。之后只发送
+要求和范围；通过 `noema_api` 查询一个能力、按需 describe，再 `noema_call` 调用。
+已有会话也可用 `scripts/agent-api.mjs`，不必重启。修改走带版本校验的提案 API，
+页面响应保存事件，人在卡片中接受、拒绝、评论并 Send feedback。
 
-`C-c j p` 的运行预演会告诉你这个块正压在什么上面：有几个依赖没完成、有几个已经 regressed、
-以及这个块是不是已经标了 done。同样只是提示，Run 照常能起。
-
-技能库在 `~/Documents/Noema/public/README/Skills/`（放在 README 命名空间里，因为那才是
-覆盖它的 git 仓库），按 Portable Agent Plugins 结构组织：根目录有 `plugin.json` 与
-`mcp.json`，技能在 `skills/` 下——每个技能一个目录、一份
-`SKILL.md`，深度放 `references/` 里按需读。加一个技能就是新建一个目录，下一次 Run 就能
-`@@skill(<id>)` 选到，不需要发版。描述 Noema 自身机制的技能（`noema-work-dag`）仍随代码走。
-在 `.noema` 的 work 块开头输入 `@@skill(` 后，Company 会列出当前项目可选的
-Skill；首次打开时会异步加载，随后自动更新。列表与 Skill 管理器使用同一份
-能力解析结果，但管理器还展示无效或明确禁用的项目。普通正文不再自动混入
-TeX/Markdown snippet；需要模板时用 `C-c y y`。结构问题由 Flymake 在块标题
-标出，数学公式由 RaTeX 在光标处预览，代码围栏和控制行不会被当成公式。
-
-MCP 现在是两个面：知识库（笔记/搜索/标签）和 AI 流程（work DAG/Run/artifact/Proposal）
-分别在 `/mcp` 和 `/mcp/research`，能力 id 是 `noema-knowledge` 和 `noema-research`，
-可以单独启用。
-
-动手之前 agent 可以用 `proposal.create` 的 `graph.declare` 把**整张计划图**一次提出来：
-块之间可以互相引用，Graph Board 按声明的形状画成一组虚线幽灵节点，你一次接受或否决整张图
-（写入走单次 revision 比较交换，所以不会留下半张计划）。加单块仍用 `cell.create`。
-
-Run 里的 agent 可以用 `research_state` 汇报**它自己那个 WorkNode** 的状态
-（`active` / `waiting` / `done` / `regressed` / `dropped`，带一句理由或证据），改不了别的节点。
-kernel 只记录这份汇报，真正落盘的是 Emacs：它把请求当成一次普通的、可撤销的结构编辑应用，
-所以文档权威仍然只有一个。`done` 要带证据、坏了先标 `regressed` 再修这套纪律写在内置
-Skill `noema-work-dag` 里，可以用 `@@skill(noema-work-dag)` 给某个 work 块启用。
-
-取消：JuText 里 `C-c C-z` 只取消光标所在 work 块的执行，运行中、排队中、正在准备都有效；
-网页 Cancel Run 对还在准备的 Run 立即生效；Agent 窗口 `C-c C-x` 停止当前 Run，`C-c C-c`
-直接中断当前回合，不再询问。取消时待批准的权限一并撤回；agent 3 秒内不响应取消时会强制
-停掉它的进程，session 名和历史保留，下次使用时恢复。
-
-可编辑 profile 与 prompt 资源位于 `etc/noema/`。一次性 CLI sampler 仅保留为
-gptel backend 的降级；不再有独立 interaction Hub/transcript/session UI。选区、buffer
-和文件的挑选一律使用 gptel 的 context UI，去向由你决定：gptel compose，或
-`C-c A x` 交给某个 ACP 会话。完整上游源码位于
-`site-lisp/noema/upstream/`；当前代码不得回退到旧 workbench 命名或另一份外部 checkout。
+冻结上下文、记忆、Session、权限、CAS 产物与 Finding 服务继续保留；普通 Jupyter
+也保留。旧 workstream 身份仍按真实服务约束使用，不靠提示词伪造。专用 `.noema`
+编辑、Company、LSP 投影和 Work Output 已退役，不再提供旧 Graph Board 操作。
 
 ## 9. Jupyter cell —— 普通笔记与 kernel
 
-本节只描述普通 Markdown `@@cell` sidecar 与 `.ipynb`。D-023 `.noema` 是
-AI prompt/工作流程文档：按 `C-c C-c` 运行 work 块时走 ACP agent，回复进入右侧
-OutputArea 并保存到该块 outputs；它没有 kernel 选择、重启、Run All 或编程代码块。
+本节描述普通 Markdown `@@cell` sidecar 与 `.ipynb`。旧 `.noema` 的专用
+输出适配已移除，访问不初始化 notebook，也不连接 kernel。
 
 笔记里的 `@@cell(language, session) [id]` 块由 Noema 渲染，**源码、cell 结构和
 运行逻辑由 Noema 管理**：在 cell 上点 Edit，Noema 会打开笔记旁 `.cell/` 下的

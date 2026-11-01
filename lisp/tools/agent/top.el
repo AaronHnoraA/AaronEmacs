@@ -1506,7 +1506,7 @@ Elsewhere, move to the next session row."
   (add-hook '+agent-acp-changed-functions #'+agent-top--session-changed))
 
 ;;;###autoload
-(defun +agent-top (&optional project)
+(defun +agent-top-report (&optional project)
   "Show every live agent session: quota, model, context, tokens and cost.
 With prefix argument PROJECT, show only the current project's sessions."
   (interactive "P")
@@ -1523,6 +1523,14 @@ With prefix argument PROJECT, show only the current project's sessions."
       (+agent-top--codex-remote-probe)
       (+agent-top--render)
       (aaron-ui-board--goto-item-id +agent-top--shown-id))))
+
+;;;###autoload
+(defun +agent-top (&optional project)
+  "Open the shared usage view; use the diagnostic report in a terminal."
+  (interactive "P")
+  (if (display-graphic-p)
+      (progn (require 'tools/agent/manager) (+agent-manager-show 'usage project))
+    (+agent-top-report project)))
 
 (defun +agent-top--stop-claude-on-exit ()
   "Stop Claude Remote processes started by abtop before Emacs exits."

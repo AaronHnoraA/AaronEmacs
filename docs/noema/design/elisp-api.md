@@ -1,110 +1,58 @@
-# Noema semantic Emacs Lisp API
+# Noema Emacs Lisp API
 
-`lisp/noema-api.el` is the public domain boundary for JuText, the Graph Board,
-scripts and compatible agents. Functions work with projects, Cells, WorkNodes,
-Runs and capabilities. Buffer rendering, text properties, transport channels,
-and ACP process details remain private backends.
+## 范围
 
-## Queries
+`lisp/noema-api.el` 提供项目身份、能力配置、Run 取消与显式文档模型查询。
+Agent 的进程、Session、编辑器上下文和管理 UI 归 Emacs 的 `lisp/tools/agent/`。
+Markdown 页面通过已有保存与上下文桥交互。
 
-These do not start external work:
+## 模型与契约
 
-| Function | Result |
-|---|---|
-| `noema-current-project` | containing project root for a path or buffer |
-| `noema-project-root` | nearest Project root (a `noema.toml` with `[project]`) above a path, native even for `/fs:` input, or nil; never writes |
-| `noema-project-scope` | that root, else the path's own directory: the one key for state kept outside a Project |
-| `noema-project-ensure` | that root, or one created after the user picks it among the file's directory and ancestors |
-| `noema-project-workspace` | directory the Project's agents execute in; defaults to the root |
-| `noema-project-set-workspace` | declare or clear that workspace |
-| `noema-project-client-path` | a path as the Noema host sees it, or nil when this machine cannot reach it |
-| `noema-current-document` | current semantic WorkDocument |
-| `noema-current-cell` | Cell at point |
-| `noema-current-node` | WorkNode at point |
-| `noema-node-id` | stable id for a WorkNode |
-| `noema-node-parents` / `noema-node-children` | related WorkNodes |
-| `noema-capability-list` | authoritative Skill/MCP resolution |
-| `noema-skill-list` / `noema-mcp-list` | one domain's effective records |
-| `noema-capability-cached` / `noema-capability-refresh` | per-project cached queries and coalesced asynchronous refresh |
-| `noema-skill-install` | create or import a project Skill without overwriting existing files |
-| `noema-mcp-probe` | explicitly test a resolved MCP and list its tools in a temporary session |
-| `noema-capability-config` | canonical project capability configuration |
-| `noema-capability-resolve` | one resolved effective record |
-| `noema-capability-active` | active Skill/MCP ids from a resolution |
+- **C1｜项目查询不创建状态。** `noema-current-project`、`noema-project-root`、
+  `noema-project-scope`、`noema-project-workspace` 与 `noema-project-client-path`
+  复用既有项目发现和 Remote 路径规则。需要创建项目时使用已有的
+  `noema-project-ensure` 交互。
+- **C2｜能力查询与写入分开。** `noema-capability-list`、`noema-skill-list`、
+  `noema-mcp-list`、`noema-capability-config` 与 `noema-capability-resolve` 是异步
+  查询，回调为 `(result error-object)`。`:scope 'global` 不发现项目；
+  `:requested-skills`、`:requested-packs` 只表示本次选择，不污染持久选择或编辑器缓存。
+- **C3｜能力写入有明确范围。** `noema-capability-set-enabled`、
+  `noema-capability-set-patch`、`noema-mcp-register`、`noema-pack-define`、
+  `noema-skill-install` 通过既有宿主接口原子修改选中的能力配置并重新解析。
+  这些操作不重写链接的外部客户端配置；查询不表示授权写入或连接 MCP。
+- **C4｜执行通过共享运行时。** `noema-agent-cancel` 取消已知 Run；原生 Agent
+  操作复用共享 `tools/agent/` 命令。现有 `.prompt` 执行仍可经
+  `noema-agent-worker-run-prompt-file` 调用冻结 Run 路径。
+- **C5｜模型保留，专用编辑 API 移除。** `noema-node-id` 和显式传入 DOCUMENT 的
+  `noema-node-parents`／`noema-node-children` 是纯模型查询。
+  JuText 的 current-document/Cell/node、结构编辑、at-point Run、Graph Board
+  导航与项目文件执行包装不再提供；不以伪造的当前 Cell 代替它们。
 
-Capability queries are asynchronous because they cross the Emacs/host boundary.
-Their callback receives `(result error-object)`.
-`noema-capability-list` accepts `:requested-skills` and `:requested-packs` for
-transient task selections, including pack dependency resolution. These queries
-do not change persisted selection or the editor's capability cache.
-
-## Semantic mutations
-
-`noema-create-node`, `noema-create-work`, `noema-create-checkpoint`,
-`noema-link`, `noema-unlink`, `noema-set-node-state`, and `noema-open-node` use
-the existing validated JuText structural transaction. The edits remain
-undoable and update the Graph Board through the established model path.
-
-`noema-capability-set-enabled`, `noema-capability-set-patch`, and
-`noema-mcp-register` atomically mutate the selected Noema capability document
-and then re-resolve it. Capability query/mutation/install/probe APIs accept
-`:scope 'global` to operate without project discovery; omitted scope retains
-the project API semantics. Global writes invalidate all editor capability
-caches, since project resolutions inherit them. Native linked client files
-are never rewritten by these mutations. The UI invokes these functions;
-it does not implement its own mutations.
-
-## Runtime effects
-
-`noema-run-cell` (also `noema-agent-run`) validates and saves the work document,
-then dispatches through the existing worker and frozen RunSpec path.
-`noema-agent-resume` chooses continued/named session routing.
-`noema-agent-cancel` requests cancellation of a durable Run.
-`noema-run-project-file` runs a project `.py` or `.ipynb` from the current
-WorkNode and retains Noema's explicit local-execution confirmation.
-
-These functions can start or affect external processes. MCP connection state is
-not changed by a capability query.
-
-`(+agent-context-send-prompt PROMPT :files FILES :draft DRAFT :pick PICK)`
-delivers a product task to an existing agent through the ordinary context
-path. Files remain references, must be saved/readable and reachable by that
-agent, and never consume the shared gptel selection. `:draft t` only fills
-the input; a busy session queues a normal send. Session selection retains the
-clipboard option. See [agent-context.md](agent-context.md).
-
-## Script example
-
-This program queries project and graph state, resolves capabilities, and creates
-a downstream semantic WorkNode without inserting JuText manually:
+## 用法
 
 ```elisp
-(let* ((project (or (noema-current-project)
-                    (user-error "Visit a Noema project first")))
-       (parent (or (noema-current-node)
-                   (user-error "Put point on a WorkNode")))
-       (parent-id (noema-node-id parent))
-       (child-id (noema-create-work "Audit the effective capability boundary"
-                                    (list parent-id))))
-  (noema-capability-list
-   :project project
-   :callback
-   (lambda (environment error-object)
-     (if error-object
-         (message "Noema capability query failed: %S" error-object)
-       (message "Created %s; active capabilities: %S"
-                child-id (noema-capability-active environment)))))
-  child-id)
+(noema-capability-list
+ :scope 'global :requested-packs '("noema-project")
+ :callback (lambda (resolution error-object)
+             (if error-object
+                 (message "Noema capability lookup failed")
+               (message "%S" (noema-capability-active resolution)))))
 ```
 
-A runnable copy is in `examples/noema-api-example.el`. The bundled
-`noema-elisp-api` Skill gives agents the same operational contract.
+`noema-capability-cached`、`noema-capability-refresh` 与
+`noema-capability-active` 保持既有缓存与结果读取约定。Skill/MCP 查询与写入的
+完整配置格式见 [capabilities.md](capabilities.md)。
 
-## Compatibility boundary
+## 实现位置
 
-The API currently delegates structural changes to the mature
-`noema-research-op-*` transaction backend and Run effects to
-`noema-agent-worker`. Those functions are implementation details: new UI,
-scripts and agent instructions should call `noema-*` public functions instead.
-The `noema:api:*` names remain wire compatibility contracts, not the Elisp
-domain interface.
+Pi 独立 Session 的入口是 `noema-pi-emacs-open`、`noema-pi-router-open` 和
+`noema-pi-sessions`。程序协调通过按需披露的 `noema:api:emacs:pi`，不调用
+Research 的 promote/bind；记录身份、恢复与归档见
+[Pi 会话与项目助手](../../design/pi-sessions.md)。
+
+- `site-lisp/noema/lisp/noema-api.el`：公开 API。
+- `site-lisp/noema/lisp/noema-research.el`：项目发现、保留的文档模型与验证。
+- `site-lisp/noema/lisp/noema-agent-worker.el`：现有冻结 Run 的执行与取消。
+- `lisp/tools/agent/`：通用 Agent 运行时、上下文和管理。
+
+随代码发布的 `noema-elisp-api` Skill 使用同一边界。

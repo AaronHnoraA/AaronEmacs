@@ -95,6 +95,18 @@
           "lean-lsp-mcp==0.30.0"
         ],
         "default_enabled": false
+      },
+      {
+        "id": "noema-api",
+        "name": "noema-api",
+        "title": "Noema API",
+        "description": "按需发现、查看和调用本地 Noema 后端 API，仅两个入口工具",
+        "type": "stdio",
+        "command": "node",
+        "args": [
+          "/Users/hc/.config/emacs/site-lisp/noema/scripts/agent-mcp.mjs"
+        ],
+        "default_enabled": false
       }
     ]
   },
@@ -175,16 +187,14 @@
         "preamble": "Follow the requested output format or the destination's native format. Keep quantitative values and transformations traceable. Render and inspect the final figure; supply editable source and state any unverified browser or layout behavior."
       },
       "noema-emacs": {
-        "title": "Noema in Emacs",
-        "description": "Operate Noema from Emacs: entry points and keys, note and work-block syntax, the semantic Elisp API and the work DAG",
+        "title": "Noema / Emacs 操作",
+        "description": "Emacs 中的 Noema、项目 Agent、普通 Jupyter、Agenda 与能力管理",
         "members": [
           "noema-emacs-workflow",
-          "noema-authoring-syntax",
-          "noema-ediff-review",
           "noema-elisp-api",
-          "noema-work-dag"
+          "noema-prompt-document"
         ],
-        "preamble": "Work in the current Noema and Emacs context. Keep Markdown and .noema source authoritative, and use the public semantic API for structural changes. Read the relevant Skill reference before using a detailed command or syntax."
+        "preamble": "通过现有 Emacs 命令和受支持的语义 API 操作。Emacs 管理窗口、Agent 进程、Session、权限和用户交互。按任务读取文档；Markdown 语法与原位审阅另选 noema-md，项目协作方法另选 noema-project。"
       },
       "emacs-noema-dev": {
         "title": "Developing Emacs and Noema",
@@ -195,6 +205,24 @@
           "rendered-construct"
         ],
         "preamble": "The repository's AGENT.md (Emacs) or AGENTS.md (Noema) wins over any Skill. Both projects' documents live in ~/.config/emacs/docs; records/ there is history, not the current contract. Commit code in its own repository, only your own changes."
+      },
+      "noema-project": {
+        "title": "Noema 项目 Agent 技巧",
+        "description": "主／子 Agent 分工、上下文、检索、记忆、Session 接续和并行工作",
+        "members": [
+          "project-agent-management",
+          "noema-parallel-runs"
+        ],
+        "preamble": "以 AGENTS.md、项目 Markdown 和实际产物接续工作；.agent/ 保存必要的任务、记忆和交接记录。复用现有 Agent 与 Noema 运行能力，没有工具时按指导组织工作，不要求 .noema、Cell 或 DAG，也不把指导说成自动执行的机制。"
+      },
+      "noema-md": {
+        "title": "Noema Markdown",
+        "description": "Markdown 语法、元数据、链接、公式、图表与原位批注审阅",
+        "members": [
+          "noema-authoring-syntax",
+          "noema-ediff-review"
+        ],
+        "preamble": "Markdown 源文件是权威。按需读取当前 syntax.md，保留原有身份、结构、公式和论断强度。显式需要审阅时使用原位 ediff；直接修改请求和已授权的常规工作不增加审批步骤。"
       }
     }
   }

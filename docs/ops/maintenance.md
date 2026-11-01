@@ -235,6 +235,9 @@ make bootstrap-health
 
 常用入口：
 
+- `make pi-live-smoke`
+  使用已安装的 Pi ACP 和隔离的原生历史 fixture，检查主／项目 Pi、原生恢复、
+  物理重启、父子关系与后台窗口保持。没有模型请求，也不修改用户会话。
 - `make state-baseline` / `make state-check`
   证明一次改动没有改变行为（`AGENT.md` “Verification” 的硬性要求）：改动前取启动状态基线，改动后再取一次并逐行比较。比较的内容包括全部 feature、每个 hook 的函数及顺序、advice、所有 keymap 绑定、所有 custom 变量、待运行的 timer。每次取快照前会先做一次预热启动，让生成的 autoloads 已经是最新的。主机名这类和机器相关的值不参与比较。有意的改名用 `STATE_RENAMES=文件`（`(OLD . NEW)` alist）先换算基线。文件放在 `var/state-check/`，工具是 `scripts/state-snapshot.el`。
 - `make test-baseline` / `make test-check`
@@ -388,9 +391,9 @@ Overview、Processes、Buffers、Hooks & timers、后台任务、Noema。皮卡�
 - agent-shell/ACP 发出 `turn-complete` 时，Noema 订阅现成事件（包括未登记的 Claude
   agent-shell buffer），对已打开的 Markdown 页面各检查一次文件时间戳；未变化就不读取
   正文。其他 buffer 只检查可见及最近 12 个，按 buffer-local 刷新函数分发；普通文件走
-  安全 auto-revert，JuText 注册自己的同步器以接收外部正文编辑并保护未保存草稿；
+  安全 auto-revert，旧 JuText 专用同步器已经移除；
   Markdown 页面通过同一次事件的全局刷新 hook 接收通知。普通文件先比较已访问文件的
-  时间戳，只有变化时才额外检查文件是否存在；JuText 在 ACP 完成时先比较时间戳，
+  时间戳，只有变化时才额外检查文件是否存在；Markdown 在 ACP 完成时先比较时间戳，
   未变化就不计算整文件 SHA，文件通知则强制核对修订以覆盖同时间戳的写入。
   不增加周期性轮询。
   笔记库也复用 web-host 的单个递归 watcher，250 ms 合并后按路径通知页面，没有新增常驻 watch。

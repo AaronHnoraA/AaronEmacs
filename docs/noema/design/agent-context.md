@@ -9,7 +9,7 @@
 | 层次 | 内容及权威 | 生命周期 |
 | --- | --- | --- |
 | 原生会话 | agent-shell/ACP 和 Agent 持有对话历史；Noema 记录项目内的逻辑 Session 名与原生 Session ID | 随原生会话恢复、分支或结束 |
-| 普通交互附加上下文 | gptel 的当前选择经 `+agent-context.el` 变成路径、行号与 ACP `resource_link`；Agent 按引用读取文件 | 本次提问 |
+| 普通交互附加上下文 | Emacs Agent 的当前选择经 `+agent-context.el` 变成路径、行号与 ACP `resource_link`；Agent 按引用读取文件 | 本次提问 |
 | 研究 Run 输入 | Node host 将 prompt、上下文内容、能力与会话路由冻结；RunSpec 记录上下文清单、摘要及选择原因 | 随 Run 持久保存 |
 | 自动记忆 | 已审核 Finding 与未经核实的 Hy Memory 各自召回；两者都受项目边界限制 | 下次提问或 Run 准备时重新选择 |
 
@@ -17,11 +17,23 @@ Noema 的 64 KiB 限额只约束它附加到**研究 Run** 的上下文字节，
 
 ## 契约
 
-**C1｜普通交互使用引用。** `+agent-context.el` 复用 `gptel-context` 中的选区、buffer 与文件选择。可保存的文件以一行路径或 `path:START-END` 进入 prompt，每个不同文件附一个 ACP `resource_link`；此路径不内嵌文件正文。未保存或不可读的选择会报告并跳过。会话忙时，agent-shell 的队列保留文本路径引用，下一轮再送。
+**C1｜普通交互使用引用。** `+agent-context.el` 使用 `tools/agent/selection` 中的选区、buffer 与文件选择。可保存的文件以一行路径或 `path:START-END` 进入 prompt，每个不同文件附一个 ACP `resource_link`；此路径不内嵌文件正文。未保存或不可读的选择会报告并跳过。会话忙时，agent-shell 的队列保留文本路径引用，下一轮再送。
 
 `+agent-context-send-prompt` 供产品操作发送明确的 prompt 和文件引用，复用同一
-会话选择、路径可达性检查、起草、排队和剪贴板路径。它不读取或清空共享 gptel
+会话选择、路径可达性检查、起草、排队和剪贴板路径。它不读取或清空共享 Agent
 选择；明确要求的文件不可读或有未保存编辑时拒绝发送，不能悄悄遗漏操作依据。
+
+Noema Markdown 页面发送时，逐次请求只携带要求、文件和 UTF-16 精确范围。
+真实 Session 首次收到简短的渐进式 API 入口；完整 ediff 语法与工具目录不重复
+注入。问答正常回复；改写用 `agent:document:read` 和 `agent:document:propose`，
+由后端保留旧文、生成审阅卡片并通知页面。已有提案的评论和拒绝作为修订依据。
+只有人接受提案。版本冲突需要重新读取，不能强行覆盖。实现见
+[交互流程](interaction-plan.md)。
+
+卡片和文件审阅列表的 **Send feedback** 复用该路径。页面核对提案快照、保存后
+发送文件与行号引用；正文和评论不另行复制进上下文。保存期间文件或文档改变
+则不发送旧范围。可补充下一轮要求；留空时约定 Agent 按已保存的评论或拒绝
+修改该提案。会话选择、排队与剪贴板交付保持一致。
 
 **C2｜研究 Run 先冻结再派发。** `.noema` 工作块先保存，再只解析开头控制区的 `@@agent`、`@@session`、`@@ctx`、`@@skill` 与 `@@pack`。Node host 在 `run:prepare` 中决定会话、解析引用、选择能力并冻结 RunSpec 和 context items；Emacs worker 只消费这份冻结输入。控制区以后的 `@@...` 是 prompt 数据。`local_only` 的 cell 或 note 不得被注入 Run。
 
@@ -43,7 +55,7 @@ Hy Memory 使用同一项目根隔离普通 ACP 对话与 Run，但召回项标�
 
 **C9｜窗口压力只依据新鲜报告。** ACP 报告累计 Session context 使用量与窗口后，后续 Run 可按 `noema-agent-worker-context-rollover-ratio` 判断是否换代；默认阈值为 85%，有效配置范围为 50%–99%。没有可靠报告时状态为 unavailable，不推断为 0%，也不自动换代。达到阈值的下一次 Run 从最新持久 Handoff 重建；预览只显示判断，不发起换代。Run 结束时只把本次开始后收到的累计 Session 用量快照写入回执；无新报告则清除用于未来判断的旧读数。
 
-**C10｜回执只报告已选择的事实。** `C-c j p` 预览本次路由、上下文引用、字节数、截取与省略以及窗口压力。`C-c j i` 的 Inspector 从不可变 RunSpec 读取已完成或 `preparing` Run 的输入、摘要与用量快照；`preparing` 表示已冻结但尚未派发。用量是带时间戳的累计 Session 快照，不是本 Run 的 token 消耗；未报告时显示 unavailable，不借用 Session 后来的读数。
+**C10｜回执只报告已选择的事实。** 现有 `run:context-preview` 服务预览路由、上下文引用、字节数、截取与省略以及窗口压力。`run:context-receipt` 从不可变 RunSpec 读取已完成或 `preparing` Run 的输入、摘要与用量快照；专用 JuText 快捷键和 Inspector 接线已移除。`preparing` 表示已冻结但尚未派发。用量是带时间戳的累计 Session 快照，不是本 Run 的 token 消耗；未报告时显示 unavailable，不借用 Session 后来的读数。
 
 **Upstream now** 只比较当前已保存 `.noema` 文件与冻结的 `result:` 输出，分别报告未变、同 Run 内容已变、由另一个 Run 覆盖、缺失或无法核实。截断输出同时冻结完整来源的摘要，老版本缺摘要时可能无法核实。比较不修改旧 RunSpec 或 WorkNode 状态，也不包含编辑器中尚未保存的改动。Agent 可通过 `research_run {action: "context"}` 读取有界回执；`research_cell {action: "outline"}` 只给直接相邻节点的状态、Run ID、大小与摘要，需要全文时再用 `read` 或 `neighbors`。`local_only` 邻居不进入返回值。
 
@@ -62,7 +74,7 @@ Hy Memory 使用同一项目根隔离普通 ACP 对话与 Run，但召回项标�
 +| 已审核 Finding 召回 | `server/lib/research-memory.mjs` |
 +| ACP 派发、用量报告与终态 | `lisp/noema-agent-worker.el`、`lisp/tools/agent/acp.el` |
 #+end ediff
-| JuText 入口、预览与 Inspector | `lisp/noema-research-mode.el` |
+| 项目工作入口 | `project-agent-management` Skill、`lisp/noema-project-overview.el` |
 
 ## 已知差距
 

@@ -662,47 +662,13 @@ buffer whose visible source intentionally differs from its JSON on disk."
     (run-hooks 'after-revert-hook)
     t))
 
-(defun +noema-jupyter-notebook--research-buffer-p ()
-  "Return non-nil when the visited buffer is a Noema research notebook.
-Research notebooks keep their semantics under `metadata.noema_research' and are
-edited through `noema-research-mode' instead of the sidecar projection."
-  (and (stringp buffer-file-name)
-       (or (string-match-p "\\.noema\\'" buffer-file-name)
-           (string-match-p "\\.noema\\.ipynb\\'" buffer-file-name))
-       (save-excursion
-         (goto-char (point-min))
-         (search-forward "\"noema_research\"" nil t))
-       (condition-case nil
-           (let* ((document (json-parse-string
-                             (buffer-string) :object-type 'hash-table
-                             :array-type 'array :null-object nil
-                             :false-object :json-false))
-                  (metadata (and (hash-table-p document)
-                                 (gethash "metadata" document)))
-                  (research (and (hash-table-p metadata)
-                                 (gethash "noema_research" metadata))))
-             (and (hash-table-p research)
-                  (member (gethash "schema" research)
-                          '("noema.work-document/2"
-                            "noema.research-notebook/1"))))
-         (error nil))
-       (require 'noema-research-mode nil t)))
-
-(defun +noema-jupyter-notebook--new-noema-p ()
-  "Return non-nil when the buffer visits a work document with no content yet.
-`.noema.ipynb' is the legacy spelling of the same work document, so an empty
-one is initialized as a work document rather than as an ordinary notebook."
-  (and buffer-file-name
-       (string-match-p "\\.noema\\(?:\\.ipynb\\)?\\'" buffer-file-name)
-       (string-empty-p (string-trim (buffer-string)))))
-
 (defun +noema-jupyter-notebook--new-notebook-p ()
   "Return non-nil when the buffer visits an `.ipynb' file with no content yet.
 An empty file is not JSON, so neither the source projection nor Noema can read
 it.  Noema work documents are excluded; they have their own initialization."
   (and buffer-file-name
        (string-match-p "\\.ipynb\\'" buffer-file-name)
-       (not (+noema-jupyter-notebook--new-noema-p))
+       (not (string-match-p "\\.noema\\.ipynb\\'" buffer-file-name))
        (string-empty-p (string-trim (buffer-string)))))
 
 (defun +noema-jupyter-notebook--initialize-new-notebook ()
@@ -722,66 +688,16 @@ before any kernel request can observe an unparsable notebook."
     (set-visited-file-modtime)
     (set-buffer-modified-p nil)))
 
-(defun +noema-jupyter-notebook--ensure-noema-project ()
-  "Return the Noema project root for the new `.noema' file, or nil.
-An enclosing project is reused; otherwise `noema-project-ensure' asks where to
-create one.  Declining writes nothing."
-  (require 'noema-research)
-  (condition-case nil
-      (noema-project-ensure buffer-file-name)
-    (quit
-     (message "Noema: %s was not created; it needs a Noema project"
-              (file-name-nondirectory buffer-file-name))
-     nil)))
-
-(defun +noema-jupyter-notebook--note-missing-project ()
-  "Tell the user when the visited `.noema' file belongs to no Noema project.
-Visiting never creates one, because previews and programs visit files too;
-the first run of a work block asks where to create it."
-  (when (and (string-match-p "\\.noema\\'" buffer-file-name)
-             (not (noema-project-root buffer-file-name)))
-    (message "Noema: %s has no project; the first run asks where to create one"
-             (file-name-nondirectory buffer-file-name))))
-
-(defun +noema-jupyter-notebook--initialize-new-noema ()
-  "Fill the empty visited `.noema' file with a valid work document.
-The file becomes valid immediately, before any OutputArea request can observe
-an empty notebook.  The caller settles the project root first."
-  (require 'noema-research-mode)
-  (let* ((title (file-name-base buffer-file-name))
-         (document (noema-research-create-document title))
-         (serialized (noema-research-serialize document)))
-    ;; Fill the still-new visiting buffer before the atomic writer creates
-    ;; the file.  Doing this in the opposite order makes Emacs correctly
-    ;; detect a supersession and prompt while opening the new document.
-    (let ((inhibit-read-only t))
-      (erase-buffer)
-      (insert serialized))
-    (noema-research-write-file buffer-file-name document)
-    (set-visited-file-modtime)
-    (set-buffer-modified-p nil)))
-
-;;;###autoload
 (defun +noema-jupyter-notebook-open-mode ()
-  "Visit an ipynb as a research notebook or a native source projection.
-Research notebooks open in `noema-research-mode'; other notebooks use the
-sidecar source projection.  A new `.noema' file is initialized only once its
-Noema project is settled, so declining leaves the empty buffer untouched.
-Any other new `.ipynb' is seeded from `+noema-jupyter-notebook-skeleton'
-first, so the projection opens on a valid notebook instead of failing to parse
-an empty file."
+  "Visit an ordinary ipynb through its native source projection.
+Legacy Noema work documents remain plain text and never enter Jupyter."
   (interactive)
-  (when (and (+noema-jupyter-notebook--new-noema-p)
-             (+noema-jupyter-notebook--ensure-noema-project))
-    (+noema-jupyter-notebook--initialize-new-noema))
-  (when (+noema-jupyter-notebook--new-notebook-p)
-    (+noema-jupyter-notebook--initialize-new-notebook))
-  (cond
-   ((+noema-jupyter-notebook--research-buffer-p)
-    (noema-research-mode)
-    (+noema-jupyter-notebook--note-missing-project))
-   ((+noema-jupyter-notebook--new-noema-p))
-   (t (+noema-jupyter-notebook--open-projection))))
+  (if (and buffer-file-name
+           (string-match-p "\\.noema\\(?:\\.ipynb\\)?\\'" buffer-file-name))
+      (fundamental-mode)
+    (when (+noema-jupyter-notebook--new-notebook-p)
+      (+noema-jupyter-notebook--initialize-new-notebook))
+    (+noema-jupyter-notebook--open-projection)))
 
 (defun +noema-jupyter-notebook--open-projection ()
   "Visit an ipynb as a native source projection.
@@ -949,29 +865,21 @@ UI talks only to Noema and never opens a Jupyter protocol connection."
     (puthash "kernelspec" kernelspec metadata)
     (+noema-jupyter-notebook-write file document)))
 
-;; This association intentionally takes precedence over code-cells/Jupytext.
-(setq auto-mode-alist
-      (cons '("\\.noema\\'" . +noema-jupyter-notebook-open-mode)
-            (cons '("\\.ipynb\\'" . +noema-jupyter-notebook-open-mode)
-                  (cl-remove-if (lambda (entry)
-                                  (and (consp entry)
-                                       (stringp (car entry))
-                                       (or (string-match-p "ipynb" (car entry))
-                                           (string-match-p "noema" (car entry)))))
-                                auto-mode-alist))))
 
-(with-eval-after-load 'code-cells
+;; Ordinary notebooks retain the source projection after code-cells loads.
+(defun +noema-jupyter-notebook--register-mode ()
+  "Register the ipynb projection without a Noema work-document editor."
   (setq auto-mode-alist
-        (cons '("\\.noema\\'" . +noema-jupyter-notebook-open-mode)
-              (cons '("\\.ipynb\\'" . +noema-jupyter-notebook-open-mode)
-                    (cl-remove-if
-                     (lambda (entry)
-                       (and (consp entry)
-                            (stringp (car entry))
-                            (or (string-match-p "ipynb" (car entry))
-                                (string-match-p "noema" (car entry)))))
-                     auto-mode-alist)))))
+        (cons '("\\.ipynb\\'" . +noema-jupyter-notebook-open-mode)
+              (cl-remove-if
+               (lambda (entry)
+                 (and (consp entry) (stringp (car entry))
+                      (or (string-match-p "ipynb" (car entry))
+                          (eq (cdr entry) '+noema-jupyter-notebook-open-mode))))
+               auto-mode-alist))))
+
+(+noema-jupyter-notebook--register-mode)
+(with-eval-after-load 'code-cells
+  (+noema-jupyter-notebook--register-mode))
 
 (provide 'noema/jupyter/notebook)
-
-;;; noema/jupyter/notebook.el ends here

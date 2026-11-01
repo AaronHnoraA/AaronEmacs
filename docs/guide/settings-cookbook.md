@@ -117,9 +117,11 @@ posframe 弹窗而不是 inline overlay。支持 `$…$`、`$$…$$`、`\(…\)`
 
 - [lisp/tools/agent/config.el](../../lisp/tools/agent/config.el)
 
-当前 AI 相关源码完整内化在 `site-lisp/noema/upstream/`；Noema 公共入口和领域适配位于
-`site-lisp/noema/lisp/`。不要重新添加 gptel、agent-shell、acp.el、shell-maker 或 Magent
-的外部 package 安装声明。
+共享 Agent 配置位于 Emacs `lisp/tools/agent/`；Noema 公共入口和领域适配位于
+`site-lisp/noema/lisp/`。agent-shell、acp.el 和 shell-maker 使用固定版本的
+package-vc 依赖；可选 gptel/Magent 源码的所有权见 `site-lisp/AGENT-UPSTREAMS.md`。
+Noema 的上下文、Markdown 提案和 Pi 不依赖 gptel。Pi 配置与独立 Session 约定见
+[Pi 会话与项目助手](../design/pi-sessions.md)。
 
 ### Claude Code
 
@@ -331,11 +333,11 @@ emacs --debug-init -q -l ./bootstrap.el
   是指向它的链接），Noema server 会扫描整个目录。研究笔记 snippet 放
   `markdown-mode/`，数学放 `tex-mode/`。
 - `;`、`:` 这类仅供 Emacs 使用的数学快捷片段由 `lisp/editor/snippets/config.el`
-  在 Yasnippet reload 后注入对应 mode，不放进共享目录；Markdown/JuText
+  在 Yasnippet reload 后注入对应 mode，不放进共享目录；Markdown
   使用 Noema 的 `\(…\)` / `\[…\]` 分隔符，Noema 自己维护浏览器端的快捷片段。
   Company 在输入 `;`、`:` 后也会显示这两个候选。
 - 继承关系用 Yasnippet 自己的 `.yas-parents` 声明，不写 Lisp：`markdown-mode`
-  继承 `tex-mode`，JuText（`noema-research-mode`）继承 `markdown-mode`，所以
+  继承 `tex-mode`；旧 JuText 的 snippet 继承适配已经移除，所以
   `.noema` 与 Markdown 笔记用同一套 snippet。
 - `fundamental-mode/` 在所有 buffer 生效，只放跨语言的片段；Lean 等语言语法放
   各自的 mode 目录（Lean 在 `lean4-mode/`，`lean-mode` 通过 `.yas-parents` 继承）。

@@ -10,8 +10,8 @@
   "Expose the complete shared implementations without loading Noema."
   (dolist (relative '("magent/lisp" "gptel"))
     (let ((directory (file-name-as-directory (expand-file-name relative +agent-upstream-root))))
-      (unless (file-directory-p directory) (error "Missing agent implementation: %s" directory))
-      (add-to-list 'load-path directory))))
+      (when (file-directory-p directory)
+        (add-to-list 'load-path directory)))))
 
 (+agent-upstream-activate)
 (provide 'tools/agent/upstream)

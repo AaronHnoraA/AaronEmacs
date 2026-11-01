@@ -27,9 +27,6 @@
 (declare-function +noema-api-call "noema/bridge/config" (channel args callback &optional timeout))
 (declare-function +noema-jupyter/output-open "noema/bridge/config"
                   (&optional cell-id focus view))
-(declare-function noema-research-accept-jupyter-runtime
-                  "noema-research-mode" (snapshot))
-(declare-function noema-research-goto-cell "noema-research-mode" (id))
 (declare-function +noema--host-file "noema/bridge/config" (file))
 (declare-function +language-server-ensure-deferred "tools/lsp/config" ())
 (declare-function noema-project-root "noema-research" (path))
@@ -473,24 +470,16 @@ Editor/LSP command remains an escape hatch for mixed-language notebooks."
       (force-mode-line-update t))))
 
 (defun +noema-jupyter-cell-handle-session-event (snapshot)
-  "Apply a Noema Jupyter session SNAPSHOT to its open Emacs buffer."
+  "Apply a Jupyter session SNAPSHOT to its open notebook source buffer."
   (let* ((document (+noema-jupyter-notebook--get 'document snapshot))
          (script-file (+noema-jupyter-notebook--get 'scriptFile document)))
     (when script-file
       (dolist (buffer (buffer-list))
         (with-current-buffer buffer
-          ;; Only then compare names: an identity costs a truename, this runs
-          ;; on every kernel status change, and most buffers are not notebooks.
-          (let ((notebook (bound-and-true-p +noema-jupyter-cell-mode))
-                (research (and (derived-mode-p 'noema-research-mode)
-                               (fboundp 'noema-research-accept-jupyter-runtime))))
-            (when (and (or notebook research)
-                       buffer-file-name
-                       (+noema-jupyter-cell--same-script-p
-                        buffer-file-name script-file))
-              (if notebook
-                  (+noema-jupyter-cell--apply-session-snapshot snapshot)
-                (noema-research-accept-jupyter-runtime snapshot)))))))))
+          (when (and (bound-and-true-p +noema-jupyter-cell-mode)
+                     buffer-file-name
+                     (+noema-jupyter-cell--same-script-p buffer-file-name script-file))
+            (+noema-jupyter-cell--apply-session-snapshot snapshot)))))))
 
 (defun +noema-jupyter/cell-refresh-status ()
   "Refresh kernel/session state from Noema without creating a kernel."
@@ -905,10 +894,6 @@ location."
       (select-window window)
       (with-current-buffer buffer
         (cond
-         ((derived-mode-p 'noema-research-mode)
-          (unless (fboundp 'noema-research-goto-cell)
-            (user-error "Noema research navigation is unavailable"))
-          (noema-research-goto-cell cell-id))
          ((bound-and-true-p +noema-jupyter-cell-mode)
           (unless (+noema-jupyter-cell--goto-id cell-id)
             (user-error "Jupyter cell %s is not present in %s" cell-id file)))

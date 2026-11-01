@@ -79,6 +79,11 @@ TTY 入口退回普通 buffer。隐藏保留页签与筛选状态，并停止页
   `+performance-hidden-monitor-stops-both-refresh-timers`、
   `aaron-ui-activity-long-page-scrolls-inside-viewport`。
 
+- **C12** 浮窗可通过公共 `aaron-ui-float-preview-buffer` 在原内容旁显示已有 buffer，
+  使用 `aaron-ui-float-clear-preview` 撤下临时窗口。预览不复制 buffer，不改变显示
+  owner；隐藏、关闭时先释放预览窗口。ETAF resize 按自己的内容窗口重新布局，
+  不使用当前选中的预览窗口宽度。
+
 ## 实现位置
 
 - `lisp/core/aaron-ui/aaron-ui.el`：Aaron 色板与主题选择。

@@ -1119,6 +1119,13 @@ selection and mark behavior."
   (ibuffer-switch-to-saved-filter-groups "default")
   (ibuffer-do-sort-by-recency))
 
+(defun aaron-ibuffer-pi-buffer-p (buffer)
+  "Whether BUFFER belongs to the independent managed Pi session domain."
+  (and (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (or (derived-mode-p 'noema-pi-sessions-mode)
+             (memq (bound-and-true-p +agent-acp-session-origin) '(pi pi-emacs pi-project))))))
+
 (defun aaron/ibuffer-visit-right ()
   "Visit the Ibuffer row in a new pane on the right."
   (interactive)
@@ -1158,6 +1165,8 @@ selection and mark behavior."
   :config
   (setq ibuffer-saved-filter-groups
         '(("default"
+           ("Pi" (pi . t))
+           ("Agent" (mode . agent-shell-mode))
            ("Noema" (noema . t))
            ("xwidget" (and (mode . xwidget-webkit-mode)
                            (not (noema . t))))
@@ -1176,6 +1185,10 @@ selection and mark behavior."
                         (name . "^\\*Messages\\*$")
                         (name . "^\\*Warnings\\*$")
                         (name . "^\\*Backtrace\\*$"))))))
+  (define-ibuffer-filter pi
+      "Toggle current view to managed Pi sessions and their session list."
+    (:description "Pi")
+    (aaron-ibuffer-pi-buffer-p buf))
   (define-ibuffer-filter noema
       "Toggle current view to buffers hosting Noema."
     (:description "Noema")
@@ -1666,7 +1679,8 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
   "Close the current frame when possible, otherwise close the current view.
 Either way the buffers stay alive (docs/design/window-lifecycle.md)."
   (interactive)
-  (if (> (length (frame-list)) 1)
+  (if (or (frame-parent (selected-frame))
+          (> (length (seq-remove #'frame-parent (frame-list))) 1))
       (delete-frame)
     (+windows/close-view)))
 

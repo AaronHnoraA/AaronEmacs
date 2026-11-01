@@ -712,16 +712,16 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
 
 ## 9. Noema AI/agent
 
-- `M-x noema` / `C-c A W` — Noema 主入口
+- `M-x noema` / `C-c A W` — 打开项目 Pi；主／项目关系与独立 Session 见 [Pi 会话与项目助手](../design/pi-sessions.md)
 - `M-x +agent/start` / `C-c A a` — 启动包管理的 agent-shell 上的结构化 agent
 - agent-shell 原生 `turn-complete` 事件由 `+agent-acp.el` 转发给本配置，裸启动的
   Claude 等 agent-shell 会话也在创建 buffer 时订阅：每轮结束后只检查可见及最近的普通
-  文件、JuText，以及打开的 Noema Markdown 页面。底层按 buffer-local
+  文件以及打开的 Noema Markdown 页面。底层按 buffer-local
   `+auto-revert-agent-refresh-function` 分发：普通文件走安全 auto-revert，拥有磁盘合并规则
   的模式可注册自己的函数；无普通文件 buffer 的页面可注册
   `+auto-revert-agent-refresh-functions`，Markdown 页面就在这条路径上。普通远程文件
   也参与：`batched` 路由可在焦点事件检查，`round-trip` 路由只在 ACP 完成或用户显式
-  解决冲突、或旧 buffer 再次显示时检查；断开的目标一律跳过。JuText 在无草稿时接收外部正文编辑，
+  解决冲突、或旧 buffer 再次显示时检查；断开的目标一律跳过。普通 Markdown 页面在无草稿时接收外部正文编辑，
   有草稿时保留本地内容并合并运行输出；页面先比较时间戳，确有变化
   且没有草稿才读取正文；不 advise ACP 内部函数，也不扫描整个项目。
 - `M-x +agent-worktree-start` / `C-c A w` — 让会话在 Project workspace 仓库的独立 linked worktree（分支 `noema/<名字>`，基点记在 `branch.<分支>.noemaBase`）里工作，会话仍登记在发起它的 Project 下（D-038 不变）。Git 都经 `process-file` 在 Emacs 目录里运行，本机和 `/fs:` 远程走同一条代码路径；临时 buffer 里会带上调用方的环境 capsule。`+agent-context` 把主 checkout 的引用改写到会话的 worktree（`+agent-worktree-redirect`），worktree 里没有这个文件就报错，区域引用的那几行在副本里内容不同也报错。Sessions 与总览的 `m`/`d` 打开该会话 checkout 的 Magit。设计来源见 [Agent Fleet 审计](../noema/records/audits/agent-fleet-noema-audit-2026-10.md)
@@ -736,8 +736,8 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
   然后运行 `+agent-acp-changed-functions`；该钩子也在 agent-shell 每次完整的 header 更新（会话建立、
   模型/模式切换、一轮开始结束，不含忙碌动画的缓存帧）和 agent buffer 被杀时运行。Codex 额度只在渲染时读最新会话文件末尾 128 KiB，
   按文件 mtime/size 缓存。不做进程扫描或轮询
-- `M-x +agent/compose` / `C-c A c` — 直接复用内化 gptel 的 compose UI
-- `C-c A s/m/./r` — send、transient、context、rewrite/diff
+- `M-x +agent/compose` / `C-c A c` — 通过项目 Pi Skill 创建并打开普通 Markdown prompt 文档
+- `C-c A s/m/./r` — 发送保存后的任务文档、Agent 菜单、选择上下文、请求选区改写
 - `C-c A p` — 把当前 agent-shell session 纳入 research
 - `C-c A x/v/B/f/@` — 把当前上下文、选区、buffer、文件、光标位置交给某个 agent
   会话；`C-c A ,` 先检视，`C-c A d` 只草拟不提交。`v/B/f/@` 只发送点名的那一段；每次都询问会话，
@@ -748,7 +748,7 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
   原生历史由 agent 后端保存，不靠 Emacs transcript。
 - Noema Markdown 页面里没有 Emacs 文本：`C-c A v/B/@/./c/s/r` 和 `C-c A e` 经
   `noema-md-bridge` 让页面先保存并报告选区的准确位置，再在笔记的 Emacs 源 buffer
-  上运行 gptel / agent UI；常用文本命令（`H-i`、`H-s`、复制粘贴、`C-x C-s` 等）在
+  上运行共享 Agent 操作，改写使用版本化文档提案 API；常用文本命令（`H-i`、`H-s`、复制粘贴、`C-x C-s` 等）在
   `+noema-keys-mode-map` 里重定向到页面操作，见 daily-usage“Noema 页面里的
   Emacs 按键”
 - 每个 agent session 仍是真正可交互的 agent-shell buffer，但不进入全局
@@ -757,37 +757,33 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
   transcript。点击 tab，或 `C-c C-a` 选择、`C-c C-n`/`C-c C-p` 切换 session；
   右键 tab 打开管理菜单（停止、重启、关闭、重命名、fork、归档等），`?` 查看全部
   按键。Noema Run 结束后补回输入提示符，`C-c C-e` 或 `C-c A i` 聚焦输入。
-- 重跑 work 块从上游状态重建会话（独占会话沿用原名、换新一代，共用会话则分支），新对话
+- 保留的 Run 服务重跑时从上游状态重建会话（独占会话沿用原名、换新一代，共用会话则分支），新对话
   注入项目根、文档路径和 lineage 上游块。权限由 kernel 判定：项目内自动批准，项目外与
   网络进入 Attention 弹窗，sudo/凭据/`git push`/改写历史始终拒绝。
 - 取消链路：准备中的 Run 被取消时 kernel 立即结束它、拒绝迟到的 attach/start，并把
-  cancelled 写回格子；运行中的 Run 由 worker 发 ACP `session/cancel`、撤回待批权限，
-  3 秒无响应再关停 agent 进程。JuText `C-c C-z` 按光标所在格子取消。
+  cancelled 写入运行记录；运行中的 Run 由 worker 发 ACP `session/cancel`、撤回待批权限，
+  3 秒无响应再关停 agent 进程。旧 JuText 的按格子取消接线已移除。
 - `M-x noema-skill` 直接打开 Skill／Pack 输入补全搜索；在搜索输入时按
   `Cmd+,` 进入完整 Skill 管理 buffer。在 agent-shell 或 Portal 终端中选中结果，
   只在输入处草拟引用，不自动发送。`noema-mcp-manager` /
   `noema-capability-manager` 打开完整管理页；
   从 agent-shell 调用它们时仍进入只读 lookup（`M-x noema-capability-lookup`）。
-- `.noema` 的 JuText 是研究工作文档，没有语言服务器。Company 在 work 开头的
-  `@@agent`、`@@session`、`@@ctx`、`@@skill` 控制行只使用 Noema CAPF；普通正文
-  用文字补全，Yasnippet 模板用 `C-c y y` 显式展开，避免 TeX/Markdown 模板混进
-  Skill 候选。候选取自同一项目的能力解析缓存；启用状态和来源显示在注释里，
-  无效或明确禁用的 Skill 不可选。Flymake 把现有结构校验的错误和警告标在
-  对应块标题；公式预览复用 RaTeX 和共享 KaTeX 宏。
+- 旧 `.noema` 的 JuText、Company/CAPF、Flymake 与 Work Output 适配已移除。
+  普通 notebook 的 LSP、Company、文本投影、执行与输出继续保留。
+  项目协作以 Markdown、`AGENTS.md`、`.agent/` 和相关 Skill 组织。
 - 会话登记（`+agent-acp.el`）：`+agent-acp-start` 用 `:origin` 记下是哪个
-  入口开的（`run`/`popup`/`manual`/`foreign`/`pi`/`takeover`/`probe`/`side`），
+  入口开的（`run`/`popup`/`manual`/`foreign`/`pi-emacs`/`pi-project`/`takeover`/`probe`/`side`），
   `+agent-acp-adopt` 是唯一登记点，负责解析项目 root、生成唯一会话名、调用
   `+agent-acp-mark-session-buffer`；裸 `M-x agent-shell` 经管理入口以
   `manual` 来源在调用窗口启动，其他程序自行创建的 agent-shell buffer 仍由
   `agent-shell-mode-hook` 收编（`+agent-acp-adopt-foreign-sessions` 可关）。
   root 解析是纯查询（含 `[project]` 的 `noema.toml` → projectile → project.el →
-  该目录，统一投影成本机原生路径），绝不创建 Project。只有已经是 Noema 项目时才额外 `session:promote` + `session:name:bind`
+  该目录，统一投影成本机原生路径），绝不创建 Project。普通任务 Agent 只有已经是 Noema 项目时才额外 `session:promote` + `session:name:bind`
   写进 Node 持久注册表，失败不影响会话。`+agent-acp-sessions` 是合并视图，
   `noema-sessions-read` 是统一的会话选择器（可选“新开一个”；context send
   还可在列表末尾选择复制 prompt 到剪贴板，不需要 ACP 会话）。
-  `+agent-acp-ephemeral-origins`（默认 `side`、`latex-export`）里的来源不写持久注册表。
-- 生命周期：所有自动停止路径（warm 清扫、项目最后一个 `.noema` 关闭后的收尾、项目
-  关闭期间结束的 Run）统一经 `+agent-acp-auto-stoppable-p`——空闲、没有排队的
+  Pi 自己管理历史与活跃指针；`+agent-acp-ephemeral-origins`（默认 `side`、`latex-export`）里的来源不写研究持久注册表。
+- 生命周期：暖会话清扫等自动停止路径统一经 `+agent-acp-auto-stoppable-p`——空闲、没有排队的
   prompt（agent-shell 的 `:pending-prompts`）、不可见、来源在
   `+agent-acp-auto-stop-origins`。`agent-shell-mode-hook` 给每个 agent buffer
   装 `after-change-functions` 记录活动时间；`noema-agent-worker-stop-buffer` 在
@@ -800,8 +796,8 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
   在 `noema-agent-worker--slot-waiting` 等待。同一文件的并发编辑由 kernel 权限策略
   转为人工决定（`policyReason`），不拒绝。设计来源与取舍见
   `docs/noema/records/audits/pisper-agent-lifecycle-study-2026-09.md`。
-- 编辑器上下文（`+agent-context.el`）：挑选完全复用 gptel 的 `gptel-context` 与
-  `*gptel-context*` 检视 buffer，只有一份选择。发送时把它解析成引用
+- 编辑器上下文（`tools/agent/{selection,context}.el`）：Emacs Agent 跟踪文件与选区，
+  `+agent-context-inspect` 检视和移除引用。发送时把它解析成引用
   （`+agent-context-references`），再构造内容块：一个 text 块列出
   `path:START-END`（与 `agent-shell--get-region-context` 同格式），每个文件一个
   `resource_link`。**不发 embedded `resource`**，所以不吃 `embeddedContext` 能力
@@ -812,14 +808,15 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
 - 编排面板（`noema-orchestration.el`，`C-c A O`）：kernel 的
   Task/Job/Invocation/Worker/Delegation 模型一直完整，但 D-016/D-017 退役
   Orchestration Lab 之后就没有任何界面，`orchestration:snapshot` 无人调用。
-  这个 board 就是那个界面。它**只读**——作业与开 Run 仍在 Graph Board——回答
-  Graph Board 答不了的问题：什么被分解成了什么、谁排在谁后面、哪个 worker 持有
-  认领、以及哪个 agent 委派给了哪个（delegation 是 Graph Board 没有的关系）。
+  这个 board 只读展示保留的编排模型：什么被分解成了什么、谁排在谁后面、
+  哪个 worker 持有认领，以及哪个 agent 委派给了哪个。
   一次快照喂所有视图（`t`/`j`/`w`/`d`/`e`，`TAB` 轮换），所以切视图不重新请求，
-  整块板子是同一个时刻的一致快照而不是五次独立读取。
-- 两个 MCP 面：`/mcp` 是知识库（笔记、搜索、块、标签），`/mcp/research` 是 AI 流程
+  整块板子是同一个时刻的一致快照而不是五次独立读取。旧 Graph Board 已退役，
+  编排面板不创建文档块或模拟原编辑器。
+- 既有 MCP 面：`/mcp` 是知识库（笔记、搜索、块、标签），`/mcp/research` 是 AI 流程
   （`research_cell` / `research_run` / `research_state` / `artifact` /
-  `proposal.create`），`/mcp/coordinator` 是 Pi。注册表仍然只有一个，端点只差一个投影
+  `proposal.create`），`/mcp/coordinator` 保留研究协调能力。Pi 默认使用只有
+  `noema_api` / `noema_call` 的渐进披露入口；详见 [MCP](../noema/design/mcp.md)。既有注册表仍然只有一个，端点只差一个投影
   谓词（`tools.SurfaceForTool`）；没标 `Surface` 的工具算知识库，所以新增工具不会悄悄
   扩大 research 面。能力 id 相应拆成 `noema-knowledge` / `noema-research`，配置里写旧的
   `noema` 会被展开成两者（否则「禁用 noema」只会关掉一半）。
@@ -836,7 +833,7 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
   带 `run_id` + `work_node_id`）→ `artifacts.sha256` → 与磁盘当前哈希比较。
   `Store.SourceChanges` 实现，`research_cell {action: "changes"}` 暴露；**只报告，
   不改任何状态**。
-- 交付诚实：`research_state` 只记录一条 `worknode.state` 协调请求，由 Emacs 应用；
+- 交付诚实：`research_state` 只记录一条 `worknode.state` 协调请求，原编辑器应用路径已退役并明确报告未应用；
   `research_state {action: "status", requestId}` 让 agent 确认它到底落没落地
   （pending / claimed / done / failed），而不是假设。
 - profile 与模板在 `etc/noema/`，运行状态在 `var/noema/`
@@ -844,21 +841,13 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
 源码边界：Noema 代码在 `site-lisp/noema/lisp/`；agent-shell、acp.el、shell-maker
 由 package-vc 管理，固定 revision 在 `tools/agent/config.el` / `package-lock.el`。
 `+agent-render.el` 保留隐藏输出性能策略，不修改上游包文件。
-gptel、Magent、Claude/Codex 兼容源码仍在 `site-lisp/noema/upstream/`。
+可选 gptel/Magent 的源码归 Emacs 所有，来源见 `site-lisp/AGENT-UPSTREAMS.md`。
 任何一层都不能用自研简化实现替代成熟工具链。
 
-### Claude Code
+### Claude 与 Codex
 
-- 独立的 claude-code-ide 菜单不再全局绑定；需要 Claude 时从 Noema agent 入口选择。
-- CLI 路径在 `lisp/tools/agent/config.el` 的 `claude-code-ide-cli-path` 中配置。
-- 兼容源码保留在 `site-lisp/noema/upstream/claude-code-ide/`。
-
-### Codex CLI
-
-- `C-c c t` — 切换面板
-- `C-c c s` / `C-c c q` — 启动 / 停止
-- `C-c c p` / `C-c c r` / `C-c c f` — 发送 prompt / region / file
-- 本地源码由 `site-lisp/noema/upstream/codex-cli/` 提供
+从 `C-c A a` 的共享 Agent 入口选择；原生历史、模型选项和权限通过同一 ACP
+边界处理。CLI 登录与程序路径沿用实际安装的提供方配置，不维护另一套会话 UI。
 
 ### Copilot
 

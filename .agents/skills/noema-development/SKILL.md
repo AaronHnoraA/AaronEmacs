@@ -25,7 +25,7 @@ names.
 | --- | --- |
 | Every source form, its parser and its spec | `docs/noema/design/syntax.md` |
 | Planning commands (`@@todo`, `@@clock`, …) | `docs/noema/design/agenda-dsl.md` |
-| `.noema` work-block directives | `docs/noema/design/capabilities.md` “Work-cell syntax” |
+| Retained Run control directives | `docs/noema/design/capabilities.md` “Retained Run controls” |
 | Drawing a construct over source (widgets, reveal) | the `rendered-construct` Skill |
 | Math macros and TeX compatibility | `docs/design/latex-preview.md`; export in `docs/noema/design/latex-export-style.md` |
 
@@ -64,7 +64,7 @@ implementation, `kernel/noema/wikisearch`.
 
 | Surface | Read |
 | --- | --- |
-| Elisp semantic API (`noema-current-*`, `noema-create-work`, …) | `docs/noema/design/elisp-api.md` |
+| Project/capability Elisp API (`noema-current-project`, `noema-capability-list`, …) | `docs/noema/design/elisp-api.md` |
 | Host HTTP/SSE endpoints | `server/Features/<Feature>/api.mjs`; placement rule in `docs/noema/architecture.md` “改动落点” |
 | MCP servers | `docs/noema/design/mcp.md` |
 | Skills, packs, capability resolution | `docs/noema/design/capabilities.md` |

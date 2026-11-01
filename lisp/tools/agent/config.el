@@ -4,7 +4,7 @@
 ;;
 ;; Emacs owns shared agent infrastructure; Noema Research consumes it:
 ;;
-;;   gptel source      arbitrary-buffer compose/context/preset/rewrite UI
+;;   Emacs selection   file/region references and Markdown task documents
 ;;   agent-shell/acp   structured external-agent sessions and permissions
 ;;   Magent            queue, ledger, tools and optional gptel-backed agent
 ;;
@@ -12,12 +12,12 @@
 ;; in docs/design/agent-management.md. New generic policy lives in this module.
 ;;
 ;; agent-shell/acp/shell-maker are pristine package-vc dependencies, pinned as
-;; one audited group. gptel and Magent remain embedded. C-c A is the prefix.
+;; one audited group. Optional gptel and Magent sources remain available. C-c A is the prefix.
 ;;
 ;; Every agent session -- a `.noema' Run's, the popup pool's, one started here
 ;; and a bare `M-x agent-shell' -- is registered per project by
 ;; `+agent-acp-adopt', so one list manages them and any of them can be
-;; given editor context by name.  `+agent-context' hands the shared gptel
+;; given editor context by name.  `+agent-context' hands the shared editor
 ;; selection to a chosen session as references, never as copied text.
 
 ;;; Code:
@@ -397,31 +397,8 @@ the process exited is never replayed, since its tool effects may have run."
     (user-error "Open an agent-shell buffer first"))
   (unless (+agent-shell--dead-client-p agent-shell--state)
     (user-error "The ACP process has not exited"))
-  (let* ((old-name (buffer-name))
-         (session-id (map-nested-elt agent-shell--state '(:session :id)))
-         (draft (agent-shell--prompt-input))
-         (origin (and (boundp '+agent-acp-session-origin)
-                      +agent-acp-session-origin))
-         (name (and (boundp '+agent-acp-session-name)
-                    +agent-acp-session-name))
-         (agent (and (boundp '+agent-acp-session-agent)
-                     +agent-acp-session-agent))
-         (root (and (boundp '+agent-acp-session-root)
-                    +agent-acp-session-root)))
-    ;; The process is gone; any remaining active request was already lost.
-    ;; Clear it so upstream does not ask whether to stop an exited process.
-    (map-put! agent-shell--state :active-requests nil)
-    (agent-shell-restart :session-id session-id)
-    (when-let* ((new-buffer (get-buffer old-name))
-                ((buffer-live-p new-buffer)))
-      (when (and origin (fboundp '+agent-acp-adopt))
-        (+agent-acp-adopt new-buffer :origin origin :name name
-                              :agent agent :root root))
-      (when (and (stringp draft) (not (string-empty-p draft)))
-        (agent-shell-insert :text draft :submit nil :no-focus t
-                            :shell-buffer new-buffer))
-      (message "ACP session reconnecting; review the retained input and press RET to send")
-      new-buffer)))
+  (prog1 (+agent-acp-restart-native (current-buffer))
+    (message "ACP session reconnecting; review retained input and queued prompts before sending")))
 
 (defun +agent-shell--session-context (directory)
   "Return DIRECTORY's workspace and execution target as one logical identity.
@@ -669,66 +646,9 @@ when present; the exact Codex message is the isolated compatibility fallback."
             (agent-shell--clear-prompt-input)))
         (if live
             (progn (agent-shell--display-buffer live) live)
-          (let* ((popup (and (boundp '+portal-popup-instance-p)
-                             (buffer-local-value '+portal-popup-instance-p source)))
-                 (display (and (boundp '+agent-acp-display-buffer-function)
-                               (buffer-local-value
-                                '+agent-acp-display-buffer-function source)))
-                 (old-name (buffer-name source))
-                 (binding (and (fboundp 'noema-sessions-native-binding)
+          (let* ((binding (and (fboundp 'noema-sessions-native-binding)
                                (noema-sessions-native-binding id root)))
-                 (target
-                  (cond
-                   (popup
-                      ;; Keep popup presentation attached to the new ACP
-                      ;; execution.  Upstream restart loses its popup-local
-                      ;; display function when it kills SOURCE.
-                      (let ((buffer
-                             (+agent-acp-start
-                              :config config :directory directory :session-id id
-                              :focus nil :origin 'popup
-                              :display-function #'+portal-popup-display-buffer)))
-                        (+agent-acp-adopt
-                         buffer :agent (map-elt config :identifier)
-                         :origin 'popup
-                         :name (and binding (plist-get binding :name))
-                         :root root)
-                        (with-current-buffer buffer
-                          (setq-local +portal-popup-kind
-                                      (intern (format "ai-%s" (map-elt config :identifier)))
-                                      +portal-popup-title
-                                      (capitalize (format "%s" (map-elt config :identifier)))
-                                      +portal-popup-workspace-id
-                                      (buffer-local-value '+portal-popup-workspace-id source)
-                                      +agent-acp-display-buffer-function
-                                      #'+portal-popup-display-buffer)
-                          (+agent-acp-tabs-mode -1)
-                          (+portal-popup-agent-keys-mode 1))
-                        (+portal-popup-display-buffer buffer)
-                        (kill-buffer source)
-                        buffer))
-                   (display
-                    ;; An agent opened with M-x agent-shell owns its invoking
-                    ;; window.  Keep that display function across a resume.
-                    (let ((buffer
-                           (+agent-acp-start
-                            :config config :directory directory :session-id id
-                            :focus nil :origin 'manual
-                            :display-function display)))
-                      (+agent-acp-adopt
-                       buffer :agent (map-elt config :identifier)
-                       :origin 'manual
-                       :name (and binding (plist-get binding :name))
-                       :root root)
-                      (funcall display buffer)
-                      (kill-buffer source)
-                      buffer))
-                   (t
-                    ;; A normal Agent window uses upstream replacement.
-                    (with-current-buffer source
-                      (agent-shell-restart :session-id id))
-                    (or (get-buffer old-name)
-                        (user-error "Agent shell did not restart"))))))
+                 (target (+agent-acp-restart-native source id)))
             (when (and binding (fboundp '+agent-acp-mark-session-buffer))
               (+agent-acp-mark-session-buffer
                target (plist-get binding :name)
@@ -784,16 +704,12 @@ when present; the exact Codex message is the isolated compatibility fallback."
                  (window (selected-window))
                  (config (or (+agent-acp-config-for agent)
                              (user-error "No agent-shell configuration for %s" agent)))
-                 (display (lambda (buffer)
-                            (when (window-live-p window)
-                              (select-window window))
-                            (switch-to-buffer buffer)))
                  (buffer (+agent-acp-start
                           :config config :directory directory :focus nil
-                          :origin 'manual :display-function display)))
+                          :origin 'manual)))
       (+agent-acp-adopt buffer :agent agent :origin 'manual
                              :root noema-root)
-      (funcall display buffer)
+      (+agent-view-embed buffer window)
       buffer)))
 
 (defun +agent-shell--managed-entry-a (original &optional arg)
@@ -837,6 +753,7 @@ Double prefix ARG keeps the upstream existing-session picker."
 (with-eval-after-load 'agent-shell
   ;; Apply to every entry point, including plain M-x agent-shell.
   (setq agent-shell-transcript-file-path-function nil
+        agent-shell-header-style 'text
         agent-shell-persistent-prompt-enabled t
         agent-shell-busy-submit-default-function
         #'+agent-shell-busy-submit-steer-or-queue
@@ -952,6 +869,7 @@ target-native path.  A CLI that cannot be found is an error."
 (autoload '+agent/compose-add-context "tools/agent/compose" nil t)
 (autoload '+agent/compose-rewrite "tools/agent/compose" nil t)
 (autoload '+agent/start "tools/agent/acp" nil t)
+(declare-function portal-terminal-refresh-bindings "portal-terminal-bindings" ())
 (declare-function +agent-acp-config-for "tools/agent/acp" (agent))
 (declare-function noema-agent-export-config "noema-agent-acp" (config model-id))
 (declare-function +agent-acp-start "tools/agent/acp" (&rest args))
@@ -1076,9 +994,15 @@ is `+config-ask-model', registered with native Config Customize."
 (autoload 'noema-agent-takeover-session "noema-agent-takeover" nil t)
 (autoload 'noema-agent-handback-session "noema-agent-takeover" nil t)
 (autoload 'noema-research-attention "noema-research-inspector" nil t)
-(autoload 'noema-research-propose-with-magent "noema-research-synthesis" nil t)
 (autoload 'noema-project-enable "noema-research" nil t)
 (autoload 'noema-pi-router-open "noema-pi-router" nil t)
+(autoload 'noema-pi-emacs-open "noema-pi-router" nil t)
+(autoload 'noema-pi-assistant-mode "noema-pi-router" nil t)
+(autoload 'noema-pi-startup "noema-pi-router")
+(autoload 'noema-pi-sessions "noema-pi-sessions" nil t)
+(add-hook 'emacs-startup-hook #'noema-pi-startup)
+(when (and after-init-time (not noninteractive))
+  (run-at-time 0 nil #'noema-pi-startup))
 (autoload 'noema-pi-doctor "noema-pi-router" nil t)
 (autoload 'noema-orchestration "noema-orchestration" nil t)
 (autoload 'noema-sessions "noema-sessions" nil t)
@@ -1093,9 +1017,14 @@ is `+config-ask-model', registered with native Config Customize."
 (autoload '+agent-worktree-parallel "tools/agent/worktree-board" nil t)
 (autoload '+agent-worktree-board "tools/agent/worktree-board" nil t)
 (autoload '+agent-top "tools/agent/top" nil t)
+(autoload '+agent/manager "tools/agent/manager" nil t)
+(autoload 'agent-manager "tools/agent/manager" nil t)
 (autoload '+agent/sessions "tools/agent/sessions" nil t)
 (autoload '+agent/inbox "tools/agent/sessions" nil t)
 (autoload '+agent/peek "tools/agent/sessions" nil t)
+(autoload '+agent/pool "tools/agent/sessions" nil t)
+(autoload '+agent/pool-switch "tools/agent/sessions" nil t)
+(autoload '+agent/usage "tools/agent/manager" nil t)
 (autoload '+agent-context-send "tools/agent/context" nil t)
 (autoload '+agent-context-draft "tools/agent/context" nil t)
 (autoload '+agent-context-send-region "tools/agent/context" nil t)
@@ -1155,6 +1084,7 @@ is `+config-ask-model', registered with native Config Customize."
 (defvar-keymap +agent-prefix-map
   :doc "Prefix map for Noema research and agent commands."
   "a" #'+agent/start
+  "RET" #'+agent/manager
   "w" #'+agent-worktree-start
   "n" #'+agent-worktree-parallel
   "A" #'+agent-worktree-board
@@ -1171,7 +1101,7 @@ is `+config-ask-model', registered with native Config Customize."
   "S" #'+agent/sessions
   "T" #'+agent-acp-conversation-tree
   "G" #'+agent/inbox
-  "U" #'+agent-top
+  "U" #'+agent/usage
   "O" #'noema-orchestration
   "b" #'+agent/peek
   "i" #'+agent-acp-focus-input
@@ -1186,8 +1116,20 @@ is `+config-ask-model', registered with native Config Customize."
   ;; Noema Markdown pane: open its note in Emacs at the selection.
   "e" #'noema-md-bridge-edit-source)
 
-(map! "C-c M-a" #'+agent/compose-add-context
-      "C-c A" +agent-prefix-map)
+(map! :desc "Project agent pool" "C-c a" #'+agent/pool
+      "C-c M-a" #'+agent/compose-add-context
+      "C-c A" +agent-prefix-map
+      :desc "Agent Manager" "H-A" #'+agent/manager)
+
+;; Claim the same existing entry points while a native terminal has input.
+(after! portal-terminal-bindings
+  (map! :map portal-terminal-native-map
+        "C-c a" #'+agent/pool
+        "C-c A" +agent-prefix-map)
+  (portal-terminal-refresh-bindings))
+
+(define-leader-key!
+  "a a" '(:def +agent/manager :which-key "agent manager"))
 
 ;;; ── Noema settings in the config registry (D-035) ─────────────────────────
 ;;
@@ -1204,7 +1146,7 @@ is `+config-ask-model', registered with native Config Customize."
 (declare-function persp-current-buffers "perspective" ())
 
 (defconst +noema-config-groups
-  '(noema-research noema-research-graph noema-agent-worker noema-pi-router
+  '(noema-agent-worker noema-pi-router
     noema-md-bridge noema-orchestration)
   "Custom groups whose options Noema exposes through `config'.")
 
@@ -1238,8 +1180,7 @@ is `+config-ask-model', registered with native Config Customize."
                                          "\n"))
                  (+agent-config--type-arguments symbol)))))))
 
-(dolist (feature '(noema-research-mode noema-research-graph noema-research-settings
-                   noema-agent-worker noema-pi-router
+(dolist (feature '(noema-agent-worker noema-pi-router
                    noema-md-bridge noema-orchestration))
   (eval-after-load feature #'+noema-config-register-groups))
 
@@ -1254,27 +1195,6 @@ is `+config-ask-model', registered with native Config Customize."
                  (+agent-config--type-arguments symbol)))))))
 (dolist (feature '(tools/agent/acp tools/agent/context tools/agent/render tools/agent/top tools/agent/worktree))
   (eval-after-load feature #'+agent-register-config-options))
-
-(defun +noema-close-projects-of-killed-perspective ()
-  "Close Noema projects whose documents live only in the dying perspective.
-`persp-killed-hook' runs inside that perspective, before its buffers go.  The
-project's Pi and idle agents stop; a running Run finishes first."
-  (when (and (featurep 'noema-pi-router) (fboundp 'persp-current-buffers))
-    (let* ((inside (seq-filter #'buffer-live-p (persp-current-buffers)))
-           (root-of (lambda (buffer)
-                      (with-current-buffer buffer
-                        (and buffer-file-name
-                             (derived-mode-p 'noema-research-mode)
-                             (noema-pi-project-root (file-name-directory buffer-file-name))))))
-           (roots (delete-dups (delq nil (mapcar root-of inside)))))
-      (dolist (root roots)
-        (unless (seq-some (lambda (buffer)
-                            (and (not (memq buffer inside))
-                                 (equal (funcall root-of buffer) root)))
-                          (buffer-list))
-          (noema-pi-close-project root))))))
-
-(add-hook 'persp-killed-hook #'+noema-close-projects-of-killed-perspective)
 
 ;;; ── Claude Code ────────────────────────────────────────────────────────────
 

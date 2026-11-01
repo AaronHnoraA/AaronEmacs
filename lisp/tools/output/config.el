@@ -22,6 +22,12 @@
 
 (defvar compilation-mode-map)
 (defvar compilation-scroll-output)
+(defvar +display-rules-bottom-size)
+
+;; One policy for frame-owned run/test/task buffers and ordinary compilation.
+;; Buffer names are labels, not display predicates.
+(set-popup-rule! 'compilation-mode
+  :select t :align 'below :size +display-rules-bottom-size)
 
 (defgroup +output nil
   "Unified output helpers for compilation-like buffers."
