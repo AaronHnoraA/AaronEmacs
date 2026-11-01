@@ -98,6 +98,8 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 
 - App 自带 Bridge：`~/.config/mn-bridge/<设备>/`、`mn-bridge` skill；README 技能库的
   `marginnote-agent` 记录双端通道选择、能力矩阵和 `scripts/mn.py`。
+- `marginnote-agent` 的 `scripts/mn_flow.py`：送 PDF、找手写、读手写、回批注与留白写字
+  的官方流程；页内文字只经留白写入。
 - `plugins/marginnote/`：原生插件、API 声明索引、agent CLI 与 stdio MCP。
 - `server/Features/MarginNote/`：任务中转、会话和 HTTP 控制器。
 - `scripts/build-marginnote-addon.mjs`：将本机连接配置打入 `.mnaddon`。
