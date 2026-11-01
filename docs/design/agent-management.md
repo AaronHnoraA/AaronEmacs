@@ -61,7 +61,7 @@ Research 的逻辑 Session 和 Run ID 不可互换。关闭视图只改变显示
 All、Inbox、Usage 页签。GUI 使用 Aaron ETAF，按 target/workspace 分组；
 Interactive、Portal、Worktrees、Noema Research 及 Previous generations
 是会话行上的来源标签。左侧是可折叠的会话
-导航，右侧直接显示原生聊天 buffer，保留其工具、审批、表单与输入。单击、Tab
+导航；Sessions 与 Inbox 右侧直接显示原生聊天 buffer，保留其工具、审批、表单与输入。单击、Tab
 或 j/k 导航时只预览，不清未读；Return 确认进入正常会话窗口，q 返回来源。
 浮窗不占用来源窗格；TTY 使用 `+agent/sessions-table` 后备。
 
@@ -76,8 +76,18 @@ Transient：停止、重连、改名、结束、按能力提供 fork、模型与
 选择、搜索、滚动和折叠属于视图状态，刷新保留稳定实体。隐藏退订事件并释放
 计时器及临时预览窗口；关闭还释放 UI Runtime。两者都保留 agent 进程、输入与队列。
 Usage 仅读取已上报数据；未知值不显示为零。`+agent-top` 的 GUI 入口也指向该页签；
+该页签保留左侧会话选择，右侧使用完整浮窗展示上下文进度、输入／输出 tokens、
+缓存读写、费用、回合及会话详情，不再占用空间预览聊天；`RET` 仍可进入真实会话。
+指标随选择和既有状态事件刷新，缺少容量时不绘制百分比，未报告值显示“—”。
+原生 usage 接口把未报告的 token 计数归一为零，页面对这些零值保守显示“—”；
+明确给出的费用零值与已知回合零值保留为零，不修改提供商数据。
 需要完整配额、远程控制诊断时，在操作菜单选 Detailed usage 或调用
 `+agent-top-report`。这类显式诊断保留原有取数与控制能力。
+
+队列采用带序号、正文和 held 状态的紧凑卡片，顶部汇总待发与挂起数量；列表可滚动，
+完整文本保留在悬停提示中。原生 Sessions、Worktree attempts、Context 表格保留
+原有行身份和动作，以统一标题、数量、可见列标题及空状态呈现。后台任务页使用
+ETAF UI 的标准按钮、状态标签与分区；Detailed usage 保留原生诊断面板和控制能力。
 
 普通会话默认显示在当前 frame 的右侧 Agent dock。A 切到 B 复用当前聊天窗格，
 不改其他手工分屏；没有当前聊天时先复用本 frame 的已有视图，再分配空闲侧窗。
@@ -93,6 +103,16 @@ popup / dock / embedded 类型返回，Portal 保留用户调整后的高度。
 同一项目新建两个会话，就有两个真实 buffer 和两个 client；标签、管理器预览与
 多窗口展示只引用这些会话，不合并对话，也不为显示另起执行。终端的原生视图保持
 单实例；Agent 的普通 Emacs buffer 可由用户在多个窗口展示，各窗口独立返回。
+
+聊天沿用原生 Markdown 和活动分组折叠。借鉴
+[dsh-emacs 的视觉层次与输入反馈](https://github.com/vritser/dsh-emacs/blob/main/docs/ui-styling.md)，
+用户标签和原生提示符使用 Aaron 的青色强调，角色标签没有背景徽章，用户正文
+保持正文字体，思考和摘要降低对比度；
+工具的完成、运行和失败分别使用语义色，Wave、Dragon、Lotus 切换后同步更新。
+输入上方显示当前 `RET`／`M-RET` 的真实提交路径，有队列时显示数量、挂起数和
+一小段待发内容；`/queue` 仍是唯一管理入口。连接中和 client 退出分别显示明确提示。
+提示只属于显示，不进入复制文本、草稿、协议或撤销历史。`C-a` 在输入首行停在
+提示符之后，续行和历史正文保留普通行首移动。`+agent-input-mode` 可在当前聊天关闭提示。
 
 ### 生命周期
 
@@ -196,7 +216,7 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
 - **C17 日常管理共享一个界面。** `C-c A S/G/U` 分别打开同一管理器的会话、
   待处理与用量视图；项目可折叠，选择、筛选和折叠在刷新后保留。表格仅作 TTY
   后备与显式诊断入口。新建默认使用选中会话的 workspace。
-- **C18 预览保留原生交互。** 管理器左侧选择，右侧显示同一真实 agent buffer。
+- **C18 预览保留原生交互。** 管理器的 Sessions 与 Inbox 左侧选择，右侧显示同一真实 agent buffer。
   单击和 j/k 只预览；RET 确认进入，q 返回来源。预览不清未读，不接管显示归属，
   隐藏、关闭及会话失效均释放预览窗口，不让隐藏 frame 阻碍自动回收。
 - **C19 操作菜单可发现。** 管理器的 `.` 与聊天正文的 `?` 使用同一分组 Transient；
@@ -299,6 +319,40 @@ Agent 的真实聊天 buffer 是用户 buffer，名称不使用 Emacs 内部 buf
 它们进入全局 Ibuffer 的 Agent 分组和日常 Consult buffer 选择器；不进入全局 tab
 只由 `tab-line-exclude` 控制。加载会话层时会迁移已有的旧管理名称，并同步
 shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
+- **C50 ACP 事实可查询。** `emacs:agent` 的 `status` 附带提供商报告的
+  `capabilities`（`list`、`load`、`resume`、`fork`、`steer`）和 `usage`（含 cached read/write，
+  未上报时为 null，不当作零）；`list` 保持轻量。`create` 带 `worktree` 时走
+  `+agent-worktree--start`，在 Project 工作目录的独立 worktree 启动，可带 `group`，
+  并返回分支和路径。清理和 fork 仍是用户动作，API 不提供。
+  所有创建先按 workspace 校验显式 target，再创建会话或 worktree。返回值沿用
+  Emacs gateway 的 JSON 标记（nil 为 null、`:json-false` 为 false），经传输仍保持类型。
+- **C51 普通会话的项目入口。** 普通 ACP 会话位于本机可达的 Noema 项目时，首个请求附带
+  一个隐藏的 ACP 文本块，只含项目根、`noema-project-maintenance` 的路径和 API 命令。
+  它是引用：不读取项目，不启动 host，不改变聊天中显示的提问。每个原生 Session
+  只发一次。Run、probe、side、Pi、MarginNote 和 LaTeX 导出由各自的 owner 提供上下文，
+  不收此块。实现在 `noema-agent-entry`，只在同步构建请求时绑定，晚于异步记忆召回。
+  `/` 命令不收入口；命令中的路径与参数分别经过 shell 与 JSON 编码。
+  只有对应原生 Session 的请求构建成功才记为已发送，构建失败不消耗入口。
+- **C52 项目共享资源有一个入口。** `agent:project:status` 用一次只读调用回答项目根、
+  工作目录、`.agent/` 的占用和压力，以及 Hy Memory 状态。不在项目内时 `project` 为
+  null，项目还没有存储时 `cache` 为 null；两者都不创建任何东西。
+  `agent:project:maintain` 立即执行既有的保守维护，`agent:memory:search` 用自选问题
+  在项目范围内召回，`state` 不是 `ok` 时表示未知而非空。这些接口不持有状态：
+  `.agent/` 归 Go kernel（`research:cache:*`），记忆归 Hy Memory。各类 Agent 的用法写在
+  `noema-project-maintenance`，属于 `noema-project` pack。
+- **C53 输入提示只负责显示。** 原生提示符前只有一个随插入移动的 overlay，按
+  会话状态、初始化完成和 prompt-ready 事件更新；不逐帧扫描正文、不增加计时器。
+  队列预览读取有界的文本片段，挂起项明确标记；忙碌提交按现有函数和 Run owner
+  显示 steering／queue，不更改发送行为。停止模式、切 major mode 和结束 buffer
+  释放 overlay、订阅与 buffer-local 输入字体覆盖。行首编辑不越过草稿起点，
+  原生停止、模型和菜单按键保留。
+  测试：`agent-appearance-c53-*` 与 `agent-flow-e2e-*`。
+- **C54 管理页面共用呈现规则。** `tools/agent/ui` 维护公共指标、上下文进度和
+  原生表格样式；页面只消费原有快照，不因展示增加取数、进程或计时器。Usage
+  选择更新指标并撤下聊天预览，切回 Sessions／Inbox 恢复真实 buffer 预览；
+  隐藏与返回保持 C12、C18。队列滚动不丢失条目或改变顺序，原生表格的列标题
+  不作为工作实体，操作仍按行身份定位。主题切换使用 Aaron 语义色，字体覆盖在
+  major mode 结束时释放。测试：`agent-pages-c54-*` 与管理器／队列 GUI 测试。
 - **C55 恢复列表覆盖所属项目。** 保存的对话归 provider，Emacs 不读取其存储，也不
   维护索引：`+agent-acp-list-saved` 用官方 `session/list` 列出当前目录，当前仓库
   嵌套在另一个仓库里时再列出外层项目。外层项目的对话带上所在目录，恢复时切到该目录，
@@ -315,6 +369,8 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
 | 物理会话、能力快照、项目池、队列与暖会话回收 | `lisp/tools/agent/acp.el` |
 | 管家调用公共会话的语义接口 | `lisp/tools/agent/api.el` |
 | 常规视图放置、来源返回、frame 边界与物理替换 | `lisp/tools/agent/views.el` |
+| 原生聊天配色、输入提示和可编辑行首 | `lisp/tools/agent/appearance.el` |
+| 管理页面的指标、上下文进度和原生表格样式 | `lisp/tools/agent/ui.el` |
 | 会话列表、Inbox、可取消预览与通用操作 | `lisp/tools/agent/sessions.el` |
 | ETAF Agent Manager、分组筛选和 UI 生命周期 | `lisp/tools/agent/manager.el` |
 | 按能力提供的原生会话与领域动作菜单 | `lisp/tools/agent/menu.el` |
@@ -350,6 +406,9 @@ G4–G9 与 G11 的项目池、显示归属、返回、预览及物理替换问�
 - **G13 真实 SSH 实测。** C37–C44 已在客户端无法直接访问的 Remote target 上经 `/fs:`
   路由验证（`agent-remote-routed-*`），但没有真实网络与断线。
   `test/agent-lifecycle-remote-live.el` 覆盖真实目标，需要允许写入目标的 `/tmp`，尚未运行。
+- **G14 Remote 上的项目入口。** Noema host 与 Hy Memory 在客户端，运行在其他 target 的
+  Agent 既够不到 API 命令，也没有记忆。C51、C52 在这里不生效：会话不收入口，不是报错。
+  要支持需要经 `remote-channel` 转发 host，尚未实现。
 - **G3 状态迁移。** 模型和配额偏好从旧 Noema 路径复制到 `var/agent/`，保留原文件；
   现有 worktree 使用的 `noemaBase/noemaGroup/noemaAgent` Git 元数据保持可读写，
   避免改名使已存在的分支失去归属。它们不要求 Noema 运行。

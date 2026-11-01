@@ -303,6 +303,14 @@ Portal 终端与 agent-shell 使用同一行 popup 标签，放在 Emacs 的 tab
 - **C36** `H-w` 计算普通顶层 frame 的数量，不把管理器 child frame 当作第二个
   编辑 frame；唯一顶层 frame 上仍只关视图。测试：`c36-*`。
 
+- **C37 Agent 打开文件保留聊天。** Agent API 的文件打开默认 `other`，经
+  `aaron-open-place` 与 CLI `emacsopen -o` 复用同一放置规则；显式 `here`、方向或
+  frame 按请求执行。`other` 的新放置避开原窗口、side 与 dedicated 窗口，
+  无其他主编辑窗格时分屏；从侧窗格发起也不覆盖原聊天。`noFocus` 保留原焦点。
+  Noema 宿主通过同步 gateway 返回实际
+  文件、buffer、window、frame 与定位结果；页面自身原有打开与克隆操作继续沿用其 owner。
+
+
 窗口测试文件：`test/init-window-lifecycle-tests.el`、`test/init-windows-tests.el`，
 由 `make ui-test` 的窗口组与 Agent、popup、输出和物理会话测试在同一进程运行，
 避免分组通过掩盖跨模块回退问题。popup 顶栏测试在 `test/popup-agent-tests.el`；Noema 页面

@@ -46,6 +46,14 @@
             (set-buffer chat)
             (should (+agent-acp-agent-buffer-p chat))
             (agent-flow-e2e--wait (lambda () (+agent-acp-state-value chat '(:init-finished))))
+            ;; C53: real C-a/C-k keys stop at the editable prompt boundary.
+            (goto-char (point-max))
+            (execute-kbd-macro "draft")
+            (agent-entry-gui-e2e--key "C-a")
+            (should (= (point) (agent-shell--prompt-input-start)))
+            (agent-entry-gui-e2e--key "C-k")
+            (should-not (agent-shell--prompt-input))
+            (should (overlay-buffer +agent-input--overlay))
             ;; C-c a returns from the chat and leaves it running.
             (agent-entry-gui-e2e--key "C-c a")
             (should (eq (window-buffer (selected-window)) source))

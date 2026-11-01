@@ -10,6 +10,9 @@
 (require 'cl-lib)
 (require 'seq)
 (require 'tabulated-list)
+(declare-function +agent-ui-state-face "tools/agent/ui" (state))
+(declare-function +agent-ui-table-init "tools/agent/ui" ())
+(declare-function +agent-ui-table-summary "tools/agent/ui" (title summary &optional empty))
 (require 'tools/agent/acp)
 
 (defun +agent/pool (&optional choose)
@@ -275,7 +278,8 @@ question lands on its native control; nothing is decided for you."
                     (usage (plist-get session :usage))
                     (root (plist-get session :root)))
                (list buffer
-                     (vector (+agent-sessions--state session)
+                     (vector (propertize (+agent-sessions--state session)
+                                         'face (+agent-ui-state-face (+agent-sessions--state session)))
                              (or (and (plist-get session :unread-kind)
                                       (symbol-name (plist-get session :unread-kind))) "-")
                              (or (plist-get session :name) (buffer-name buffer))
@@ -290,6 +294,10 @@ question lands on its native control; nothing is decided for you."
                            sessions)
              sessions)))
     (tabulated-list-print t)
+    (+agent-ui-table-summary "Agent sessions"
+                             (format "%d sessions · RET open · g refresh · r rename · s stop"
+                                     (length tabulated-list-entries))
+                             "No sessions match this view.")
     (when selected
       (goto-char (point-min))
       (while (and (not (eobp)) (not (eq (tabulated-list-get-id) selected))) (forward-line 1)))))
@@ -327,8 +335,10 @@ question lands on its native control; nothing is decided for you."
 
 (define-derived-mode +agent-sessions-mode tabulated-list-mode "Agents"
   "All live agent sessions; actions operate on the original buffers."
+  (require 'tools/agent/ui)
   (setq tabulated-list-format [("State" 10 t) ("Unread" 10 t) ("Session" 26 t) ("Agent" 12 t) ("Model" 24 t) ("Workspace" 0 t)]
         tabulated-list-padding 1)
+  (+agent-ui-table-init)
   (tabulated-list-init-header)
   (add-hook 'kill-buffer-hook #'+agent-sessions--stop-timer nil t))
 

@@ -493,6 +493,18 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 
 - [var/backup-snapshots](../var/backup-snapshots)
 
+### Agent 运行时与项目缓存
+
+托管 Pi 的运行时由 `make pi-setup` 按 `config/pi/runtime/` 的 lock 安装到
+`var/agent/pi/runtime/`，`make setup` 和 `make setup-full` 都会执行；私有配置在忽略的
+`etc/noema/pi/`，原生会话在 `var/noema/pi/`。Hy Memory 用 `make memory-setup` 单独安装。
+
+每个 Noema 项目的运行状态在 `.agent/`，由 Go kernel 持有，Git 不跟踪。用
+`agent:project:status` 查看占用，`M-x noema-agent-worker-maintain-cache` 或
+`agent:project:maintain` 立即维护；Run 结束后也会自动维护，至多一小时一次。维护只移除
+可再生的数据，仍报告 `pressure` 时剩下的都是登记过的持久数据，不要手动删除
+`.agent/` 下的文件。
+
 ## 4. 常见清理
 
 ### 清编译产物

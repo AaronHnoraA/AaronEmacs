@@ -8,6 +8,7 @@
 ;;; Code:
 
 (require 'etaf)
+(require 'aaron-ui-etaf)
 (require 'aaron-ui)
 (require 'aaron-ui-board)
 
@@ -26,43 +27,25 @@
     (&key label command owner primary handoff)
   "Render one Activity COMMAND named LABEL for OWNER."
   :view
-  (box :role 'button :tab-index 0
-       :padding '((lh 0) (ch 2))
-       :border (aaron-ui-activity--color 'border-subtle "#4B5268")
-       :bgcolor (aaron-ui-activity--color
-                 (if primary 'accent-blue 'bg-elevated)
-                 (if primary "#A9CBFF" "#2A3247"))
-       :color (if primary "#1B2435"
-                (aaron-ui-activity--color 'fg-main "#E4ECFF"))
+  (etaf-button :label label :variant (if primary 'secondary 'ghost)
        :on-press (lambda ()
                    (with-current-buffer owner
                      (when handoff
                        (+activity-board--return-to-parent))
-                     (call-interactively command)))
-    (text (expr label))))
+                     (call-interactively command)))))
 
 (etaf-define-component aaron-ui-activity-stat (&key label tone)
   "Render one compact Activity status badge."
   :view
-  (box :padding '((lh 0) (ch 1))
-       :border (aaron-ui-activity--color 'border-subtle "#4B5268")
-       :bgcolor (aaron-ui-activity--color 'bg-surface "#1E2536")
-       :color (aaron-ui-activity--color
-               (pcase tone
-                 ('success 'accent-green)
-                 ('warning 'accent-yellow)
-                 ('danger 'accent-red-strong)
-                 ('muted 'fg-muted)
-                 (_ 'accent-blue))
-               "#A9CBFF")
-    (text (expr label))))
+  (etaf-badge :text label :variant (pcase tone
+                                    ((or 'success 'warning 'danger) tone)
+                                    ('muted 'neutral) (_ 'info))))
 
 (etaf-define-component aaron-ui-activity-row (&key row owner)
   "Render one focused Activity ROW in OWNER."
   :view
-  (box :ref (plist-get row :ref)
-       :role 'button :tab-index 0
-       :padding '((lh 0) (ch 2))
+  (etaf-button :ref (plist-get row :ref) :label (plist-get row :title) :variant 'ghost
+       :padding '((lh 0.5) (ch 2))
        :bgcolor (aaron-ui-activity--color 'bg-surface "#1E2536")
        :color (aaron-ui-activity--color 'fg-main "#E4ECFF")
        :on-press
@@ -98,18 +81,10 @@
 (etaf-define-component aaron-ui-activity-section (&key section owner)
   "Render a titled Activity SECTION for OWNER."
   :view
-  (column :width 'stretch
-    (box :padding '((lh 1) (ch 1))
-         :border (aaron-ui-activity--color 'border-subtle "#4B5268")
-         :color (aaron-ui-activity--color 'accent-cyan "#9DE7FF")
-         :font-weight 'bold
-      (text (expr (format "%s  %d"
-                          (plist-get section :title)
-                          (length (plist-get section :rows))))))
-    (box :if (null (plist-get section :rows))
-         :padding '((lh 0) (ch 2))
-         :color (aaron-ui-activity--color 'fg-muted "#8B90A8")
-      (text "Nothing here"))
+  (etaf-panel :title (format "%s  ·  %d" (plist-get section :title)
+                            (length (plist-get section :rows))) :variant 'flat
+    (etaf-label :if (null (plist-get section :rows))
+                :text "Nothing here" :variant 'muted)
     (aaron-ui-activity-row
      :for (row (plist-get section :rows))
      :key (plist-get row :ref)

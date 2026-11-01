@@ -4,6 +4,18 @@ Noema resolves project capabilities before it freezes a RunSpec. The resolver
 is the single authority used by the host API, the Emacs manager, and agent
 startup. UI code does not scan Skill directories or merge configuration.
 
+Emacs-owned Pi consumes the existing Skill/Packs manager, using the operational
+packs `noema-emacs`, `noema-project`, `noema-md` and `emacs-noema-dev`. Edit their
+members in that manager; Pi has no independent Skill list or selection store.
+Project definitions, dependencies, disables and patches remain authoritative. The
+`agent:skill:list` API returns pack members and preambles plus Skill descriptors
+and sources, limited to those packs, their dependencies, project selections and
+explicit requests; `agent:skill:read` returns one effective body, by id, for any
+enabled Skill. Both accept a project root or
+global scope without creating a Research Project. Pi discloses descriptors
+before a requested model turn, never executes Skill instructions on startup,
+and reads bodies on demand through the existing Noema API tools.
+
 ## Sources and precedence
 
 The ordered scopes are:
@@ -189,7 +201,8 @@ or connected.
 
 Skills stay a flat library.  A *pack* is a named link list over it: an id,
 optional `title`/`description`, an ordered `members` array of Skill ids, and an
-optional `preamble` the pack contributes to a Run.  A pack never contains a
+optional `preamble` the pack contributes to a Run or Agent catalog. An optional
+boolean `agent_catalog` marks a default Agent catalog pack. A pack never contains a
 copy of a Skill; every member keeps its own definition, patches, selection and
 dependencies.  Packs live under `packs` in any capabilities document:
 
@@ -225,6 +238,17 @@ Patch over the definition plus three list operations — `members_remove`,
 therefore adjusts a global pack without copying it.  Pack patches never change
 member content: a Skill has one effective content no matter which pack
 selected it, and refining a member is an ordinary Skill patch.
+
+`agent:skill:list` requests packs whose effective `agent_catalog` is true,
+after definitions and patches have been merged. A project may set it to false
+or remove it with null; explicit disables still win. Explicit `requestedPacks`
+replace these defaults. The flag does not enable a pack for research Runs:
+that remains `packs.enabled` or an explicit Run request. The catalog includes
+these packs' preambles, selected project Skills (including project `extends`),
+explicit requests and their dependency closure, with relevant diagnostics.
+Globally enabled domain Skills and packs alone do not join it. Skill bodies
+are read individually through `agent:skill:read`, with the same patches and
+disable rules, even if the Skill is outside the automatic catalog.
 
 An enabled or `@@pack`-requested pack enables each member (recorded in the
 member's `selectedBy` as `scope: "pack"`) before the dependency closure is
@@ -432,10 +456,14 @@ Noema 不为旧 `.noema` 提供专用 Company、Flymake、JuText 或 OutputArea�
 
 | pack | 职责 | 成员 |
 | --- | --- | --- |
-| `noema-project` | 项目 Agent 方法、上下文、记忆、交接和并行工作 | `project-agent-management`、`noema-parallel-runs` |
-| `noema-emacs` | Emacs 中的 Noema 操作与 API | `noema-emacs-workflow`、`noema-elisp-api` |
+| `noema-project` | 项目 Agent 方法、上下文、记忆、交接、并行工作和共享资源维护 | `project-agent-management`、`noema-parallel-runs`、`noema-context-memory`、`noema-project-docs`、`noema-project-maintenance` |
+| `noema-emacs` | Emacs 中的 Noema 操作与 API | `noema-emacs-workflow`、`noema-elisp-api`、`noema-editor-interaction`、`noema-prompt-document`、`noema-agent-operations` |
 | `noema-md` | Markdown 源语法与原位审阅 | `noema-authoring-syntax`、`noema-ediff-review` |
-| `emacs-noema-dev` | 修改 Emacs 与 Noema 实现 | `emacs-config`、`noema-development`、`rendered-construct` |
+| `emacs-noema-dev` | 修改 Emacs 与 Noema 实现 | `emacs-config`、`noema-development`、`rendered-construct`、`noema-workflow-audit` |
+
+这四个 pack 默认标记 `agent_catalog: true`，Pi 通过同一解析器按需消费。
+Skill Manager 的 Packs 页显示 `· agent`；菜单 `a` 切换所选全局 pack 的目录标记，
+`m` 编辑成员与 preamble。两种编辑保留定义的其余字段；项目差异使用 pack patch。
 
 前三类按操作目的选择，不自动互相加载。领域写作、验证和可视化保留原有 pack；
 pack 仍只列平面的 Skill id。项目指导可直接使用，无需工作文档或服务；机制
@@ -474,3 +502,8 @@ directory, so only what a test installs is visible. A test that needs a
 populated global scope stubs those variables itself, and a test that injects a
 fake `userHome` must also pass `environment: {}` to the resolver, because the
 environment is checked before `userHome`.
+
+Repository Skill contract tests check code-owned files and API references using
+checkout paths. Tests never require the user's vault library. Deployment checks
+resolve the real pack library separately through `agent:skill:list` and inspect
+its diagnostics, rather than reading machine state inside an isolated suite.

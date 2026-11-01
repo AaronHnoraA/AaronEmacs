@@ -123,7 +123,7 @@ query disk/network while the shared registry renders.")
   "Return (LABEL . ID) for provider-listed SESSIONS, newest first, except EXCLUDE."
   (mapcar (lambda (session)
             (let ((id (map-elt session 'sessionId)))
-              (cons (format "%s  %s · %s"
+              (cons (format "%s  %s · %s%s"
                             (agent-shell--session-title session)
                             (agent-shell--format-session-date
                              (or (map-elt session 'updatedAt)
@@ -420,24 +420,26 @@ Claude's Sonnet alias may be advertised with a versioned model ID."
 
 (defun +agent-acp-pinned-config (config model-id effort)
   "Return a copy of CONFIG pinned to MODEL-ID at reasoning EFFORT.
+EFFORT may be a string or a function returning the current configured level.
 A task that owns its session (LaTeX export, MarginNote sync) chooses its own
 model; the pin keeps that choice out of the remembered interactive model."
   (let* ((copy (copy-tree config))
          (effort-key (pcase (map-elt copy :identifier)
                        ('codex "reasoning_effort")
-                       ('claude-code "effort")))
+                       ('claude-code "effort")
+                       ('pi "thinkingLevel")))
          (default-options (map-elt copy :default-config-options)))
     (when (and (stringp model-id) (not (string-empty-p model-id)))
       (setf (alist-get :agent-pinned-model copy) model-id
             (alist-get :default-model-id copy)
             (lambda () (+agent-acp-export-model-id model-id))))
-    (when (and effort-key (stringp effort) (not (string-empty-p effort)))
+    (when (and effort-key (or (functionp effort) (and (stringp effort) (not (string-empty-p effort)))))
       (setf (alist-get :default-config-options copy)
             (lambda ()
               (let ((options (if (functionp default-options)
                                  (funcall default-options)
                                default-options)))
-                (cons (cons effort-key effort)
+                (cons (cons effort-key (if (functionp effort) (funcall effort) effort))
                       (seq-remove (lambda (entry)
                                     (equal (car-safe entry) effort-key))
                                   options))))))
@@ -2266,21 +2268,35 @@ LIMIT and IDLE-SECONDS default to the shared settings.  No history is removed."
     (ignore-errors (+agent-acp-resolve-config identifier))))
 
 (defvar agent-shell-pi-environment)
+(defvar agent-shell-pi-acp-command)
 (declare-function agent-shell-pi-make-client "agent-shell-pi" (&rest args))
 
-(defun +agent-acp-pi-config (environment)
+(defun +agent-acp--pi-node-environment (environment)
+  "Use the host CA bundle for Pi's Node without overriding explicit trust.
+Hy Memory uses this same Node convention. Certificate verification stays on."
+  (if (or (getenv "NODE_EXTRA_CA_CERTS")
+          (seq-some (lambda (entry) (string-prefix-p "NODE_EXTRA_CA_CERTS=" entry)) environment)
+          (not (file-readable-p "/etc/ssl/cert.pem")))
+      environment
+    (cons "NODE_EXTRA_CA_CERTS=/etc/ssl/cert.pem" environment)))
+
+(defun +agent-acp-pi-config (environment &optional command)
   "Return a Pi agent-shell configuration whose client runs with ENVIRONMENT.
 ENVIRONMENT is a list of \"NAME=VALUE\" strings.  They are added every time
 agent-shell builds the client, so a restart or resume keeps them (D-035).
+Optional COMMAND pins that client's executable and arguments across restart.
 Return nil when Pi is not available."
   (require 'agent-shell-pi nil t)
   (when-let* ((config (+agent-acp-config-for "pi"))
               ((fboundp 'agent-shell-pi-make-client)))
-    (setf (alist-get :client-maker config)
-          (lambda (buffer)
-            (let ((agent-shell-pi-environment
-                   (append environment (bound-and-true-p agent-shell-pi-environment))))
-              (agent-shell-pi-make-client :buffer buffer))))
+    (let ((command (copy-sequence (or command agent-shell-pi-acp-command))))
+      (setf (alist-get :client-maker config)
+            (lambda (buffer)
+              (let ((agent-shell-pi-acp-command command)
+                    (agent-shell-pi-environment
+                     (+agent-acp--pi-node-environment
+                      (append environment (bound-and-true-p agent-shell-pi-environment)))))
+                (agent-shell-pi-make-client :buffer buffer)))))
     config))
 
 (defun +agent-acp-known-agents ()
@@ -2700,10 +2716,27 @@ workspace is meant to replace."
   (advice-add 'agent-shell--display-buffer :around
               #'+agent-acp--display-buffer-a))
 
-(defun +agent-acp-set-permission-responder (buffer responder)
-  "Install RESPONDER for structured permission requests in BUFFER."
+(defun +agent-acp-set-permission-responder (buffer responder &optional settle-pending)
+  "Install RESPONDER in BUFFER; SETTLE-PENDING also handles its current requests."
   (with-current-buffer buffer
-    (setq-local agent-shell-permission-responder-function responder)))
+    (setq-local agent-shell-permission-responder-function responder)
+    (when (and settle-pending (functionp responder) (not (+agent-acp-client-exited-p buffer)))
+      (let* ((state (+agent-acp--state buffer)) (client (map-elt state :client))
+             (calls (copy-sequence (map-pairs (map-elt state :tool-calls)))))
+        (dolist (pair calls)
+          (when-let* ((tool-call-id (car pair)) (tool (cdr pair)) (request (map-elt tool :permission-request-id)))
+            (funcall responder
+                     (list (cons :tool-call tool)
+                           (cons :options (map-elt tool :permission-actions))
+                           (cons :respond
+                                 (lambda (option)
+                                   (when (and (buffer-live-p buffer)
+                                              (eq state (+agent-acp--state buffer))
+                                              (eq client (map-elt state :client))
+                                              (equal request (map-nested-elt state (list :tool-calls tool-call-id :permission-request-id))))
+                                     (agent-shell--send-permission-response
+                                      :client client :request-id request :option-id option
+                                      :state state :tool-call-id tool-call-id))))))))))))
 
 (defun +agent-acp-draft (buffer text)
   "Put TEXT in BUFFER's native input for review; do not submit it."
@@ -2949,6 +2982,7 @@ Cancelling, or finding nothing to restore, ends that client."
 
 (+agent-acp--retire-transcript-workspace)
 
+(require 'tools/agent/appearance)
 
 (provide 'tools/agent/acp)
 ;;; tools/agent/acp.el ends here

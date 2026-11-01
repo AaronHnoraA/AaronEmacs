@@ -32,7 +32,7 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L lisp/core/aaron-ui -l lisp/core/aaron-ui
         health health-startup health-byte health-native core-test ui-test activity-test performance-test ui-tokens audit-ui-tokens \
         remote-test remote-source-test remote-transfer-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e remote-cleanup-live-smoke remote-route-benchmark remote-local-visit-benchmark remote-ssh-visit-benchmark remote-ssh-write-benchmark remote-directory-benchmark \
 		lsp-test lsp-protocol-rebuild writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke lsp-remote-tty-smoke lsp-remote-gui-smoke lsp-gui-company-popup lsp-key-to-screen lsp-existing-file-live-probe remote-task-live-smoke remote-task-disconnect-smoke remote-terminal-live-smoke \
-        jupyter-test research-test pi-live-smoke pi-idle-benchmark agenda-test agenda-apple-test project-workflow-test \
+        jupyter-test research-test pi-setup pi-live-smoke pi-idle-benchmark agenda-test agenda-apple-test project-workflow-test \
         jupyter-linux-disconnect-live-smoke \
         noema-help noema-setup noema-build noema-install noema-test noema-kernel-build noema-kernel-install \
         noema-server-config-init noema-server-build noema-server-start noema-server-deploy noema-disk-audit noema-clean \
@@ -113,6 +113,7 @@ help:
 	  '  make remote-terminal-live-smoke  Check routed PTY input/output on a real SSH target' \
 	  '  make jupyter-test         Run Noema/Jupyter and notebook ERT suites' \
 	  '  make research-test        Run Noema project, Agent and research model ERT suites' \
+	  '  make pi-setup             Install the pinned Emacs-owned Pi runtime under var/' \
 	  '  make pi-live-smoke        Check native Pi lifecycle without model requests' \
 	  '  make pi-idle-benchmark    Measure Pi metadata, redraw and retention work locally' \
 	  '  make project-workflow-test Run project run, task, output and local override ERT tests' \
@@ -148,9 +149,9 @@ up:
 	fi
 	$(MAKE) bootstrap-health
 
-setup: install health-startup
+setup: install pi-setup health-startup
 
-setup-full: install health doctor
+setup-full: install pi-setup health doctor
 
 bootstrap-health: install health doctor audit-lock
 
@@ -204,7 +205,7 @@ ui-test:
 	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' --eval '(require (quote package))' --eval '(package-initialize)' -L lisp/core -L lisp/core/aaron-ui -l test/aaron-ui-etaf-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/noema-icon-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-open-place-tests.el -f ert-run-tests-batch-and-exit
-	$(BATCH) -l test/init-windows-tests.el -l test/init-window-lifecycle-tests.el -l test/init-frame-buffers-tests.el -l test/agent-buffer-management-tests.el -l test/agent-display-audit-tests.el -l test/agent-manager-tests.el -l test/agent-lifecycle-e2e.el -l test/agent-acp-tests.el -l test/popup-agent-tests.el -l test/init-output-frame-tests.el -l test/agent-runtime-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-windows-tests.el -l test/init-window-lifecycle-tests.el -l test/init-frame-buffers-tests.el -l test/agent-buffer-management-tests.el -l test/agent-display-audit-tests.el -l test/agent-manager-tests.el -l test/agent-pages-ui-tests.el -l test/agent-lifecycle-e2e.el -l test/agent-acp-tests.el -l test/popup-agent-tests.el -l test/init-output-frame-tests.el -l test/agent-runtime-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-ui-dashboard-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-ui-modeline-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-auto-insert-tests.el -f ert-run-tests-batch-and-exit
@@ -480,13 +481,19 @@ agenda-apple-test:
 
 research-test:
 	$(BATCH) -l test/noema-startup-tests.el -f ert-run-tests-batch-and-exit
-	$(BATCH) -l test/popup-agent-tests.el -L site-lisp/noema/tests/elisp -l test/agent-acp-tests.el -l test/agent-api-tests.el -l test/agent-render-tests.el -l noema-context-tests.el -l test/init-pi-workflow-tests.el -l test/pi-idle-tests.el -l test/pi-project-tabs-tests.el -l test/agent-worktree-tests.el -l test/agent-worktree-board-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/popup-agent-tests.el -L site-lisp/noema/tests/elisp -l test/agent-acp-tests.el -l test/agent-api-tests.el -l test/agent-render-tests.el -l noema-context-tests.el -l test/init-pi-workflow-tests.el -l test/pi-idle-tests.el -l test/pi-project-tabs-tests.el -l test/pi-owned-tests.el -l test/agent-worktree-tests.el -l test/agent-worktree-board-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -L site-lisp/noema/tests/elisp -l noema-capability-workspace-tests.el -l noema-marginnote-tests.el -l test/noema-manager-layout-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/noema-research-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -L site-lisp/noema/lisp -L site-lisp/noema/tests/elisp \
 	  -l noema-interaction-tests.el -l noema-interaction-magent-tests.el -l noema-api-tests.el -l noema-completion-tests.el \
 	  -l noema-project-overview-tests.el -l noema-agent-inbox-tests.el -l noema-agent-attention-tests.el -l noema-history-search-tests.el -l noema-findings-tests.el -l noema-pi-sessions-tests.el \
 	  -f ert-run-tests-batch-and-exit
+
+pi-setup:
+	mkdir -p "$(CURDIR)/var/agent/pi/runtime"
+	ln -sfn "$(CURDIR)/config/pi/runtime/package.json" "$(CURDIR)/var/agent/pi/runtime/package.json"
+	ln -sfn "$(CURDIR)/config/pi/runtime/package-lock.json" "$(CURDIR)/var/agent/pi/runtime/package-lock.json"
+	npm --prefix "$(CURDIR)/var/agent/pi/runtime" ci --no-audit --no-fund
 
 pi-live-smoke:
 	$(BATCH) -l test/pi-session-live-smoke.el

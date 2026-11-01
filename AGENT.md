@@ -103,6 +103,9 @@ when adapting upstream interaction logic. Notifications go through
 `tools/agent/notifications` and `aaron-notify`; routine completion is quiet.
 The daily front door is `agent-manager` (`H-A`, `SPC a a`), an Aaron ETAF
 float over the shared registry; closing its view must never end execution.
+Sessions and Inbox preview the real chat; Usage uses the same selection for
+reported metrics without a chat preview. Agent page presentation belongs in
+`tools/agent/ui`; it must not add provider queries or polling timers (C54).
 Native restart/reconnect goes through `+agent-acp-restart-native`, retaining
 the native ID and unsent input without replaying an active request. Research
 must finish its owning Run before restart. Input/hide keys are `C-c C-e` /
@@ -436,11 +439,33 @@ This config already has maintenance and workflow entry points. Reuse them:
   read by RaTeX) and the note's `#+begin macros` block.  They reuse the same
   parser; do not add another store for personal macros.  See
   `docs/design/latex-preview.md`.
+- Pi: the companion and project Pi run the pinned runtime `make pi-setup`
+  installs from `config/pi/runtime/` into `var/agent/pi/runtime/`, with private
+  config in the ignored `etc/noema/pi/` and native sessions in `var/noema/pi/`
+  (`docs/design/pi-sessions.md` C18). Pi consumes operational packs marked
+  `agent_catalog: true` in the effective capability configuration through
+  `agent:skill:list` / `agent:skill:read`; it has no Skill list of its own.
+  The Skill Manager's Packs page owns that flag; project definitions, patches
+  and explicit disables apply before catalog selection. The flag does not
+  globally enable a pack for Runs.
+  `noema-editor-interaction` is the code-owned editor operations guide. Pi
+  uses `emacs:open` with `placement: "other"`; shell Agents prefer
+  `emacsopen -o`. Keep the chat visible unless the user requests another
+  placement. The API and CLI share `aaron-open-place` and return actual
+  window results; renderer state notifications are not query APIs.
+- Project resources for Agents: `agent:project:status`,
+  `agent:project:maintain` and `agent:memory:search` are the one entry to a
+  Project's `.agent/` cache and Hy Memory, and `emacs:agent` `status` reports
+  ACP capabilities and usage (`docs/design/agent-management.md` C50–C52).
+  Ordinary sessions in a Project receive one hidden pointer to the
+  `noema-project-maintenance` Skill.  Do not add another cache, memory index
+  or status command; a new shared resource is added to that entry and Skill.
 - Agent Skills: the Noema capability resolver and its manager
   (`noema-skill-manager`).  Global Skills live flat in the vault library
   `+noema-skills-directory` (`NOEMA_GLOBAL_SKILLS`), not in `etc/`;
   Skill packs (`packs` in `etc/noema/capabilities.json`, `@@pack(id)`) are
-  link lists over them, patched per project by membership deltas only; and
+  link lists over them, patched per project in membership and pack metadata,
+  never member content; and
   `skills.lock.json` beside that library is the single upstream record, maintained by
   `noema-skill-upstream` (install/check/diff/update/rollback).  Do not copy a
   Skill into a pack, hand-edit a locked Skill in place, or add another

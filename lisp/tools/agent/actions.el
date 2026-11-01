@@ -55,7 +55,7 @@
      ("?" "Key help" +agent-acp-help))
     ("Noema"
      ("W" "Noema" noema)
-     ("P" "Pi" noema-pi-emacs-open)
+     ("P" "Pi" noema-pi-open)
      ("D" "Pi doctor" noema-pi-doctor)
      ("I" "Research attention" noema-research-attention)
      ("O" "Orchestration" noema-orchestration)

@@ -41,10 +41,21 @@ forking or imitating them.
 精确选区。起草、复制到剪贴板不消耗会话初始化；新原生 Session 再初始化。
 完整语法与全部 API schema 不按轮注入。
 
-本地 API MCP 只公布 `noema_api` 与 `noema_call`。前者搜索当前注册 channel 名字或
+本地 API MCP 只公布 `noema_api` 与 `noema_call`。前者搜索当前注册 channel 的名字、
+用途和别名（按所有关键词匹配，名字命中优先；不搜索实现正文），或
 查看一个接口的参数与实际实现；后者通过同一后端调用。已有会话可使用
 `scripts/agent-api.mjs`，不必为新增 MCP 重启会话。它每次从 `host.json` 解析活跃
 端口。公共 Server 模式仍只暴露原有只读发布能力。
+
+编辑器交互由随代码发布的 `noema-editor-interaction` Skill 披露。打开文件使用
+`noema:api:emacs:open`，Agent 默认 `placement: "other"`，保留聊天窗格；
+支持 `here/left/right/above/below/frame`、1-based `line`、0-based `col` 和
+`noFocus`。带位置的请求经 `noema.open-file` 同步 gateway 调用 Emacs 的
+`aaron-open-place`，返回实际文件、buffer、window、frame 与定位结果，和
+CLI `emacsopen -o` 使用同一 owner。页面自身的 Noema 打开与克隆保留原入口。
+`emacs:pi action=context` 查询编辑来源；`emacs:pi` 的 Session 动作不打开文件。
+`emacs:current-file`、`emacs:ui-state`、`emacs:input-focus` 是 renderer 上报，
+不能当作读取编辑器的操作。只读审计必须取得设计和实现证据，状态查询只说明现场。
 
 `agent:document:read` 返回保存版本、UTF-16 范围和已有提案反馈；
 `agent:document:propose` 保留旧文与未选文字、生成或修订原地提案，然后复用
@@ -77,12 +88,19 @@ Research 的模型、存储、冻结上下文、记忆、Session、权限和证�
 ## Pi 层级与生命周期
 
 Pi 的会话记录、历史、活跃指针与 Research 独立；物理运行时仍使用共享 ACP。
-主程序启动保留 Dashboard，后台初始化 Emacs Pi；项目激活复用项目 Pi。
-Ibuffer 有独立 Pi 组，Dashboard 的 `pi`、`M-x pi` 和 `C-c A P` 打开同一个主 Pi；
-在主 Pi 窗口再次调用会收起并返回编辑位置，带前缀参数打开来源项目 Pi。
+主程序启动保留 Dashboard，后台初始化 Emacs Pi；项目 Pi 在明确调用时才创建。
+Ibuffer 的 Agent 与 Pi 分组互斥。`M-x pi`、`C-c A P` 召回来源项目的独立 Pi，
+无项目或带前缀时召回主 Pi；Dashboard 的 `pi` 明确打开主 Pi。
+在对应 Pi 窗口再次调用会收起并返回编辑位置；项目切换撤下前一项目 Pi 的视图。
 `M-x noema-pi-sessions` 查看当前 Pi／项目的历史，带前缀查看所有作用域。
 Pi 使用独立 tab 和管理入口；项目列表跟随明确的项目切换，主 Pi 保持全局，
 执行 Agent 的 tab、管理器、名字替换与批量操作不接管 Pi。
+Pi 的默认模型池、提示词和扩展随源码版本化；Skill/pack 由既有 Skill Manager
+统一维护，Pi 直接消费有效操作包。本机配置/认证
+位于 Emacs 私有 `etc/noema/pi/`，会话和缓存位于 `var/noema/pi/`，原生入口用
+符号链接共享。`make pi-setup` 固定安装 Emacs 自己的 Pi 运行时。Skill 名称和
+用途自动披露，正文由 `agent:skill:read` 按项目有效定义读取，涵盖现有 Hy Memory、
+上下文与流程管理、Agent/ACP、审计、项目文档/Skill 与 Noema Markdown 语法。
 `RET` 恢复、`n` 新建、`a` 归档、`i` 导入旧引用。结束 Pi 不终止项目执行 Agent。
 
 `emacs:pi` 按需提供 context、list、status、ensure、send、resume、new、archive。

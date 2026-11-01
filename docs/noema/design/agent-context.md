@@ -74,7 +74,8 @@ Hy Memory 使用同一项目根隔离普通 ACP 对话与 Run，但召回项标�
 +| 已审核 Finding 召回 | `server/lib/research-memory.mjs` |
 +| ACP 派发、用量报告与终态 | `lisp/noema-agent-worker.el`、`lisp/tools/agent/acp.el` |
 #+end ediff
-| 项目工作入口 | `project-agent-management` Skill、`lisp/noema-project-overview.el` |
+| 项目工作入口 | `project-agent-management` 与 `noema-project-maintenance` Skill、`lisp/noema-project-overview.el` |
+| 普通会话的项目入口、共享资源查询 | `lisp/noema-agent-entry.el`、`server/lib/agent-project.mjs`（[Agent 管理](../../design/agent-management.md) C51、C52） |
 
 ## 已知差距
 

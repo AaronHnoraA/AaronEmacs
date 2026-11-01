@@ -354,8 +354,13 @@ route default."
 `frame' is handled by the caller."
   (pcase placement
     ('here base)
-    ('other (let ((next (next-window base 'nomini)))
-              (if (eq next base) (split-window base nil 'right) next)))
+    ('other (or (seq-find
+                 (lambda (window)
+                   (and (not (eq window (selected-window)))
+                        (not (window-parameter window 'window-side))
+                        (not (window-dedicated-p window))))
+                 (window-list (window-frame base) 'nomini base))
+                (split-window base nil 'right)))
     ((or 'left 'right 'above 'below) (split-window base nil placement))
     (_ (user-error "Unknown placement: %s" placement))))
 

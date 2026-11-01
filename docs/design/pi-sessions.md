@@ -2,7 +2,7 @@
 
 ## 范围
 
-Pi 是 Emacs 的常驻助手，并为每个进入的项目维护项目助手。本文约定 Pi 的独立
+Pi 是 Emacs 的常驻助手，并在项目中首次调用时创建该项目的助手。本文约定 Pi 的独立
 会话管理，以及它与首页、buffer、执行 Agent、Markdown 和 Noema 服务的边界。
 
 ## 模型
@@ -42,35 +42,46 @@ Emacs Pi 负责编辑器操作、跨项目路由和找到项目 Pi。项目 Pi �
   新对话与恢复分开，失败不能悄悄换成空白对话。刚初始化的空对话只有运行时
   身份；提供方确认保存历史后才成为持久记录，不为制造历史发送虚假 prompt。
 - **C3 初始化没有任务副作用。** 主程序启动时进入 Dashboard，Pi 在后台初始化，
-  不提交模型 prompt、不切换窗口。项目激活复用项目 Pi，切换项目不关闭旧会话。
+  不提交模型 prompt、不切换窗口。进入项目不创建 Pi；项目中首次调用才建立
+  该项目独立的 buffer 与 native Session，后续调用复用。切换项目不结束旧会话。
   CLI 和 stdio MCP 入口按文件真实路径识别启动，兼容 Emacs 配置目录的符号链接。
 - **C4 视图可发现。** Ibuffer 的 Pi 分组列出真实 Pi buffer；Pi Sessions 查看
   当前与历史对话，普通 Agent Manager 只管理执行会话。后台不显示窗口不等于隐藏
   buffer。Dashboard 直接打开主 Pi；Pi Sessions 保留独立历史入口。
 - **C5 生命周期分开。** 关闭聊天视图不停止 client；停止当前回合、结束 Pi、
   换新对话、归档历史分别处理。结束项目 Pi 不结束该项目的执行 Agent。
+  新 client 的管理登记失败或取消时清理本次创建的 buffer 与 client，允许重新启动。
 - **C6 逐步披露。** 首次只提供小型 API 入口。先搜索能力名字，再查看一个接口，
   最后调用；本轮只发送任务、项目与位置引用。Skill 正文和参考章节按需读取。
+  搜索匹配注册名字、用途和别名，先排名字命中；结果仍只给名字。
+  编辑器操作由 `noema-editor-interaction` 披露：Pi 使用语义 API，有 shell 的 Agent
+  可使用 `emacsopen -o`。API 不依赖 Pi 的 Session 管理动作或 Elisp 执行能力。
+  Agent 请求打开文件默认在其他窗格，复用已有文件视图；显式位置优先。
+  返回实际窗口结果后才报告已打开，不能把通知已排队当作已显示。
 - **C7 文档复用。** 申请 prompt 文档由 Skill 指导项目 Pi 创建、打开普通 Noema
   Markdown。用户保存并发送后才执行；改写用版本化提案 API，由人审阅。
 - **C8 状态可核对。** native ID 与归档事实持久化；运行、忙碌、等待权限、可见与
   连接失败从实际 ACP 状态派生。恢复历史不假装附着到其他进程的活动执行。
-- **C9 全局入口。** `M-x pi`、`C-c A P` 和 Dashboard 的 `pi` 召回同一个主 Pi。
-  在该聊天窗口再次调用时收起视图并返回来源；前缀参数打开来源项目 Pi。
+  重连优先继续当前物理会话的 native ID 或待恢复 ID，不被较早的持久活跃指针替换。
+- **C9 按项目召回。** `M-x pi`、`C-c A P` 在项目中召回该项目 Pi，无项目时召回
+  主 Pi；带前缀强制主 Pi。Dashboard 的 `pi` 与 `noema-pi-emacs-open` 是主 Pi
+  的明确入口。在对应聊天窗口再次调用时收起视图并返回来源。
   主 Pi、项目 Pi、执行 Agent 分别保留真实 buffer 和会话身份。
 - **C10 当前上下文是查询。** `emacs:pi` 的 `context` 从当前选中窗口解析编辑来源，
   返回文件、target、项目、位置和选区的引用，不复制正文、不保存、不启动会话。
   Noema 页面只报告已知文件身份，不用占位 buffer 伪造页面的行号、选区或修改状态。
   主 Pi 不把自己的启动目录当成用户当前项目。
   没有可用编辑来源时返回 `sourceAvailable:false`，目录与项目为空，不回退到 Pi 的 home。
+  `sourceAvailable`、`pageOwned`、`modified` 经 gateway 保持 JSON 布尔值，不返回符号名字符串。
 - **C11 调度复用公共 Agent。** Pi 通过 `emacs:agent` 查询、创建、发送、读取结果
   或停止真实会话；没有另一份 Agent 注册表、队列或执行状态。变更和读取必须携带
   buffer 与 native ID，防止把旧指令发送到同名新会话。查询不打开 UI；创建不提交
   任务；发送默认后台受理，只有显式 focus/show 才显示。受理、排队和完成分别报告。
   正常完成后继续原生排队任务；停止、失败或拒绝后保留挂起任务，等待显式恢复。
-- **C12 Idle 预热。** 自动启动和项目激活只登记一次 idle 工作，合并尚未预热的
-  项目到最近一次选择。明确打开或发送立即复用原入口；关闭自动模式或退出取消
+- **C12 Idle 预热。** 启动只登记一次主 Pi 的 idle 工作，项目切换不安排启动。
+  明确打开或发送才创建或复用项目 Pi；关闭自动模式或退出取消
   待执行工作。已有对话不随项目切换结束，主 Pi 不按普通执行 Agent 回收。
+  主 Pi 与项目 Pi 的同作用域启动都防止重入；失败或取消释放启动占用，不阻止重试。
 - **C13 异步工作有归属。** 每个物理 Pi 的历史确认最多一个在途请求，合并同一
   回合的重复观察；回调检查 client 代际、native ID 和当前作用域归属。工具事件
   合并为一个有上限等待的协调查询，同一 client 只允许一个在途协调请求，只有派发时
@@ -88,17 +99,48 @@ Emacs Pi 负责编辑器操作、跨项目路由和找到项目 Pi。项目 Pi �
   的项目池与管理器也不接管 Pi。Pi 聊天的管理按钮和 `C-c C-l` 打开本作用域的
   Pi Sessions。项目会话列表跟随明确的项目切换，主 Pi 列表保持全局；带前缀
   打开 Pi Sessions 才查看所有作用域。空项目列表的新建仍属于该项目。
+  切换项目时旧列表行立即失效，合并刷新前的操作也不能访问或归档前一项目的对话。
   `/new`／`C-c A n` 在 Pi 中新建本作用域对话，在执行会话中创建执行 Agent。
   分类依据是管理角色来源，手动启动的 Pi 提供方仍是普通执行会话。共用 ACP
   物理注册表与生命周期，不增加另一套进程管理。同名执行会话不会使 Pi 退役，
   命名查询与替换也遵守管理作用域。
+- **C18 Emacs 私有配置。** 主 Pi 与项目 Pi 使用 Emacs 固定版本的本地运行时，不依赖系统
+  Pi 安装或 `~/.pi/agent`。手动启动的 Pi 提供方是普通执行会话（C17），与其他提供方一样
+  从 target 的 PATH 解析 `pi-acp` 并使用它自己的配置，因为管理配置关闭了执行工具。可版本化的默认模型池、提示词、扩展和 Skill 属于源码；
+  本机覆盖、模型配置与认证属于忽略的 `etc/noema/pi/`，原生会话、索引和缓存属于
+  `var/noema/pi/`。原生目录以符号链接组合这些文件，不保存第二份配置。
+  Config 面板与 Pi 使用同一设置；默认 `openai-codex/gpt-5.6-luna`、推理 `medium`，
+  保留已有后端池。新建与重连通过原生 config options 应用配置的推理级别。
+  Codex 登录通过只读引用复用，不复制 token，也不改写独立 Pi 的用户目录。
+  Pi 与 Hy Memory 的 Node client 复用系统 CA bundle；显式的
+  `NODE_EXTRA_CA_CERTS` 优先。重连保留环境，不关闭证书校验。
+- **C19 Skill 自动披露。** Skill 与 pack 由既有 Skill Manager 统一管理，Pi 消费
+  其中有效定义标记 `agent_catalog: true` 的操作包，没有独立的 Skill 名单或管理配置。
+  标记遵守项目覆盖与 patch，显式禁用优先；`requestedPacks` 可替换默认目录包。
+  这个标记只选择 Agent 的自动目录，不为研究 Run 全局启用 pack。项目 Skill、禁用、
+  依赖和 patch 复用 Noema 能力解析器；只自动披露 pack 的成员与 preamble，以及 Skill 的
+  名称、用途和来源，正文按需读取一个有效 Skill。目录只含操作包成员及其依赖、项目
+  选择（含项目 `extends`）和明确请求的 Skill；仅全局启用的领域 Skill、pack 及其
+  独有依赖留给 Run，仍可按 ID 读取。诊断也只来自目录选择和依赖。
+  没有原生 read 工具时也能通过 Noema API 使用它们。
+  自动目录包含 Emacs/Noema 操作、Agent/ACP、上下文、Hy Memory、流程与交接、
+  文档/项目 Skill 管理、项目缓存与共享资源和 Noema Markdown 语法；不把整库正文注入每个回合。
+  这些指导复用现有运行能力，不创建另一套记忆、流程或文档管理器。
+- **C20 Pi 工具自动允许。** 主 Pi 与项目 Pi 使用 agent-shell 的内置自动允许
+  responder，默认 `noema-pi-permission-policy=allow`。Config 面板可切回 `ask`；
+  更新作用于现有 Pi 与当前待处理请求，重连后仍按同一设置执行。
+  权限响应保留实际 client 和 request 身份，不向已结束或被替换的请求回复。
+- **C21 项目视图有归属。** Ibuffer 的 Agent 与 Pi 使用互斥分类。项目 Pi 的
+  buffer、native Session 与历史属于项目，不把主 Pi 或别的项目 Pi 当作它。
+  项目切换撤下前一项目的 Pi 视图；调用当前项目 Pi 才显示它，不替别的项目
+  创建进程。各项目的会话继续保留，由同一显示 owner 管理各自返回位置。
 
 ## 工作流程
 
 1. **打开主程序：** 首页选择 Dashboard → 后台恢复 Emacs Pi → Ibuffer 出现 Pi。
    未配置或初始化失败时保留首页，并通过现有诊断与 Pi Sessions 显示事实。
-2. **进入项目：** 根据 target 与项目根定位作用域 → 恢复活跃项目 Pi；没有真实
-   原生记录时新建 → 后台登记管理关系。它不依赖 `.noema` 或研究 Project。
+2. **在项目里调用 Pi：** 根据 target 与项目根定位作用域 → 恢复该项目活跃 Pi；
+   首次使用时创建独立 buffer 和原生对话 → 登记管理关系。不依赖 `.noema`。
 3. **准备任务：** 通过项目 Pi 申请 Markdown 文档 → 用户编辑 → 保存后发送给
    选中的执行 Agent。文档、会话、任务产物分别保留自己的身份。
 4. **执行和反馈：** API 创建或修订提案 → 页面响应保存通知 → 人审核或评论 →
@@ -133,6 +175,20 @@ Dashboard 的 `pi` 入口打开主 Pi。`M-x noema-pi-sessions` 查看当前 Pi�
 `tools/agent/acp` 管理实际 client；Ibuffer 与 Dashboard 由既有 Emacs UI 配置管理。
 API 与 Markdown 审阅见 [Noema 交互](../noema/design/interaction-plan.md)。
 
+| 文件 | 归属 |
+| --- | --- |
+| Emacs `config/pi/runtime/package*.json` | 进 Git 的固定 npm 依赖与 lock；`make pi-setup` 安装 |
+| Noema `resources/pi/profile.json`、`SYSTEM.md`、`extensions/` | 进 Git 的默认模型池、提示词与扩展；Skill/pack 归既有管理器 |
+| Noema `resources/skills/noema-{agent-operations,context-memory,project-docs,project-maintenance,workflow-audit}/` | 与实现一起维护的操作 Skill；其它知识库 Skill 仍在原库 |
+| Emacs `etc/noema/pi/config.el` | 私有 Config 面板覆盖，按需生成；默认值仍来自版本化 profile |
+| Emacs `etc/noema/pi/{settings,models,auth}.json` | 私有 Pi 配置和认证；原有 `var/` 文件首次部署时迁移，保持引用 |
+| Emacs `var/noema/pi/` | 原生会话、索引和缓存；配置、提示词与扩展使用符号链接，Skill 不另建目录 |
+
+修改全局 Pi 配置后，新建或重连使用更新后的配置；现有回合不被自动重启。
+自动启动开关会立即取消或安排 idle 工作。Skill 清单在明确发起的回合前按当前
+项目重新查询，静止与隐藏期间不轮询。格式遵循
+[Agent Skills](https://agentskills.io/specification) 的描述与正文渐进披露。
+
 | 实现入口 | 所有权 |
 | --- | --- |
 | `site-lisp/noema/lisp/noema-pi-router.el` | 主／项目 Pi、作用域、部署、管理关系和派发 |
@@ -164,7 +220,9 @@ API 与 Markdown 审阅见 [Noema 交互](../noema/design/interaction-plan.md)�
 同一 target 还运行本地 ACP 测试进程，验证管家入口、来源上下文、真实队列续发、
 结果分页、草稿保护和停止挂起；`pi-butler-e2e` 在 GUI 中额外验证多 frame 来源。
 `tests/agent-api.test.ts` 还以真实子进程验证符号链接下的 CLI 和 MCP 启动。
-`test/pi-idle-tests.el` 覆盖 C12–C16 的合并、缓存失效、失败写入、晚到结果和资源释放；
-`pi-butler-e2e` 验证 API 完成后的历史确认、排队续发与空闲无请求、无索引写入。
+`test/pi-idle-tests.el` 覆盖重连身份、初始化失败清理，以及 C12–C16 的合并、缓存失效、
+失败写入、晚到结果和资源释放；`pi-project-tabs-tests` 验证项目切换立即撤销旧行操作。
+`pi-butler-e2e` 验证真实 client 的重连与失败清理，以及 API 完成后的历史确认、
+排队续发与空闲无请求、无索引写入。
 `make pi-idle-benchmark` 在隔离的临时索引与 buffer 上统计 JSON 解析、重复观察写入、
 突发事件重画和暖会话候选检查次数；不连接模型，不读取用户会话。

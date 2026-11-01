@@ -1126,6 +1126,12 @@ selection and mark behavior."
          (or (derived-mode-p 'noema-pi-sessions-mode)
              (memq (bound-and-true-p +agent-acp-session-origin) '(pi pi-emacs pi-project))))))
 
+(defun aaron-ibuffer-agent-buffer-p (buffer)
+  "Whether BUFFER is an execution Agent rather than a managed Pi."
+  (and (buffer-live-p buffer)
+       (with-current-buffer buffer (derived-mode-p 'agent-shell-mode))
+       (not (aaron-ibuffer-pi-buffer-p buffer))))
+
 (defun aaron/ibuffer-visit-right ()
   "Visit the Ibuffer row in a new pane on the right."
   (interactive)
@@ -1166,7 +1172,7 @@ selection and mark behavior."
   (setq ibuffer-saved-filter-groups
         '(("default"
            ("Pi" (pi . t))
-           ("Agent" (mode . agent-shell-mode))
+           ("Agent" (agent . t))
            ("Noema" (noema . t))
            ("xwidget" (and (mode . xwidget-webkit-mode)
                            (not (noema . t))))
@@ -1189,6 +1195,10 @@ selection and mark behavior."
       "Toggle current view to managed Pi sessions and their session list."
     (:description "Pi")
     (aaron-ibuffer-pi-buffer-p buf))
+  (define-ibuffer-filter agent
+      "Toggle current view to execution Agent buffers."
+    (:description "Agent")
+    (aaron-ibuffer-agent-buffer-p buf))
   (define-ibuffer-filter noema
       "Toggle current view to buffers hosting Noema."
     (:description "Noema")

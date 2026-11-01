@@ -11,6 +11,7 @@
 (require 'subr-x)
 (require 'tools/agent/sessions)
 (require 'aaron-ui-etaf)
+(require 'tools/agent/ui)
 
 (autoload '+agent-shell/resume "tools/agent/config" nil t)
 (autoload '+agent-top "tools/agent/top" nil t)
@@ -49,7 +50,8 @@
   (when-let* (((featurep 'aaron-ui-float))
               (panel (aaron-ui-float-panel-for-buffer (current-buffer)))
               ((aaron-ui-float-visible-p panel)))
-    (if (not (+agent-acp-agent-buffer-p +agent-manager--selected))
+    (if (or (eq +agent-manager--view 'usage)
+            (not (+agent-acp-agent-buffer-p +agent-manager--selected)))
         (aaron-ui-float-clear-preview panel)
       (let ((owner (current-buffer)) (+agent-acp-previewing t))
         (aaron-ui-float-preview-buffer
@@ -376,7 +378,7 @@ Without a live selection a new client lists the provider's saved conversations."
       (etaf-button
       :ref (+agent-manager--ref buffer) :class "agent-session" :variant 'ghost
       :aria-selected active :padding '((lh 0.5) (ch 1))
-      :bgcolor (aaron-ui-color (if active 'bg-surface-strong 'bg-panel))
+      :bgcolor (aaron-ui-color (if active 'bg-surface-strong 'bg-base))
       :label (or (plist-get session :name) (buffer-name buffer))
       :on-press (lambda ()
                   (let ((pointer (etaf-event-pointer-p)))
@@ -398,11 +400,41 @@ Without a live selection a new client lists the provider's saved conversations."
                  (etaf-label :text (concat "  " (truncate-string-to-width activity 40 nil nil "…"))
                              :wrap-mode 'word))))
         (etaf-label :text (concat "  "
-                                 (or (plist-get (plist-get session :group) :label) "Interactive") " · "
                                  (if usage-view (+agent-manager--usage-line session)
-                                   (or (plist-get usage :model) "Model pending")))
+                                   (concat (or (plist-get (plist-get session :group) :label) "Interactive")
+                                           " · " (or (plist-get usage :model) "Model pending"))))
                     :variant 'muted :wrap-mode 'word))))))
   :styles ((".agent-session" :width stretch)))
+
+(etaf-define-component +agent-manager-usage-detail (&key session)
+  "A read-only usage page sourced from the selected session snapshot."
+  :render
+  (let ((usage (plist-get session :usage)))
+    (etaf-view
+     (column :width 'stretch :item-gap '(lh 1) :padding '((lh 0.5) (ch 2))
+       (etaf-label :text (or (plist-get session :name) "Choose a session") :variant 'heading)
+       (etaf-label :text (or (plist-get usage :model) (plist-get usage :model-id) "Model not reported")
+                   :variant 'muted :wrap-mode 'word)
+       (+agent-ui-context :usage usage)
+       (flex :width 'stretch :flex-wrap 'wrap :gap '((lh 0.5) (ch 1))
+         (+agent-ui-metric :label "Input tokens" :value (+agent-ui-usage-count usage :input))
+         (+agent-ui-metric :label "Output tokens" :value (+agent-ui-usage-count usage :output))
+         (+agent-ui-metric :label "Cache read" :value (+agent-ui-usage-count usage :cached-read))
+         (+agent-ui-metric :label "Cache write" :value (+agent-ui-usage-count usage :cached-write))
+         (+agent-ui-metric :label "Reported cost" :value (+agent-ui-cost usage))
+         (+agent-ui-metric :label "Turns" :value (+agent-ui-count (plist-get usage :turns))))
+       (etaf-panel :title "Session details" :variant 'flat
+         (column :width 'stretch :item-gap '(lh 0.5)
+           (etaf-label :text (+agent-manager--status-line session)
+                       :color (+agent-manager--state-color session) :wrap-mode 'word)
+           (etaf-label :text (or (plist-get session :root) "Workspace not reported")
+                       :variant 'muted :wrap-mode 'word)
+           (etaf-label :text (format "Context peak %s · Compactions %s"
+                                    (+agent-ui-usage-count usage :context-peak)
+                                    (+agent-ui-count (plist-get usage :compactions)))
+                       :variant 'muted :wrap-mode 'word)))
+       (etaf-label :text "Reported by this session. — means unavailable; quotas remain in Detailed usage."
+                   :variant 'muted :wrap-mode 'word)))))
 
 (etaf-define-component +agent-manager-page (&key model owner)
   "Compact workspace navigation beside the original interactive chat."
@@ -441,8 +473,9 @@ Without a live selection a new client lists the provider's saved conversations."
                      ("R" +agent-manager-restart "Restart session")
                      ("x" +agent-manager-end "End session"))
        (row :width 'stretch :item-gap '(ch 4)
-         (etaf-label :text "Sessions" :variant 'heading)
-         (etaf-button :label "+ New · n" :variant 'ghost
+         (etaf-label :text (pcase view ('usage "Usage") ('attention "Inbox") (_ "Sessions"))
+                     :variant 'heading)
+         (etaf-button :label "+ New · n" :variant 'secondary
                       :on-press (lambda () (with-current-buffer owner (+agent-manager-new)))))
        (etaf-segmented
         :value view :options `((sessions . ,(format "All %d" (plist-get data :total)))
@@ -462,17 +495,16 @@ Without a live selection a new client lists the provider's saved conversations."
                           (lambda () (read-string "Filter agents: " +agent-manager--query)))))))
        (expr (when (eq (plist-get data :scope) 'project)
                (etaf-view (etaf-label :text "This project · p to show all" :variant 'muted))))
-       (column :ref 'agent-manager-list :width 'stretch :height (list 'lh height)
-               :overflow 'scroll :item-gap '(lh 1)
+       (row :width 'stretch :height (list 'lh height) :item-gap '(ch 2) :overflow 'hidden
+       (column :ref 'agent-manager-list :width (if (eq view 'usage) '(ch 38) 'stretch)
+               :height 'stretch :overflow 'scroll :item-gap '(lh 1)
          (expr
           (if (null sessions)
               (etaf-view
-               (column :padding '((lh 2) (ch 1)) :item-gap '(lh 1)
-                 (etaf-label :text (if (eq view 'attention) "All caught up" "No sessions here") :variant 'strong)
-                 (etaf-label :text (if (eq view 'attention)
-                                      "Requests, failures and unread results appear here."
-                                    "Start a session with n, or change the filter.")
-                             :wrap-mode 'word :variant 'muted)))
+               (etaf-empty :title (if (eq view 'attention) "All caught up" "No sessions here")
+                           :description (if (eq view 'attention)
+                                            "Requests, failures and unread results appear here."
+                                          "Start a session with n, or change the filter.")))
             (mapcar
              (lambda (group)
                (let* ((key (car group))
@@ -498,7 +530,16 @@ Without a live selection a new client lists the provider's saved conversations."
                                                   :usage-view (eq view 'usage))))
                                     (cdr group)))))))) groups))))
        (expr
-        (when session
+        (when (eq view 'usage)
+          (etaf-view
+           (column :width 'stretch :height 'stretch :overflow 'scroll
+             (expr (if session
+                       (etaf-view (+agent-manager-usage-detail :session session))
+                     (etaf-view
+                      (etaf-empty :title "No usage to display"
+                                  :description "Choose a live session to see its reported usage.")))))))))
+       (expr
+        (when (and session (not (eq view 'usage)))
           (etaf-view
            (column :width 'stretch :item-gap '(lh 0)
              (etaf-label :text (if (eq view 'usage) (+agent-manager--usage-line session)
@@ -515,7 +556,8 @@ Without a live selection a new client lists the provider's saved conversations."
                               :on-press (lambda () (with-current-buffer owner (+agent-manager-review)))))))))))
        (etaf-button :label "Actions  ·" :variant 'ghost :disabled (not selected)
                     :on-press (lambda () (with-current-buffer owner (call-interactively #'+agent-session-menu))))
-       (etaf-label :text "j/k preview · RET open · q return" :variant 'muted)))))
+       (etaf-label :text (if (eq view 'usage) "j/k select · RET open · q return"
+                          "j/k preview · RET open · q return") :variant 'muted)))))
 
 (defun +agent-manager-show (&optional view project)
   "Show VIEW in the shared manager, optionally restricted to PROJECT."

@@ -68,7 +68,7 @@ make audit-lock
 
 - `install` 只做恢复
 - `lock` 只做导出
-- `setup` = 恢复 + 启动检查
+- `setup` = 恢复 + Pi 运行时（`pi-setup`）+ 启动检查
 - `up` = 可选恢复状态 + 完整拉起验收
 
 这样迁移链路是确定的，不需要靠启发式猜测。

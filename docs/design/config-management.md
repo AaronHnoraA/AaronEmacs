@@ -190,6 +190,11 @@ transient `config-dispatch`：打开 `config` group、按注册表 group 打开�
 该文件随仓库提交，是配置的真正来源。`config-set` / 面板写操作会更新这个文件。
 其他 `etc/config-*.el` 使用同样格式，并由 `config` 自动发现。
 
+Pi 的可共享默认模型池是 Noema 版本化的 `resources/pi/profile.json`。
+Skill/pack 仍由既有 Skill Manager 统一管理，Pi 没有第二份名单。
+Pi Custom 选项仍注册到同一 Config 面板，但本机覆盖写入忽略的
+`etc/noema/pi/config.el`；认证等私有 JSON 与原生运行数据不进 Git。
+
 ## 增量迁移工作流
 
 1. 找到散落的 `(setq some-var value)` 硬编码

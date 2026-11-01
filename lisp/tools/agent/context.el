@@ -51,15 +51,15 @@ only their known file identity, never the placeholder's point or contents."
         (append
          `((buffer . ,(buffer-name buffer)) (mode . ,(symbol-name major-mode))
            (file . ,file) (directory . ,directory) (root . ,root)
-           (sourceAvailable . ,(if source-available t :false))
+           (sourceAvailable . ,(if source-available t :json-false))
            (target . ,(when (or file directory) (remote-file-name-target (or file directory))))
            (logicalFile . ,(when file (remote-canonicalize-emacs-file-name file)))
            (activeProject . ,(bound-and-true-p +project-active-root))
-           (pageOwned . ,(if page t :false)))
+           (pageOwned . ,(if page t :json-false)))
          (when (and source-available (not page))
            (save-restriction
              (widen)
-             `((modified . ,(if (buffer-modified-p) t :false))
+             `((modified . ,(if (buffer-modified-p) t :json-false))
                (line . ,(line-number-at-pos position t))
                (selection . ,(when (and origin (use-region-p))
                                `((startLine . ,(line-number-at-pos (region-beginning) t))

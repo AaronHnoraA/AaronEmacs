@@ -1,0 +1,8 @@
+{
+  "name": "aaron-emacs-pi-runtime",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@automatalabs/pi-acp": "0.8.0"
+  }
+}

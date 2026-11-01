@@ -33,6 +33,7 @@ names, and that file wins over anything remembered.
 | Existing entry points not to duplicate | `AGENT.md` “Do Not Reinvent Existing Surfaces” |
 | Performance diagnostics | `AGENT.md` “Performance Diagnostics” |
 | Shared agent sessions, Compose, context, worktrees and quiet notifications | `docs/design/agent-management.md`; `lisp/tools/agent/` |
+| Pi: private runtime and config, Skill catalog; Project cache and memory APIs for Agents | `docs/design/pi-sessions.md`; `docs/design/agent-management.md` C50–C52 |
 | Noema's Elisp API | `docs/noema/design/elisp-api.md` |
 
 ## Commands outside Emacs
@@ -41,7 +42,11 @@ names, and that file wins over anything remembered.
 (`emacs-app`, `emacsopen`, …) with its spec; `make help` lists the make
 targets, described in `docs/ops/maintenance.md`.
 
-To show the user a file, run `emacsopen` (see `emacsopen --help`); do not call
+To show the user a file, prefer `emacsopen -o FILE` (alias `emacs-open`), keeping
+the Agent chat in its own window. Pi has no shell: use
+`noema:api:emacs:open` with `[{"file":"/absolute/path","placement":"other"}]`;
+`noema-editor-interaction` describes the editor APIs. Explicit user placement wins.
+For CLI options see `emacsopen --help`; do not call
 `emacsclient` yourself. With no placement it opens in the selected window,
 reusing a visible window already showing that file. `-o` uses the other window
 (splitting right if needed) and also reuses a visible file window. `-l`, `-r`,

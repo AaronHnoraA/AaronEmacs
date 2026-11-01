@@ -1719,6 +1719,30 @@ This is a memory-only check; it never opens an inactive project or reads disk."
  (lambda (params _client)
    (remote-require-on-client 'tools/agent/api)
    (+agent/api params)))
+
+(declare-function aaron-open-place "aaron-open" (file &optional placement line column no-focus))
+(defvar aaron-open-placements)
+
+(defun +noema--api-open-file (params _client)
+  "Open PARAMS through the same placement owner as `emacsopen'."
+  (remote-require-on-client 'aaron-open)
+  (let* ((file (alist-get 'file params))
+         (placement (intern (or (alist-get 'placement params) "other")))
+         (line (or (alist-get 'line params) 1))
+         (col (or (alist-get 'col params) 0))
+         (default-directory user-emacs-directory))
+    (unless (and (stringp file) (not (string-empty-p file))
+                 (memq placement aaron-open-placements)
+                 (integerp line) (> line 0) (integerp col) (>= col 0))
+      (user-error "Invalid file, placement or line/col"))
+    (cons '(ok . t)
+          (mapcar (lambda (entry)
+                    (cons (car entry) (pcase (cdr entry)
+                                       (:null nil) (:false :json-false) (value value))))
+                  (aaron-open-place file placement line (1+ col)
+                                    (eq (alist-get 'noFocus params) t))))))
+
+(remote-gateway-register-method "noema.open-file" #'+noema--api-open-file)
 (remote-gateway-register-method
  "noema.file.read" #'+noema--external-file-read)
 (remote-gateway-register-method

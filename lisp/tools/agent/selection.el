@@ -4,6 +4,8 @@
 (require 'subr-x)
 (require 'seq)
 (require 'tabulated-list)
+(declare-function +agent-ui-table-init "tools/agent/ui" ())
+(declare-function +agent-ui-table-summary "tools/agent/ui" (title summary &optional empty))
 
 (defvar +agent-selection nil
   "Selected sources: (BUFFER . OVERLAYS), (BUFFER), or (FILE).
@@ -85,7 +87,11 @@ A buffer without overlays means its entire saved file. No source is copied.")
                                   (if (bufferp source) (buffer-name source) source)
                                   (if (cdr entry) (format "%d region(s)" (length (cdr entry))) "File")))))
                 +agent-selection))
-  (tabulated-list-print t))
+  (tabulated-list-print t)
+  (+agent-ui-table-summary "Agent context"
+                           (format "%d references · RET visit · d remove · C-c C-c send"
+                                   (length tabulated-list-entries))
+                           "No context selected. Add a file or region before sending."))
 
 (defun +agent-selection-review-remove ()
   "Remove the source at point."
@@ -101,8 +107,10 @@ A buffer without overlays means its entire saved file. No source is copied.")
 
 (define-derived-mode +agent-selection-review-mode tabulated-list-mode "Agent Context"
   "Review references; d removes, RET visits, C-c C-c sends."
+  (require 'tools/agent/ui)
   (setq tabulated-list-format [("Source" 60 t) ("Scope" 16 nil)]
         tabulated-list-padding 2)
+  (+agent-ui-table-init)
   (tabulated-list-init-header))
 (define-key +agent-selection-review-mode-map (kbd "d") #'+agent-selection-review-remove)
 (define-key +agent-selection-review-mode-map (kbd "RET") #'+agent-selection-review-visit)

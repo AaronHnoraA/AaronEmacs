@@ -269,7 +269,7 @@ The function is called with no arguments when it accepts none, else with
   (when-let* ((fn (plist-get entry :on-change)))
     (when (functionp fn)
       (condition-case err
-          (if (zerop (cdr (func-arity fn)))
+          (if (eql 0 (cdr (func-arity fn)))
               (funcall fn)
             (funcall fn name value))
         (error
@@ -929,7 +929,7 @@ invoked a single time, while callbacks taking arguments run per entry."
                 (config--set-value entry key val)
                 (when-let* ((fn (plist-get entry :on-change)))
                   (when (functionp fn)
-                    (if (zerop (cdr (func-arity fn)))
+                    (if (eql 0 (cdr (func-arity fn)))
                         (cl-pushnew fn shared :test #'eq)
                       (config--run-on-change entry key val))))))))
         (error

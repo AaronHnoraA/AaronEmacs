@@ -113,10 +113,10 @@
     (unless (equal signature +agent-top--theme-signature)
       (setq +agent-top--theme-signature signature)
       (aaron-ui-set-face '+agent-top-border :foreground 'border-muted)
-      (aaron-ui-set-face '+agent-top-title :foreground 'accent-cyan :weight 'bold)
+      (aaron-ui-set-face '+agent-top-title :foreground 'role-strong :weight 'semi-bold)
       (aaron-ui-set-face '+agent-top-dim :foreground 'fg-muted)
       (aaron-ui-set-face '+agent-top-faint :foreground 'fg-faint)
-      (aaron-ui-set-face '+agent-top-key :foreground 'accent-cyan :weight 'bold))))
+      (aaron-ui-set-face '+agent-top-key :foreground 'accent-cyan :weight 'semi-bold))))
 
 ;;; Formatting
 
@@ -1266,13 +1266,19 @@ width then widens Session and Model."
                       (and rows (cons nil (car rows))))))
     (setq +agent-top--shown-id (and current (plist-get (cadr current) :buffer)))
     (aaron-ui-board-set-header
-     "Agent Top" 'process
+     "Agent usage" 'process
      (format "%d session%s · %d busy · %s"
              (length rows) (if (= 1 (length rows)) "" "s")
              (cl-count-if (lambda (row) (plist-get (car row) :busy)) rows)
              (format-time-string "%H:%M:%S")))
     (aaron-ui-board-render
      (lambda ()
+       (aaron-ui-board-insert-page-header
+        "Usage & quotas" :icon 'chart
+        :subtitle "Session usage, reported quotas and remote controls"
+        :stats (list (cons (format "%d sessions" (length rows)) 'info)
+                     (cons (format "%d working" (cl-count-if
+                                                 (lambda (row) (plist-get (car row) :busy)) rows)) 'muted)))
        (+agent-top--insert-quota)
        (+agent-top--insert-remote)
        (+agent-top--insert-cache rows)

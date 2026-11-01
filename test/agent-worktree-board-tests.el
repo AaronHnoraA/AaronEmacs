@@ -123,7 +123,10 @@
                        '("noema/one-1-codex" "noema/two-1-codex" "noema/two-2-claude")))
         (should (equal (aref (cadr (nth 1 tabulated-list-entries)) 0) "two (settled)"))
         (goto-char (point-min))
-        (forward-line 1)
+        ;; The native table now includes a visible column heading; select
+        ;; the attempt by identity instead of its physical line number.
+        (while (not (equal (tabulated-list-get-id) "noema/two-1-codex"))
+          (forward-line 1))
         ;; Sessions still open block the group's removal.
         (should-error (+agent-worktree-board-remove-group) :type 'user-error)
         (dolist (buffer sessions) (kill-buffer buffer))

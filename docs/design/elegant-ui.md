@@ -90,13 +90,14 @@ TTY 入口退回普通 buffer。隐藏保留页签与筛选状态，并停止页
 - `lisp/core/aaron-ui/aaron-ui-etaf.el`：ETAF Theme 适配和开发预览。
 - `lisp/core/aaron-ui/aaron-ui-float.el`：普通 buffer 与 ETAF View 的浮窗承载。
 - `lisp/core/aaron-ui/aaron-ui-docs.el`：通用 Markdown 文档浮窗与个人配置文档入口。
+- `lisp/core/aaron-ui/aaron-ui-activity.el`：后台任务页，使用 ETAF UI 的按钮、状态标签与分区。
 - `lisp/ui/theme/config.el`：包声明、延迟加载入口与 Dashboard `[config]` 动作。
 - `lisp/core/config-tools.el`：原生 Config 菜单和文档入口。
 - `lisp/tools/agent/config.el`：询问配置的隐藏 ACP 和 minibuffer 入口。
 
 ## 已知差距
 
-统一监控页仍有手写基础控件；后续可逐项换用 ETAF UI 组件，但需保留原有焦点与
+统一监控页的概览和导航仍有手写基础控件；后续可逐项换用 ETAF UI 组件，但需保留原有焦点与
 键盘动作。
 
 ## 待定设计

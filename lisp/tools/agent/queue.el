@@ -11,6 +11,7 @@
 (require 'seq)
 (require 'tools/agent/sessions)
 (require 'aaron-ui-etaf)
+(require 'tools/agent/ui)
 
 (declare-function aaron-ui-float-show "aaron-ui-float" (buffer &rest options))
 (declare-function aaron-ui-float-panel-for-buffer "aaron-ui-float" (buffer))
@@ -288,25 +289,43 @@ interrupting its work is a separate, explicit decision."
                      ("x" +agent-queue-clear-all "Remove all")
                      ("g" +agent-queue-refresh "Refresh")
                      ("q" +agent-queue-hide "Close"))
-       (etaf-label :text (or (plist-get data :title) "Queue") :variant 'heading)
+       (etaf-label :text "Message queue" :variant 'heading)
+       (etaf-label :text (or (plist-get data :title) "Queue") :variant 'strong)
        (etaf-label :text (or (plist-get data :state) "") :variant 'muted :wrap-mode 'word)
-       (etaf-label :text (+agent-queue--hint held (length items)) :wrap-mode 'word)
-       (column :width 'stretch :overflow 'scroll :item-gap '(lh 0.5)
+       (row :width 'stretch :item-gap '(ch 2)
+         (etaf-badge :text (format "%d pending" (length items)) :variant 'info)
+         (expr (when (> held 0)
+                 (etaf-view (etaf-badge :text (format "%d held" held) :variant 'warning)))))
+       (etaf-label :text (+agent-queue--hint held (length items)) :wrap-mode 'word :variant 'muted)
+       (column :ref 'agent-queue-list :width 'stretch
+               :height (list 'lh (max 3 (- (or (cdr (etaf-viewport)) 24) 10)))
+               :overflow 'scroll :item-gap '(lh 0.5)
+         (expr (when (null items)
+                 (etaf-view (etaf-empty :title "Nothing queued"
+                                       :description "Follow-up messages appear here while the agent works."))))
          (expr
           (seq-map-indexed
            (lambda (prompt index)
              (etaf-view
               (etaf-button
                :key (+agent-queue--row-ref index) :ref (+agent-queue--row-ref index)
-               :variant 'ghost :aria-selected (= index selected)
-               :bgcolor (aaron-ui-color (if (= index selected) 'bg-surface-strong 'bg-panel))
+               :variant 'ghost :aria-selected (= index selected) :padding '((lh 0) (ch 2))
+               :bgcolor (aaron-ui-color (if (= index selected) 'bg-surface-strong 'bg-base))
                :label (format "%d%s  %s" (1+ index) (if (< index held) " held" "")
                               (truncate-string-to-width
                                (replace-regexp-in-string "[ \t\n]+" " " prompt) 70 nil nil "…"))
+               :help-echo prompt
                :on-press (lambda ()
                            (with-current-buffer owner
                              (setq +agent-queue--selected index)
-                             (+agent-queue-refresh))))))
+                             (+agent-queue-refresh)))
+               (column :width 'stretch :item-gap '(lh 0)
+                 (etaf-label :text (format "%02d · %s" (1+ index)
+                                          (if (< index held) "Held for review" "After this turn"))
+                             :color (aaron-ui-color (if (< index held) 'accent-yellow 'fg-muted)))
+                 (etaf-label :text (truncate-string-to-width
+                                   (replace-regexp-in-string "[ \t\n]+" " " prompt) 180 nil nil "…")
+                             :wrap-mode 'word)))))
            items)))
        (etaf-label :text "e edit · d remove · J/K order · s send now · r resume · h hold · q close"
                    :variant 'muted :wrap-mode 'word)))))

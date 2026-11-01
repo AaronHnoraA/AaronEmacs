@@ -22,6 +22,9 @@
 (require 'seq)
 (require 'subr-x)
 (require 'tabulated-list)
+(declare-function +agent-ui-state-face "tools/agent/ui" (state))
+(declare-function +agent-ui-table-init "tools/agent/ui" ())
+(declare-function +agent-ui-table-summary "tools/agent/ui" (title summary &optional empty))
 (require 'tools/agent/worktree)
 
 (declare-function +agent-acp-attention-mark "tools/agent/acp" (buffer))
@@ -186,12 +189,18 @@ branch point, then new untracked files -- an agent's new file is a change."
                        (vector (format "%s (%s)" (car group) state)
                                (plist-get member :branch)
                                (or (plist-get member :agent) "")
-                               (symbol-name member-state)
+                               (propertize (symbol-name member-state)
+                                           'face (+agent-ui-state-face member-state))
                                (or (plist-get member :stat) "")))
                  entries))
          (cdr group) states)))
     (setq tabulated-list-entries (nreverse entries))
-    (tabulated-list-print t)))
+    (tabulated-list-print t)
+    (+agent-ui-table-summary
+     "Worktree attempts"
+     (format "%d attempts · RET session · m Magit · d diff · g refresh"
+             (length tabulated-list-entries))
+     "No parallel attempts in this workspace.")))
 
 (defun +agent-worktree-board-refresh ()
   "Read the groups and their changes from Git again, then redraw."
@@ -303,11 +312,13 @@ uncommitted edits.  Nothing is removed unless every attempt can go."
 
 (define-derived-mode +agent-worktree-board-mode tabulated-list-mode "Agent-Attempts"
   "Compare the parallel attempts of one repository."
+  (require 'tools/agent/ui)
   (setq tabulated-list-format [("Group" 28 t) ("Branch" 34 t) ("Agent" 9 t)
                                ("State" 8 t) ("Changes" 0 nil)]
         tabulated-list-padding 1
         header-line-format
         "Agent attempts  |  RET session  m Magit  d diff  k remove  K remove group  g refresh")
+  (+agent-ui-table-init)
   (tabulated-list-init-header)
   (add-hook '+agent-acp-changed-functions
             #'+agent-worktree-board--session-changed)

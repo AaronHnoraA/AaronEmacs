@@ -1825,6 +1825,19 @@ Agent Manager 按 target、workspace 分组并标注执行来源；Noema Researc
 `?` 显示快捷键帮助；Tab / Return 也能操作控件。隐藏和关闭管理器都不结束 agent。
 TTY 使用共享表格；`M-x +agent/sessions-table` 可显式打开诊断列表。
 
+`C-c A U` 的 Usage 页左侧选择会话，右侧显示上下文进度及 tokens、缓存读写、费用、
+回合和会话详情；未知数据用“—”，`RET` 进入所选聊天。完整配额与远程控制仍在
+操作菜单的 Detailed usage。队列页顶部显示 pending／held 数量，卡片按发送顺序
+排列，长列表可滚动，悬停查看完整正文。会话、工作树和上下文的原生表格有统一
+标题、数量、状态色与空状态，保留原来的快捷键。
+
+聊天输入上方提示 `RET`／`M-RET` 当前会发送、steer 还是排队；有队列时附上数量、
+挂起数和短预览，用 `/queue` 管理。连接中、client 退出会显示相应提示。
+`C-a` 在输入首行停在可编辑起点，方便接 `C-k`；续行照常回行首。
+角色标签去掉背景徽章，用户正文使用正常字重；思考与工具摘要使用较淡文字，
+工具状态和青色用户标签随 Aaron 主题切换。
+`M-x +agent-input-mode` 可切换当前聊天的输入提示。
+
 Noema Markdown 页的选区工具栏有 **Agent** 和 **Rewrite** 按钮，`...` 里还有
 Add to AI context、项目 Pi prompt 文档、在 Emacs 源 buffer 中选中；`H-o %` 是同一组操作的
 Transient。Portal 与 xwidget 页面都先保存笔记，发送整篇笔记也等待保存回执，
@@ -2069,14 +2082,15 @@ Run 声明新命名会话，与树里的原生 `f` 不同；WorkNode DAG 仍描�
 Markdown 语法审阅指导；维护实现使用 `emacs-noema-dev`。Skill 库位于
 `~/Documents/Noema/public/README/Skills/`，深度参考按需读取。
 
-Emacs 启动后在首次 idle 预热隐藏的主 Pi；明确进入本地项目后复用项目子 Pi，不抢焦点、
-不自动发送模型请求。`M-x pi`（`noema-pi-emacs-open`）、`C-c A P` 和 Dashboard
-的 `pi` 召回主 Pi；在其窗口再次调用会收起并返回编辑位置。
-`C-u C-c A P` 或 `M-x noema-pi-router-open` 打开来源项目 Pi。
+Emacs 启动后在首次 idle 预热隐藏的主 Pi，不自动发送模型请求。进入项目不创建
+项目 Pi；`M-x pi` 或 `C-c A P` 首次调用才创建该项目独立的 buffer 和 Session，
+再次调用复用，在对应窗口调用则收起并返回。切换项目会撤下前一项目的 Pi 视图。
+`C-u C-c A P`、`M-x noema-pi-emacs-open` 或 Dashboard 的 `pi` 召回主 Pi。
+默认 Codex Luna，推理 `medium`，Pi 工具调用自动允许；设置由 Config 面板统一维护。
 主 Pi 查询当前文件、项目和位置引用，通过共享 Agent 接口派发明确任务、查看进度
 与结果。后台发送不抢焦点，已受理或排队不表示任务完成；历史仍用 `noema-pi-sessions`。
-自动预热默认等待 0.5 秒 idle（`noema-pi-idle-delay`）；快速切换时只预热最后选择的
-项目，明确打开和发送立即执行。关闭 `noema-pi-assistant-mode` 会取消待预热工作，
+主 Pi 自动预热默认等待 0.5 秒 idle（`noema-pi-idle-delay`）；项目助手只在明确打开
+或发送时创建。关闭 `noema-pi-assistant-mode` 会取消待预热工作，
 保留已有对话。Pi Sessions 只在可见时合并刷新，隐藏后释放 UI 订阅与刷新计时器。
 `C-c A c c` 根据 `noema-prompt-document` Skill 申请普通 Markdown 文档；保存后
 `C-c A c s` 才交给 Agent 执行。没有额外 Compose 界面。

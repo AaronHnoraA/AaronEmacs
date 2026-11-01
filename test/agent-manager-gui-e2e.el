@@ -83,6 +83,11 @@
                   (progn
                     (select-window (aaron-ui-float-content-window panel))
                     (should (eq +agent-manager--view (cadr entry)))
+                    (when (eq (cadr entry) 'usage)
+                      (etaf-runtime-flush (etaf-runtime-for-buffer (current-buffer)))
+                      (should (string-match-p "Input tokens" (buffer-string)))
+                      (should (string-match-p "Reported cost" (buffer-string)))
+                      (should-not (get-buffer-window +agent-manager--selected (selected-frame))))
                     (agent-manager-gui-e2e--key "q")))
                 ;; Native input invoked inside a preview leaves the child
                 ;; frame through the same display owner as an explicit open.

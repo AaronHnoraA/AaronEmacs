@@ -108,5 +108,13 @@
       (put symbol 'saved-value nil)
       (put symbol 'customized-value nil))))
 
+(ert-deftest config-on-change-accepts-a-rest-argument-function ()
+  (let (seen (warnings nil))
+    (cl-letf (((symbol-function 'display-warning) (lambda (&rest args) (push args warnings))))
+      (config--run-on-change (list :on-change (lambda (&rest args) (setq seen args))) 'name 'value)
+      (config--run-on-change (list :on-change (lambda () (setq seen 'none))) 'name 'value))
+    (should (eq seen 'none))
+    (should-not warnings)))
+
 (provide 'init-config-store-tests)
 ;;; init-config-store-tests.el ends here

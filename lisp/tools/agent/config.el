@@ -1005,7 +1005,8 @@ is `+config-ask-model', registered with native Config Customize."
 (autoload 'noema-project-enable "noema-research" nil t)
 (autoload 'noema-pi-router-open "noema-pi-router" nil t)
 (autoload 'noema-pi-emacs-open "noema-pi-router" nil t)
-(defalias 'pi #'noema-pi-emacs-open)
+(autoload 'noema-pi-open "noema-pi-router" nil t)
+(defalias 'pi #'noema-pi-open)
 (autoload 'noema-pi-assistant-mode "noema-pi-router" nil t)
 (autoload 'noema-pi-startup "noema-pi-router")
 (autoload 'noema-pi-sessions "noema-pi-sessions" nil t)
@@ -1125,6 +1126,8 @@ is `+config-ask-model', registered with native Config Customize."
 (defvar config--registry)
 (declare-function noema-pi-project-root "noema-pi-router" (&optional directory))
 (declare-function noema-pi-close-project "noema-pi-router" (&optional directory interrupt))
+(declare-function noema-pi-router--auto-start-changed "noema-pi-router" (&optional _name _value))
+(declare-function noema-pi-router--permission-policy-changed "noema-pi-router" (&optional _name _value))
 (declare-function persp-current-buffers "perspective" ())
 
 (defconst +noema-config-groups
@@ -1155,7 +1158,10 @@ is `+config-ask-model', registered with native Config Customize."
                    (not (gethash symbol config--registry)))
           (apply #'config-register symbol
                  :group 'noema
-                 :store-file "etc/config-noema.el"
+                 :store-file (if (eq group 'noema-pi-router) "etc/noema/pi/config.el" "etc/config-noema.el")
+                 :on-change (pcase symbol
+                              ('noema-pi-auto-start #'noema-pi-router--auto-start-changed)
+                              ('noema-pi-permission-policy #'noema-pi-router--permission-policy-changed))
                  :doc (car (split-string (or (documentation-property
                                               symbol 'variable-documentation t)
                                              "")

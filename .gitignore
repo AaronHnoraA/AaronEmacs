@@ -64,6 +64,7 @@ target/
 /etc/hiapi-online.key
 /etc/joplin.token
 /etc/query-url.txt
+/etc/noema/pi/
 
 # Legacy local state paths from before var/etc cleanup
 /.org-id-locations
