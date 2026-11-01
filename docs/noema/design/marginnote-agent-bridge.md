@@ -116,10 +116,12 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 
 - **MN-G1：** Noema 插件 1.0.3 在 macOS 5.0.1 上的查询与手写读取已验证；iPad
   连接及取材仍未验证。插件通道固定在 `127.0.0.1`，iPad 只能走 Bridge。
-- **MN-G2：** 5.0.1 上 Bridge 的读写路由与 `official_export.mjs` 已在 macOS 和
-  iPad 验证，含带手写的插入留白；贴图等其他图层仍需每次视觉核对。插件命令执行、
-  批注稿编辑器、写入 MN 的图片遮罩、`blank-bands` 追加的成功路径与
-  `/writing/*` 写入路由未验证。
+- **MN-G2：** 5.0.1 上 Bridge 的读写路由、官方导出和页内留白写字已在 macOS 和 iPad
+  验证，含带手写的插入留白；贴图等其他图层仍需每次视觉核对。插件命令执行、批注稿
+  编辑器与 `/writing/*` 写入路由未验证。
+- **MN-G3：** Noema 笔记导 PDF、批注后合并回 Markdown 的流程只有设计，手写到 Markdown
+  位置的映射未实现；`workflow.py` 的增量快照未接新导出。步骤见 `marginnote-agent` 的
+  `references/workflows.md`。
 
 ## 安装与调用
 
