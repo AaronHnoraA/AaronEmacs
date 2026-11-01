@@ -136,9 +136,9 @@ Emacs Pi 负责编辑器操作、跨项目路由和找到项目 Pi。项目 Pi �
   创建进程。各项目的会话继续保留，由同一显示 owner 管理各自返回位置。
 - **C22 Pi 是可直接沟通的 Agent。** 项目中的普通 ACP 会话从入口提示（C51）得知 Pi 存在、
   自己的 `buffer` 与 `nativeSessionId`，方法在 `noema-pi` Skill。`emacs:pi` `send` 带 `from`
-  时，Emacs 先按身份核对这个会话，再把它的 Agent、buffer、native ID 和项目根写成消息头；
-  核对不过拒绝发送，头不由调用方拼写。Pi 用 `emacs:agent` `send` 回复到这个会话，忙时排队，
-  所以调用方可以结束回合等待，不轮询。主动查看用 `status` 取身份后 `emacs:agent` `read`。
+  时，Emacs 先按身份核对这个会话，再把它的 Agent、buffer、native ID、项目根和可直接使用的
+  回复调用写成消息头；核对不过拒绝发送，头不由调用方拼写。Pi 照这个调用回复，不用查接口，
+  忙时排队，所以调用方可以结束回合等待，不轮询。主动查看用 `status` 取身份后 `emacs:agent` `read`。
   消息头表明来自 Agent，不带人的批准；Pi 只回复一次，不回应确认，避免互相续杯。
 
 ## 工作流程

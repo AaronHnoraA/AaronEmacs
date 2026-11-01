@@ -654,14 +654,6 @@ emacs --batch -Q --init-directory="$PWD" -l ./early-init.el \
 1. `gls` 是否存在
 2. macOS 上 coreutils 是否装好
 
-### Noema host 跟随代码
-
-host 启动时记下 Noema 仓库最新提交和 kernel 二进制的时间。Agent 回合结束时比较一次，只
-有一次 `stat`，没有轮询。代码变了并且没有打开的 Noema 页面、运行中的任务、忙碌的 Agent
-和 Jupyter kernel 时，host 自动重启；否则等下一个回合。重启不等于丢工作：Agent 进程在
-Emacs，观察项和任务图谱都在项目的 `.agent/`。`M-x +noema/refresh-host` 手动做同样的判断，
-并说明在等什么。kernel 的 Go 源码变了要先 `make noema-kernel-install`。
-
 ### Lean / Noema 孤儿进程占内存
 
 Lean 4 LSP 是 watchdog 架构：eglot 管理的是 `lean --server`/`lake serve`

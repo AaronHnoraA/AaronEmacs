@@ -61,6 +61,8 @@
      ("O" "Orchestration" noema-orchestration)
      ("g" "Agent cache" noema-project-graph :slash "cache"
       :doc "Open the Project's cache, task graph and watches")
+     ("L" "Leave a watch…" noema-project-graph-add-watch :slash "watch"
+      :doc "Tell this Project's Pi something after a countdown")
      ("p" "Promote to Research" noema-agent-promote-current-session :if +agent-menu--session-p)
      ("e" "Edit page source" noema-md-bridge-edit-source)
      ("J" "Associated work" +agent-menu-jump :if +agent-menu--jump-p)

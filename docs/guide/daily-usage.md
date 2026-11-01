@@ -2053,7 +2053,7 @@ tab-line/tab-bar，但会出现在 Ibuffer 的 Agent 分组和日常 buffer 选�
 |----|------|
 | `?`（输入区外） / `C-c C-z` | 全部动作的菜单；鼠标右键 tab 相同 |
 | `/queue` `/next` `/changes` `/resume` | 输入区本地命令：队列、下一个等待的会话、改过的文件、已保存对话 |
-| `/cache` `/inbox` `/usage` `/pi` `/doctor` | 同上，不走模型：Agent cache、Inbox、Usage、项目 Pi、Pi doctor |
+| `/cache` `/inbox` `/usage` `/pi` `/doctor` `/watch` | 同上，不走模型：Agent cache、Inbox、Usage、项目 Pi、Pi doctor、倒计时后告诉 Pi |
 | `/fork` `/rename` `/restart` `/new` `/side` `/agents` | 输入区本地命令，生成中也可用；提供方的同名命令优先 |
 | `C-c C-c` | 停止当前 Run 或回合，排队的 prompt 挂起 |
 | `C-c C-e` | 聚焦输入提示符 |

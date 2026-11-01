@@ -23,7 +23,7 @@ PlanWeave、Trace Canvas 用 Claude/Codex 的 hooks 自动记录，要写各家 
 | 协议 | `noema-project-graph` pack 的 `noema-pi` Skill | 何时用、怎么说；拒绝信息和 `fix` 来自引擎 |
 
 pi-acp 既不公布 Pi 扩展的指令，也不转发它们的输出，所以管理指令是动作表的行，在聊天输入框
-本地执行，不是 Pi 扩展指令。
+本地执行，不是 Pi 扩展指令。`/watch` 用 minibuffer 问时间和内容。
 
 ## 触发与动作
 
