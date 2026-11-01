@@ -713,6 +713,7 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
 ## 9. Noema AI/agent
 
 - `M-x noema` / `C-c A W` — 打开项目 Pi；主／项目关系与独立 Session 见 [Pi 会话与项目助手](../design/pi-sessions.md)
+- 项目 Agent 协作：Agent 直接找项目 Pi，事情留给观察项，任务落盘到图谱，见[用 Pi 协作](pi-collaboration.md)
 - `M-x +agent/start` / `C-c A n` — 启动包管理的 agent-shell 上的结构化 agent
 - agent-shell 原生 `turn-complete` 事件由 `+agent-acp.el` 转发给本配置，裸启动的
   Claude 等 agent-shell 会话也在创建 buffer 时订阅：每轮结束后只检查可见及最近的普通

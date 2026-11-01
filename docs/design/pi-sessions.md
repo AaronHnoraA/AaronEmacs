@@ -139,7 +139,8 @@ Emacs Pi 负责编辑器操作、跨项目路由和找到项目 Pi。项目 Pi �
   时，Emacs 先按身份核对这个会话，再把它的 Agent、buffer、native ID、项目根和可直接使用的
   回复调用写成消息头；核对不过拒绝发送，头不由调用方拼写。Pi 照这个调用回复，不用查接口，
   忙时排队，所以调用方可以结束回合等待，不轮询。主动查看用 `status` 取身份后 `emacs:agent` `read`。
-  消息头表明来自 Agent，不带人的批准；Pi 只回复一次，不回应确认，避免互相续杯。
+  回复开头带 `[From Pi, not the person]`。消息头和回复都表明来自 Agent，不带人的批准；Pi 只回复
+  一次，不回应确认，避免互相续杯。
 
 ## 工作流程
 
@@ -151,7 +152,9 @@ Emacs Pi 负责编辑器操作、跨项目路由和找到项目 Pi。项目 Pi �
    选中的执行 Agent。文档、会话、任务产物分别保留自己的身份。
 4. **执行和反馈：** API 创建或修订提案 → 页面响应保存通知 → 人审核或评论 →
    同一 Session 按文件位置继续。提交成功与执行完成分别报告。
-5. **长任务接续：** 先按预算检索与选择上下文，再生成可核查的交接；需要新对话
+5. **Agent 之间协作：** Agent 按入口提示用 `emacs:pi` 找 Pi → Pi 按消息头回复到它的会话 → 后续事情
+   写成观察项。日常用法见[用 Pi 协作](../guide/pi-collaboration.md)。
+6. **长任务接续：** 先按预算检索与选择上下文，再生成可核查的交接；需要新对话
    时保留旧 native ID 和新旧关系，更新活跃指针。原生压缩按实际能力提供。
 
 ## 存储与实现
@@ -184,7 +187,7 @@ API 与 Markdown 审阅见 [Noema 交互](../noema/design/interaction-plan.md)�
 | 文件 | 归属 |
 | --- | --- |
 | Emacs `config/pi/runtime/package*.json` | 进 Git 的固定 npm 依赖与 lock；`make pi-setup` 安装 |
-| Noema `resources/pi/profile.json`、`SYSTEM.md`、`extensions/` | 进 Git 的默认模型池、提示词与扩展；Skill/pack 归既有管理器 |
+| Noema `resources/pi/profile.json`、`SYSTEM.md`、`extensions/` | 进 Git 的默认模型池、提示词与扩展（含观察项的执行者 `watcher.mjs`）；Skill/pack 归既有管理器 |
 | Noema `resources/skills/noema-{agent-operations,context-memory,pi,project-docs,project-maintenance,workflow-audit}/` | 与实现一起维护的操作 Skill；其它知识库 Skill 仍在原库 |
 | Emacs `etc/noema/pi/config.el` | 私有 Config 面板覆盖，按需生成；默认值仍来自版本化 profile |
 | Emacs `etc/noema/pi/{settings,models,auth}.json` | 私有 Pi 配置和认证；原有 `var/` 文件首次部署时迁移，保持引用 |

@@ -80,6 +80,7 @@ No active workbenches. The ignored upstream clones remain under `works/doom-temp
 - [documentation-center.md](guide/documentation-center.md) Reading map for this Emacs configuration, Noema, configuration settings, and the official Emacs manual.
 - [settings-cookbook.md](guide/settings-cookbook.md) “I want to change X” guidance that tells you where each kind of change belongs.
 - [dev-guide.md](guide/dev-guide.md) Programming, completion, LSP, debugging, terminals, remote work, browser integration, and AI.
+- [pi-collaboration.md](guide/pi-collaboration.md) Agents working together in a Project: reaching Pi, leaving work for later, the task graph and what they cost.
 - [project-guide.md](guide/project-guide.md) Project switching, project workbench flow, and how Treemacs / Perspective fit together.
 - [research-notes-workflow.md](guide/research-notes-workflow.md) Division of labor between notes, Jupytext notebooks, Jupyter, and reusable source code.
 - [workbench-tools.md](guide/workbench-tools.md) Adopted Xenodium editing, file, GitHub, Bazel, calendar, Org, and macOS workbenches, with keybindings and design boundaries.

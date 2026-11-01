@@ -22,7 +22,7 @@ Session、Run、任务、Attention 与能力；`M-x noema-sessions` 管理项目
 Agent cache）：一页显示缓存与记忆、任务树、需要处理的问题和最近日志。`g` 重新解析，
 `RET` 打开任务文件，`m` 做保守维护。终端里用
 `node ~/.config/emacs/site-lisp/noema/scripts/project-graph.mjs graph --text`。
-契约见[项目任务图谱](../design/project-graph.md)。
+契约见[项目任务图谱](../design/project-graph.md)，多个 Agent 怎样配合见[用 Pi 协作](../../guide/pi-collaboration.md)。
 
 ## 围绕 Markdown 工作
 

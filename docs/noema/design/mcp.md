@@ -47,7 +47,9 @@ read-only checks.
 
 ## 渐进式本地 API
 
-`scripts/agent-mcp.mjs` 提供 stdio MCP，只注册 `noema_api` 和 `noema_call`。
+`scripts/agent-mcp.mjs` 提供 stdio MCP，只注册 `noema_api` 和 `noema_call`。`args` 是 JSON 数组，
+大多数 channel 只收一个对象 `[{...}]`：`agent:call` 拒绝把字段写成值列表，否则 handler 读不到字段，
+会按默认动作执行并报告成功。channel 可以省略 `noema:api:` 前缀，`describe`、调用和客户端都接受。
 前者分页搜索运行中 host 的所有已注册 channel 名字，或查看一个 channel 的参数
 及实际处理器；后者调用相同的后端，保留既有检查与通知。目录不内嵌完整 schema。
 

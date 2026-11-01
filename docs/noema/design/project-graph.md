@@ -13,7 +13,7 @@
 | 引擎 | `site-lisp/noema/server/lib/project-graph.mjs` | 全部规则；只用 Node 内置模块 |
 | 脚本 | `site-lisp/noema/scripts/project-graph.mjs` | 有 shell 的 Agent 用，不需要 host |
 | API | `noema:api:agent:project:graph` | Pi 经 `noema_call` 用，与脚本同一份代码 |
-| Skill pack | `noema-project-graph` | 只讲判断；`agent_catalog: true`，随目录披露给 Agent 与 Pi |
+| Skill pack | `noema-project-graph`（graph、plan、run、review、`noema-pi`） | 协议和契约，只讲判断；`agent_catalog: true`，随目录披露给 Agent 与 Pi |
 | 页面 | `noema-project-graph`（`C-c A g`，项目总览的 Agent cache） | 解析展示；`m` 触发既有维护，`x`、`p` 停止 [Pi 的观察项](../../design/pi-watches.md) |
 
 ## 数据
