@@ -224,6 +224,18 @@
         ],
         "preamble": "以 AGENTS.md、项目 Markdown 和实际产物接续工作；.agent/ 保存必要的任务、记忆和交接记录。复用现有 Agent 与 Noema 运行能力，没有工具时按指导组织工作，不要求 .noema、Cell 或 DAG，也不把指导说成自动执行的机制。"
       },
+      "noema-project-graph": {
+        "agent_catalog": true,
+        "title": "Noema 项目任务图谱",
+        "description": "项目开发规范：任务依赖、领取与评审、决定记录，全部在 .agent/tasks/ 由 Agent 自己维护",
+        "members": [
+          "noema-project-graph",
+          "noema-project-plan",
+          "noema-project-run",
+          "noema-project-review"
+        ],
+        "preamble": "这是项目开发规范，不是要启动的服务。多步工作先看 .agent/tasks/ 的图谱，接着上次停下的地方做，边做边记决定和提交；单步小改动不用它。"
+      },
       "noema-md": {
         "agent_catalog": true,
         "title": "Noema Markdown",
