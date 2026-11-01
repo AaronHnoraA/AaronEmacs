@@ -12,6 +12,7 @@
 (defvar +agent-manager--selected)
 (defvar +agent-manager--model)
 (declare-function +agent-manager-hide "tools/agent/manager" ())
+(declare-function +agent-manager-new "tools/agent/manager" ())
 
 (defun +agent-menu--buffer ()
   "Resolve the captured session again before every operation."
@@ -81,9 +82,11 @@
 (defun +agent-menu-new ()
   "Create a conversation through its management owner, or an execution agent."
   (interactive)
-  (let ((buffer (or (transient-scope '+agent-session-menu) (current-buffer))))
-    (unless (run-hook-with-args-until-success '+agent-session-action-functions 'new buffer)
-      (call-interactively #'+agent/start))))
+  (if (bound-and-true-p +agent-manager--model)
+      (+agent-manager-new)
+    (let ((buffer (or (transient-scope '+agent-session-menu) (current-buffer))))
+      (unless (run-hook-with-args-until-success '+agent-session-action-functions 'new buffer)
+        (call-interactively #'+agent/start)))))
 (autoload '+agent/queue "tools/agent/queue" nil t)
 
 (defun +agent-menu--show (buffer)

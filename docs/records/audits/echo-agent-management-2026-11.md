@@ -108,6 +108,11 @@ LaTeX 与 LSP 各有一项桩替换未缓存 trampoline 的原语，编译器调
 `output-workflow-compilation-is-owned-by-current-frame` 默认没有打开的 workspace，
 与 agent 测试同进程时走了 task 路径。
 
+审查并行工作（C45、C46、Pi 项目标签）的管理入口时修复两处交界问题：池查询默认排除 Pi
+后，`/next` 会漏掉等待审批的 Pi；从管理器菜单新建没有收起管理器，也没有用选中会话的
+workspace。审查只覆盖这些管理入口与本轮代码的交界，不是对 `949bd443` 和 Noema 提交的
+逐行审查。
+
 ## 验证边界
 
 - **真实 SSH 未实测。** `agent-remote-routed-*` 在客户端无法直接访问的 Remote target

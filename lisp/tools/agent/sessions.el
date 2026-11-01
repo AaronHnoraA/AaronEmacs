@@ -183,7 +183,8 @@ With prefix PROJECT stay in this project's pool.  A pending approval or
 question lands on its native control; nothing is decided for you."
   (interactive "P")
   (let* ((root (and project (or +agent-acp-session-root (+agent-acp-project-root))))
-         (waiting (+agent-session-attention-queue (+agent-pool-sessions root)))
+         ;; Pi has its own pool, but a Pi waiting on you is still waiting.
+         (waiting (+agent-session-attention-queue (+agent-pool-sessions root nil 'all)))
          (buffers (mapcar (lambda (session) (plist-get session :buffer)) waiting))
          (index (seq-position buffers (current-buffer)))
          (session (and waiting (nth (mod (1+ (or index -1)) (length waiting)) waiting))))

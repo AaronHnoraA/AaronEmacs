@@ -196,6 +196,24 @@
           (should (equal reasons '(failed))))
       (agent-lifecycle-e2e--dispose agent))))
 
+(ert-deftest agent-attention-c40-a-waiting-pi-is-not-skipped ()
+  (let ((pi-chat (agent-lifecycle-e2e--synthetic "pi" '+agent-acp-session-origin 'pi-project))
+        reviewed)
+    (agent-lifecycle-e2e--await-permission pi-chat "Run")
+    (unwind-protect
+        (cl-letf (((symbol-function '+agent-acp-review-request) (lambda (buffer) (setq reviewed buffer))))
+          (with-temp-buffer (+agent/next-attention))
+          (should (eq reviewed pi-chat)))
+      (agent-lifecycle-e2e--dispose pi-chat))))
+
+(ert-deftest agent-keys-c47-new-from-the-manager-menu-uses-the-manager ()
+  (let (called)
+    (with-temp-buffer
+      (setq-local +agent-manager--model t)
+      (cl-letf (((symbol-function '+agent-manager-new) (lambda () (setq called t))))
+        (+agent-menu-new))
+      (should called))))
+
 (ert-deftest agent-attention-c40-a-domain-reason-stays-in-the-inbox ()
   (should (= 3 (+agent-session-attention-rank (list :attention-kind 'proposal))))
   (should (< (+agent-session-attention-rank (list :attention-kind 'failed))
