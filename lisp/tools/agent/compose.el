@@ -1,5 +1,6 @@
 ;;; tools/agent/compose.el --- Agent document actions -*- lexical-binding: t; -*-
 (require 'tools/agent/context)
+(require 'noema-agent-text)
 
 ;;;###autoload
 (defun +agent/compose (&optional _name)
@@ -18,7 +19,7 @@
     (unless (and buffer-file-name (derived-mode-p 'markdown-mode))
       (user-error "Open a Markdown task document first"))
     (+agent-context--send
-     :prompt "Carry out the task in this Markdown document, using its referenced context."
+     :prompt (noema-agent-text "task")
      :pick pick
      :references (+agent-context--file-references
                   (or (+agent-context--buffer-file (current-buffer))

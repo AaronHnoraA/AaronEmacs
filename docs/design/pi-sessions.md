@@ -160,14 +160,15 @@ Emacs Pi 负责编辑器操作、跨项目路由和找到项目 Pi。项目 Pi �
   `propose` 把一段改动按实际变动的行拆成多张卡片，未变的行留在卡片外，只隔一行的改动合为
   一张。超过 12 张或单张超过 60 行变动就拒绝，错误信息指向 `edit`，因为这样的卡片没人能审。
   `edit` 不碰待审提案，那是人的决定。新到的提案落在光标上时光标移到卡片之前，保持卡片
-  形态；用户正在编辑的块不受影响。测试：`C25 *`。
+  形态；用户正在编辑的块不受影响。测试：`C25 *`，WebKit 实测 `scripts/check-ediff-arrival.mjs`。
 - **C26 提示词分层。** Agent 读到的文本分四层，一个事实只写在一层。
   工具指南 `resources/agent/tools.md`：有哪些工具、什么请求用哪个，是唯一一份，
   MCP 说明、CLI `help` 和页面审阅引导都读它。入口文本：只补这个入口特有的事实（传输方式、
   选区、项目、会话身份）。Pi 的 `SYSTEM.md`：身份和协作规则。Skill：需要时才读的深入判断。
   文本是数据：这些都放在 `resources/agent/`（Pi 的放在 `resources/pi/`，Skill 和 preamble 各在
   其位），用到时才读，改提示词不需要编译、重载或重启。Elisp 和 JS 里只留占位填充，不写指导
-  句子。引导的会话键取自文本哈希，所以新文本也会到达已有会话。Pi 的系统提示默认就是版本化的 `SYSTEM.md`，私有覆盖要显式设置
+  句子，读取函数 `noema-agent-text` 不依赖任何模块。引导的会话键取自文本哈希，所以新文本
+  也会到达已有会话；MCP 说明由协议在连接时发送一次，新文本从下一个会话起生效。Pi 的系统提示默认就是版本化的 `SYSTEM.md`，私有覆盖要显式设置
   `noema-pi-system-prompt`；不在加载时把文件读进变量，否则文件一变，旧文本就被当成覆盖部署。
   测试：`C26 *`、`*-c26-*`、`pi-system-prompt-c26-*`。全部入口见下面的提示词地图。
 - **C24 API 失败说实话。** 客户端只把 `ESRCH` 当成进程不存在；沙盒中查询存活得到的
@@ -189,7 +190,7 @@ Agent 读到的每段文本都在这张表里。新增入口时加一行，并�
 | Pi 系统提示 | `resources/pi/SYSTEM.md` | Pi，每回合 | 身份、工作方式、协作规则 |
 | Skill 目录 | `renderAgentCatalog` | Pi，每回合 | pack preamble、Skill 名称和用途 |
 | Skill 正文 | `resources/skills/`、Skill 库、`.agents/skills/` | 需要时读取 | 深入判断 |
-| 任务发送 | `resources/agent/task.md`、`related.md`、`prompt-document.md`；普通 buffer 的 `+agent/compose-send` | 用户触发 | 这一次的任务 |
+| 任务发送 | `resources/agent/task.md`、`related.md`、`prompt-document.md` | 用户触发 | 这一次的任务 |
 | 其他任务 Agent | MarginNote 同步、LaTeX 导出、Research Run、Magent CLI | 各自 owner | 自带上下文，不收以上引导 |
 
 ## 工作流程
