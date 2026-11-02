@@ -2095,7 +2095,7 @@ Emacs 启动后在首次 idle 预热隐藏的主 Pi，不自动发送模型请�
 `C-c A c s` 才交给 Agent 执行。没有额外 Compose 界面。
 
 Noema 页面发送选区时，每个真实 Session 只初始化一次简短 API 入口。之后只发送
-要求和范围；通过 `noema_api` 查询一个能力、按需 describe，再 `noema_call` 调用。
+要求和范围；知道参数就直接 `noema_call`，不清楚时才用 `noema_api` 查询或 describe。
 已有会话也可用 `scripts/agent-api.mjs`，不必重启。修改走带版本校验的提案 API，
 页面响应保存事件，人在卡片中接受、拒绝、评论并 Send feedback。
 

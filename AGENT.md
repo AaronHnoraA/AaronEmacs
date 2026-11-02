@@ -468,6 +468,11 @@ This config already has maintenance and workflow entry points. Reuse them:
   with `from`, and hears back as a message in its own session
   (`docs/design/pi-sessions.md` C22, the `noema-pi` Skill).  Do not add another cache, memory index
   or status command; a new shared resource is added to that entry and Skill.
+- Agent-facing text: prompts, Skills, pack preambles and API descriptions disclose
+  what exists and when it helps, and the Agent scales to the task; only safety and
+  ownership are hard rules.  A small Markdown revision is one `agent:document:propose`
+  call.  What every turn or session carries has a budget a test holds
+  (`docs/design/pi-sessions.md` C23); say what actually failed (C24).
 - Pi's watches: `agent:pi:watch` is the one way to leave work for later (a
   countdown, a repeat, a hook on a task graph or session fact, a Project
   script), kept in `.agent/pi/` and fired by the Pi plugin while the Project's Pi

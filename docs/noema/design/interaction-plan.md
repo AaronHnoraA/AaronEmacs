@@ -37,13 +37,13 @@ forking or imitating them.
 
 ## Noema Markdown review
 
-每个原生 ACP Session 首次收到简短 API 能力入口；后续请求只有要求、文件与
-精确选区。起草、复制到剪贴板不消耗会话初始化；新原生 Session 再初始化。
+每个原生 ACP Session 首次收到简短 API 能力入口，含 `agent:document:propose` 的完整调用
+形状；后续请求只有要求、文件与精确选区，短选区带上原文（[Pi C23](../../design/pi-sessions.md)）。起草、复制到剪贴板不消耗会话初始化；新原生 Session 再初始化。
 完整语法与全部 API schema 不按轮注入。
 
 本地 API MCP 只公布 `noema_api` 与 `noema_call`。前者搜索当前注册 channel 的名字、
 用途和别名（按所有关键词匹配，名字命中优先；不搜索实现正文），或
-查看一个接口的参数与实际实现；后者通过同一后端调用。已有会话可使用
+查看一个接口的参数（实现只在没有字段说明或 `source:true` 时给出）；后者通过同一后端调用。已有会话可使用
 `scripts/agent-api.mjs`，不必为新增 MCP 重启会话。它每次从 `host.json` 解析活跃
 端口。公共 Server 模式仍只暴露原有只读发布能力。
 
