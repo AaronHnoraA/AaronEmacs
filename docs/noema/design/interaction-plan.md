@@ -58,13 +58,14 @@ CLI `emacsopen -o` 使用同一 owner。页面自身的 Noema 打开与克隆保
 不能当作读取编辑器的操作。只读审计必须取得设计和实现证据，状态查询只说明现场。
 
 `agent:document:read` 返回保存版本、UTF-16 范围和已有提案反馈；
-`agent:document:propose` 保留旧文与未选文字、生成或修订原地提案，然后复用
+`agent:document:propose` 保留旧文与未选文字、生成或修订原地提案，`agent:document:edit`
+直接应用修改，两者都复用
 `notes:save` 的 CAS、索引更新与页面通知。版本冲突要求重新读取，不强制覆盖。
 API 不替人接受提案。
 
 在 Noema Markdown 页面选中文字，用 `+agent-context-send-region` 发送给已有 Agent
-会话，并输入修改要求。页面通过 API 创建原地 `ediff` 提案：改写以旧／新行提案放回
-原位置，问答仍只回答。卡片默认比较 Markdown 局部排版，Diff 可检查精确源码；
+会话，并输入修改要求。Agent 按请求选择（[Pi C25](../../design/pi-sessions.md)）：明确要求的
+改动直接应用，需要斟酌的以原地 `ediff` 提案放回原位置，问答仍只回答。卡片默认比较 Markdown 局部排版，Diff 可检查精确源码；
 接受和拒绝沿用可撤销的文档事务。写下评论后用 Send feedback 保存并把提案引用
 送回会话，继续同一审阅流程。文件审阅列表也有这个入口。
 范围与交付契约见 [agent-context.md](agent-context.md)，语法见 [syntax.md](syntax.md)。

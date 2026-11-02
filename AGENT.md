@@ -470,9 +470,12 @@ This config already has maintenance and workflow entry points. Reuse them:
   or status command; a new shared resource is added to that entry and Skill.
 - Agent-facing text: prompts, Skills, pack preambles and API descriptions disclose
   what exists and when it helps, and the Agent scales to the task; only safety and
-  ownership are hard rules.  A small Markdown revision is one `agent:document:propose`
-  call.  What every turn or session carries has a budget a test holds
-  (`docs/design/pi-sessions.md` C23); say what actually failed (C24).
+  ownership are hard rules.  A small Markdown change is one call: `agent:document:edit`
+  applies what was plainly asked, `agent:document:propose` makes split, bounded review
+  cards (C25).  Which tool fits which request has one text, `resources/agent/tools.md`;
+  an entry adds only its own facts (C26).  Agent-facing text is data under
+  `resources/`, read when used: changing a prompt needs no compile, reload or restart.  What every turn or session carries has a
+  budget a test holds (`docs/design/pi-sessions.md` C23); say what actually failed (C24).
 - Pi's watches: `agent:pi:watch` is the one way to leave work for later (a
   countdown, a repeat, a hook on a task graph or session fact, a Project
   script), kept in `.agent/pi/` and fired by the Pi plugin while the Project's Pi

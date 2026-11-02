@@ -154,10 +154,44 @@ Emacs Pi 负责编辑器操作、跨项目路由和找到项目 Pi。项目 Pi �
   不符的情况。入口提示、`help`、MCP 说明都给出常用调用的完整形状，省掉 describe。
   每回合或每会话都带的文本有预算：`SYSTEM.md`、pack preamble、Skill 描述与正文、入口提示、
   审阅引导的长度由测试卡住。测试：`C23 *`、`*-c23-*`、`noema-agent-entry-c51-offers-*`。
+- **C25 改文档的两条路。** Agent 按请求选：`agent:document:edit` 直接应用明确要求的改动
+  （格式、整理、机械或全文修改），`agent:document:propose` 给需要人斟酌的改动做审阅卡片。
+  两者都接受 `edits` 或全文 `content`，都走 `notes:save`，打开的页面随之更新。
+  `propose` 把一段改动按实际变动的行拆成多张卡片，未变的行留在卡片外，只隔一行的改动合为
+  一张。超过 12 张或单张超过 60 行变动就拒绝，错误信息指向 `edit`，因为这样的卡片没人能审。
+  `edit` 不碰待审提案，那是人的决定。新到的提案落在光标上时光标移到卡片之前，保持卡片
+  形态；用户正在编辑的块不受影响。测试：`C25 *`。
+- **C26 提示词分层。** Agent 读到的文本分四层，一个事实只写在一层。
+  工具指南 `resources/agent/tools.md`：有哪些工具、什么请求用哪个，是唯一一份，
+  MCP 说明、CLI `help` 和页面审阅引导都读它。入口文本：只补这个入口特有的事实（传输方式、
+  选区、项目、会话身份）。Pi 的 `SYSTEM.md`：身份和协作规则。Skill：需要时才读的深入判断。
+  文本是数据：这些都放在 `resources/agent/`（Pi 的放在 `resources/pi/`，Skill 和 preamble 各在
+  其位），用到时才读，改提示词不需要编译、重载或重启。Elisp 和 JS 里只留占位填充，不写指导
+  句子。引导的会话键取自文本哈希，所以新文本也会到达已有会话。Pi 的系统提示默认就是版本化的 `SYSTEM.md`，私有覆盖要显式设置
+  `noema-pi-system-prompt`；不在加载时把文件读进变量，否则文件一变，旧文本就被当成覆盖部署。
+  测试：`C26 *`、`*-c26-*`、`pi-system-prompt-c26-*`。全部入口见下面的提示词地图。
 - **C24 API 失败说实话。** 客户端只把 `ESRCH` 当成进程不存在；沙盒中查询存活得到的
   `EPERM` 不代表 host 已停。请求根本没发出（找不到 host、连接被沙盒拦截或被拒）时明说
   没有发送，并指出真正的原因；只有请求可能已到达才说结果未知、改动前先读状态。
   Agent 据此判断要不要叫人重启，不把沙盒当作 host 故障。测试：`C24 *`。
+## 提示词地图
+
+Agent 读到的每段文本都在这张表里。新增入口时加一行，并说明它补了哪些入口特有的事实。
+
+| 文本 | 位置 | 谁收到、何时 | 内容 |
+| --- | --- | --- | --- |
+| 工具指南 | `resources/agent/tools.md` | 经下面三个入口 | 有哪些工具、什么请求用哪个 |
+| MCP 说明 | `scripts/agent-mcp.mjs` | 有 Noema MCP 的 Agent，会话开始 | 工具指南原文 |
+| CLI `help` | `scripts/agent-api.mjs` | 有 shell 的 Agent，主动查询 | 工具指南和命令用法 |
+| 页面审阅引导 | `tools.md` + `resources/agent/page-entry.md` | 页面的 agent、task、related，每个原生 Session 一次 | 工具指南、传输方式、选区规则 |
+| 单次选区说明 | `noema-md-bridge--review-instructions` | 页面发起的修改，每次 | 选区位置、文件、短选区原文 |
+| 项目入口 | `resources/agent/project-entry.md` | 项目中的普通会话，每个原生 Session 一次 | 项目根、`help` 命令、Skill 位置、会话身份（Agent C51） |
+| Pi 系统提示 | `resources/pi/SYSTEM.md` | Pi，每回合 | 身份、工作方式、协作规则 |
+| Skill 目录 | `renderAgentCatalog` | Pi，每回合 | pack preamble、Skill 名称和用途 |
+| Skill 正文 | `resources/skills/`、Skill 库、`.agents/skills/` | 需要时读取 | 深入判断 |
+| 任务发送 | `resources/agent/task.md`、`related.md`、`prompt-document.md`；普通 buffer 的 `+agent/compose-send` | 用户触发 | 这一次的任务 |
+| 其他任务 Agent | MarginNote 同步、LaTeX 导出、Research Run、Magent CLI | 各自 owner | 自带上下文，不收以上引导 |
+
 ## 工作流程
 
 1. **打开主程序：** 首页选择 Dashboard → 后台恢复 Emacs Pi → Ibuffer 出现 Pi。

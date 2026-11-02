@@ -253,4 +253,9 @@
       (should (equal ensured "/tmp/source-project/"))
       (should (eq shown 'project-child)))))
 
+(ert-deftest pi-system-prompt-c26-the-versioned-file-is-the-default ()
+  "A changed SYSTEM.md must never be deployed as a stale private override."
+  (require 'noema-pi-router)
+  (should (null (default-value 'noema-pi-system-prompt))))
+
 (provide 'init-pi-workflow-tests)

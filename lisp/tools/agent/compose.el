@@ -40,7 +40,7 @@
 
 ;;;###autoload
 (defun +agent/compose-rewrite ()
-  "Ask an Agent to revise the selected source. Noema uses API review cards."
+  "Ask an Agent to revise the selected source; it applies or proposes by the request."
   (interactive)
   (unless (+agent-editor-action 'rewrite)
     (+agent-context-send-region)))
