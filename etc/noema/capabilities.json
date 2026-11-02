@@ -84,7 +84,7 @@
         "args": [
           "/Users/hc/.config/emacs/site-lisp/noema/plugins/marginnote/mcp.mjs"
         ],
-        "default_enabled": true
+        "default_enabled": false
       },
       {
         "id": "lean-lsp",

@@ -1,6 +1,6 @@
 ---
 name: emacs-config
-description: Change or explain the user's Emacs configuration in ~/.config/emacs — where code and settings live, its APIs (remote-*, LSP, Jupyter, config registry, keybindings), its command-line entry points (bin/emacs-app, emacsopen / emacs-open for opening files at a placement, make), and its development and documentation rules. Use only for work on this repository; not for general Emacs questions, Noema's own code (noema-development) or using Noema (noema-emacs-workflow).
+description: Change or explain the Emacs configuration in ~/.config/emacs: where code and settings live, its APIs, its CLI entry points (bin/emacs-app, emacsopen, make) and development rules. Not for general Emacs, Noema's code (noema-development) or using Noema (noema-emacs-workflow).
 ---
 
 # Emacs configuration

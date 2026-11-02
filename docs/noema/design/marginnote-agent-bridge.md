@@ -136,7 +136,7 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 
 MCP 入口为 `plugins/marginnote/mcp.mjs`，四个工具是 `marginnote_status`、
 `marginnote_api`、`marginnote_execute` 和 `marginnote_result`。Noema 的全局
-能力配置已声明 `noema-marginnote`。其他 MCP 客户端使用 Node 启动该入口。
+能力配置已声明 `noema-marginnote`，默认关闭，否则每个 Run 都带上这四个工具；需要的项目在 `noema-mcp-manager` 中启用。其他 MCP 客户端使用 Node 启动该入口。
 本地 agent 也可调用 `node plugins/marginnote/cli.mjs status`，或
 `node plugins/marginnote/cli.mjs exec /path/to/code.js`。代码是函数体，例如：
 

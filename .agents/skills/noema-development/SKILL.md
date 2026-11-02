@@ -1,6 +1,6 @@
 ---
 name: noema-development
-description: Change or explain Noema's implementation in ~/.config/emacs/site-lisp/noema — its source syntax and parsers, the Wiki workspace and search, the kernel's databases and projections, and its Elisp, HTTP and MCP APIs. Use only for work on Noema's code or design; to use Noema as an author, use noema-emacs-workflow or noema-authoring-syntax instead.
+description: Change or explain Noema's implementation in ~/.config/emacs/site-lisp/noema: source syntax, Wiki and search, the kernel, Elisp, HTTP and MCP APIs. To use Noema as an author, use noema-emacs-workflow or noema-authoring-syntax.
 ---
 
 # Noema
