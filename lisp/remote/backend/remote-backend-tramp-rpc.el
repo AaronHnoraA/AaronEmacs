@@ -7,6 +7,7 @@
 (require 'remote-backend-tramp)
 (require 'remote-backend-tramp-rpc-metadata)
 (require 'remote-fs)
+(require 'remote-knowledge)
 
 (declare-function msgpack-encode "msgpack" (object))
 (declare-function msgpack-encode-alist "msgpack" (alist))
@@ -1368,23 +1369,55 @@ connection."
                               (tramp-make-tramp-file-name vec "/"))))))
         (remote-fs-forget-ancestor-scans target)))))
 
-;;;; Session knowledge report
+;;;; Session knowledge sources
 
-(defun remote-backend-tramp-rpc-knowledge-report ()
-  "Describe what the session and project knowledge layer holds now.
-Each count is answers kept in memory or questions answered without a
-round trip, for Remote Doctor."
-  (list
-   :path-index-directories
-   (hash-table-count remote-backend-tramp-rpc--path-index)
-   :path-index-hits remote-backend-tramp-rpc--path-index-hits
-   :directory-access-entries
-   (hash-table-count remote-backend-tramp-rpc--directory-access)
-   :directory-access-hits remote-backend-tramp-rpc--directory-access-hits
-   :ancestor-prefetch (and remote-backend-tramp-rpc--ancestor-prefetch t)
-   :event-settle-time remote-backend-tramp-rpc-event-settle-time
-   :metadata (and (fboundp 'remote-backend-tramp-rpc-metadata-report)
-                  (remote-backend-tramp-rpc-metadata-report))))
+(defun remote-backend-tramp-rpc--key-target (key)
+  "Return the Remote target ID of physical KEY, or nil."
+  (ignore-errors
+    (remote-file-name-target (remote-canonicalize-file-name key))))
+
+(defun remote-backend-tramp-rpc--forget-table (table target-id)
+  "Drop TABLE's entries for TARGET-ID, or every entry when it is nil."
+  (if (null target-id)
+      (clrhash table)
+    (let (stale)
+      (maphash (lambda (key _entry)
+                 (when (equal (remote-backend-tramp-rpc--key-target key)
+                              target-id)
+                   (push key stale)))
+               table)
+      (dolist (key stale) (remhash key table)))))
+
+(remote-knowledge-register
+ "tramp-rpc-path-index" :scope 'session
+ :forget (lambda (target-id)
+           (remote-backend-tramp-rpc--forget-table
+            remote-backend-tramp-rpc--path-index target-id))
+ :report (lambda ()
+           (list :directories (hash-table-count
+                               remote-backend-tramp-rpc--path-index)
+                 :answered remote-backend-tramp-rpc--path-index-hits
+                 :ttl remote-backend-tramp-rpc-path-index-ttl)))
+
+(remote-knowledge-register
+ "tramp-rpc-directory-access" :scope 'session
+ :forget (lambda (target-id)
+           (remote-backend-tramp-rpc--forget-table
+            remote-backend-tramp-rpc--directory-access target-id))
+ :report (lambda ()
+           (list :kept (hash-table-count
+                        remote-backend-tramp-rpc--directory-access)
+                 :answered remote-backend-tramp-rpc--directory-access-hits)))
+
+(remote-knowledge-register
+ "tramp-rpc-metadata" :scope 'session
+ :report (lambda ()
+           (append (list :ancestor-prefetch
+                         (and remote-backend-tramp-rpc--ancestor-prefetch t)
+                         :event-settle-time
+                         remote-backend-tramp-rpc-event-settle-time)
+                   (and (fboundp 'remote-backend-tramp-rpc-metadata-report)
+                        (remote-backend-tramp-rpc-metadata-report)))))
 
 ;;;; Version-gated shims
 

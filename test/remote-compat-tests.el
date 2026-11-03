@@ -895,6 +895,46 @@ filesystem event says otherwise; other access questions always go out."
       (should-not (remote-backend-tramp-rpc-prefetch-ancestor-markers
                    route "/fs:box:/w/" '(".git"))))))
 
+(ert-deftest remote-knowledge-forgets-every-source-of-a-target ()
+  "One call forgets a target in every source; a failing source is isolated."
+  (let ((remote-knowledge-sources nil)
+        (forgotten nil))
+    (remote-knowledge-register "a" :forget (lambda (target) (push (cons 'a target) forgotten))
+                               :report (lambda () '(:n 1)))
+    (remote-knowledge-register "broken" :scope 'project
+                               :forget (lambda (_target) (error "Boom"))
+                               :report (lambda () (error "Boom")))
+    (remote-knowledge-register "b" :forget (lambda (target) (push (cons 'b target) forgotten)))
+    ;; Registering a name again replaces it.
+    (remote-knowledge-register "a" :forget (lambda (target) (push (cons 'a2 target) forgotten))
+                               :report (lambda () '(:n 2)))
+    (should (= (length remote-knowledge-sources) 3))
+    (let ((inhibit-message t))
+      (remote-knowledge-forget "box")
+      (remote-knowledge-forget))
+    (should (equal (sort (mapcar (lambda (entry) (format "%s" entry)) forgotten) #'string<)
+                   '("(a2 . box)" "(a2)" "(b . box)" "(b)")))
+    (should (equal (mapcar #'car (remote-knowledge-report)) '("broken" "b" "a")))
+    (should (equal (nth 2 (assoc "a" (remote-knowledge-report))) '(:n 2)))
+    (should (plist-get (nth 2 (assoc "broken" (remote-knowledge-report))) :error))
+    (should-error (remote-knowledge-register "x" :scope 'forever))
+    (remote-knowledge-unregister "b")
+    (should-not (assoc "b" (remote-knowledge-report)))))
+
+(ert-deftest remote-tramp-rpc-knowledge-forgets-per-target ()
+  "The adapter's tables forget one target's entries, or all of them."
+  (let ((table (make-hash-table :test #'equal)))
+    (puthash "/rpc:box:/usr/bin/" 1 table)
+    (puthash "/rpc:box:/opt/" 1 table)
+    (puthash "/rpc:other:/usr/bin/" 1 table)
+    (cl-letf (((symbol-function 'remote-canonicalize-file-name) #'identity)
+              ((symbol-function 'remote-file-name-target)
+               (lambda (name) (nth 1 (split-string name ":")))))
+      (remote-backend-tramp-rpc--forget-table table "box")
+      (should (equal (hash-table-keys table) '("/rpc:other:/usr/bin/")))
+      (remote-backend-tramp-rpc--forget-table table nil)
+      (should (= (hash-table-count table) 0)))))
+
 (ert-deftest remote-fs-records-the-search-path-each-target-hands-out ()
   "`exec-path' answers accumulate per target and go with the session."
   (let ((remote-fs--target-search-paths (make-hash-table :test #'equal)))
@@ -903,7 +943,7 @@ filesystem event says otherwise; other access questions always go out."
     (remote-fs--remember-search-path "other" '("/bin"))
     (should (equal (remote-fs-target-search-path "box")
                    '("/usr/bin" "/opt/p/bin" "/home/u/.local/bin")))
-    (remote-fs-clear-target-cache "box")
+    (remote-knowledge-forget "box")
     (should-not (remote-fs-target-search-path "box"))
     (should (remote-fs-target-search-path "other"))))
 

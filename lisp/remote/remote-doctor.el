@@ -435,27 +435,15 @@ using the same plist format as `remote-doctor--check'.")
               (concat "Some verified workarounds are off; their state names "
                       "the failed check (contract or absent)"))))
            checks))))
-    (when (fboundp 'remote-backend-tramp-rpc-knowledge-report)
-      (let* ((knowledge (remote-backend-tramp-rpc-knowledge-report))
-             (metadata (plist-get knowledge :metadata)))
-        (push
-         (remote-doctor--check
-          'tramp-rpc-session-knowledge 'ok
-          (format (concat "PATH index %d dirs, %d answered; directory access %d "
-                          "kept, %d answered; ancestor prefetch %s; settle %ss; "
-                          "metadata batches %s, reused stats %s, access %s, "
-                          "listings %s")
-                  (plist-get knowledge :path-index-directories)
-                  (plist-get knowledge :path-index-hits)
-                  (plist-get knowledge :directory-access-entries)
-                  (plist-get knowledge :directory-access-hits)
-                  (if (plist-get knowledge :ancestor-prefetch) "on" "off")
-                  (plist-get knowledge :event-settle-time)
-                  (or (plist-get metadata :batches) 0)
-                  (or (plist-get metadata :fresh-reuse) 0)
-                  (or (plist-get metadata :access-reuse) 0)
-                  (or (plist-get metadata :listing-reuse) 0)))
-         checks)))
+    (when (fboundp 'remote-knowledge-report)
+      (dolist (entry (remote-knowledge-report))
+        (pcase-let ((`(,name ,scope ,report) entry))
+          (push
+           (remote-doctor--check
+            (intern (format "knowledge:%s" name))
+            (if (plist-get report :error) 'warning 'ok)
+            (format "%s %S" scope report))
+           checks))))
     (nreverse checks)))
 
 (defun remote-doctor--probe (target)

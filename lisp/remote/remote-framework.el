@@ -16,6 +16,7 @@
 (require 'remote-connection)
 (require 'remote-session)
 (require 'remote-background)
+(require 'remote-knowledge)
 (require 'remote-fs)
 (require 'remote-accelerator)
 
@@ -68,7 +69,9 @@ This function is idempotent and is useful after
     (when (fboundp 'remote-path-invalidate)
       (remote-path-invalidate target-id))
     (when (fboundp 'remote-environment-invalidate)
-      (remote-environment-invalidate target-id))))
+      (remote-environment-invalidate target-id))
+    ;; Session and project knowledge of every owner goes with its session.
+    (remote-knowledge-forget target-id)))
 
 (add-hook 'remote-connection-closed-hook
           #'remote-framework--connection-closed)
@@ -109,6 +112,7 @@ Persisted targets are intentionally not reloaded; configuration ownership
   (remote-pipeline-runtime-clear 'framework-reset)
   (when (boundp 'remote-fs-path-expansion-cache)
     (remote-fs-clear-target-cache))
+  (remote-knowledge-forget)
   (when (boundp 'remote-accelerator-probe-cache)
     (clrhash remote-accelerator-probe-cache))
   (when (fboundp 'remote-backend-contract-clear)

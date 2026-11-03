@@ -16,6 +16,7 @@
 (require 'url-util)
 (require 'remote-compat)
 (require 'remote-core)
+(require 'remote-knowledge)
 (require 'remote-connection)
 (require 'remote-backend)
 (require 'remote-pipeline)
@@ -109,11 +110,26 @@ target's session."
                                    (seq-filter #'stringp directories)))
                  remote-fs--target-search-paths)))))
 
-(defun remote-fs-clear-target-cache (&optional target-id)
-  "Clear path expansion state, optionally only for TARGET-ID."
+(defun remote-fs--forget-search-paths (&optional target-id)
+  "Forget the search paths handed out for TARGET-ID, or for every target."
   (if target-id
       (remhash target-id remote-fs--target-search-paths)
-    (clrhash remote-fs--target-search-paths))
+    (clrhash remote-fs--target-search-paths)))
+
+(remote-knowledge-register
+ "search-path" :scope 'project
+ :forget #'remote-fs--forget-search-paths
+ :report (lambda ()
+           (list :targets (hash-table-count remote-fs--target-search-paths)
+                 :directories
+                 (let ((count 0))
+                   (maphash (lambda (_target paths)
+                              (setq count (+ count (length paths))))
+                            remote-fs--target-search-paths)
+                   count))))
+
+(defun remote-fs-clear-target-cache (&optional target-id)
+  "Clear path expansion state, optionally only for TARGET-ID."
   (let (keys)
     (maphash
      (lambda (key _value)
@@ -849,6 +865,13 @@ marker by marker."
                remote-fs--ancestor-prefetched)
       (dolist (directory stale)
         (remhash directory remote-fs--ancestor-prefetched)))))
+
+(remote-knowledge-register
+ "ancestor-scans" :scope 'session
+ :forget #'remote-fs-forget-ancestor-scans
+ :report (lambda ()
+           (list :scanned (hash-table-count remote-fs--ancestor-prefetched)
+                 :listings (hash-table-count remote-fs--ancestor-listings))))
 
 (defun remote-prefetch-ancestor-markers (directory)
   "Learn in one round trip which registered markers DIRECTORY's ancestors hold.
