@@ -43,3 +43,9 @@ LLM Wiki 的 [core idea](https://gist.github.com/karpathy/442a6bf555914893e9891c
 事实与原文的引用如何保留；已有页的修改何时直接应用、何时提交审阅卡片；
 部分页面冲突时如何报告已写与未写的范围。单文档 CAS 和审阅卡片是可复用的写入
 边界，不能把若干独立写入称作一次原子跨页事务。
+
+项目级的人工维护路径现已写入 [Wiki 设计](../../noema/design/wiki-workspace.md#source-driven-project-wiki-maintenance)、
+[项目工作流](../../noema/guide/research-workflow.md#用新来源维护-wiki)和 Pi 的
+`noema-project-docs` Skill：从可重读来源出发，搜索并更新相关旧页，标明来源、
+解释和不确定处，最后报告逐篇结果。这是现有搜索与单篇编辑能力的使用方式；
+自动来源 ingest 仍需另行设计。

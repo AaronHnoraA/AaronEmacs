@@ -33,6 +33,15 @@ pack 是协议和契约，随 Skill 目录披露给 Agent，用到才读。
 
 这些都在 Emacs 本地执行，不走模型，不花 token。
 
+## 项目知识怎么接续
+
+给项目 Pi 一份新来源或一个变更线索时，可以请它从现有 Wiki 页面中找相关主题，
+协调需要更新的几篇页面，并说明依据与未解决的冲突。Pi 按需读取
+`noema-project-docs` Skill；它自己能处理的 Markdown 用 Noema 文档接口，
+需要核对源码或其他原始材料时交给能读取的执行 Agent。页面逐篇保存或审阅，
+Pi 最后说明已更新的范围，便于下一次接续。工作方法见
+[项目 Agent 工作流](../noema/guide/research-workflow.md#用新来源维护-wiki)。
+
 ## Agent 怎样找 Pi
 
 项目里的 ACP 会话第一次提问时，会收到一个隐藏的入口提示：项目在哪、Pi 存在、自己的 `buffer`

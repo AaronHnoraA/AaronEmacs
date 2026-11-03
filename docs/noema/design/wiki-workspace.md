@@ -382,6 +382,29 @@ its logical namespace, while copying may choose a new one in the workbench.
 The Namespaces view can rename a whole domain in place; Noema records the old
 name in `namespace_aliases`, so existing qualified links continue to resolve.
 
+## Source-driven project Wiki maintenance
+
+For project knowledge, the original paper, code revision, dataset, URL, or
+other source is the evidence; Wiki pages are a revisable account of what the
+project currently understands. A useful update preserves a way to find and
+recheck the source (and its version or access date when relevant), distinguishes
+the source's claim from the project's interpretation, and leaves uncertainty
+visible. It may revise an existing concept page, a related entity page, and a
+synthesis page together. A new page is useful when the subject warrants its own
+identity, not merely because a new source arrived.
+
+This is a project maintenance practice built on the current Wiki and Pi tools,
+not a background ingestion service. The project scope comes from the nearest
+`[project]` manifest; the relevant Wiki pages may live in a separate repository
+or namespace. Pi or an execution Agent can search the existing Wiki through
+`knowledge:search`, read the candidate Markdown, and update each relevant page
+through the existing document edit or review path. Links connect the affected
+pages; citations or source references explain the change. Conflicting claims
+can remain marked as unresolved until checked. Each page save has its own
+version/conflict boundary: a report of completed and still-open pages matters
+more than describing several saves as one atomic operation. See the
+[project workflow](../guide/research-workflow.md) and [Pi document paths](../../design/pi-sessions.md).
+
 ## Git collaboration cadence
 
 Noema creates a device work branch and automatically performs the
