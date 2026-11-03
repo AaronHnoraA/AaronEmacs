@@ -759,6 +759,38 @@ callback 即使发生在其他 buffer，也不能读取环境中的 `default-dir
 `rg`，不可用时回退 `grep`，同时把可由客户端直接访问的根投影为原生路径。
 普通项目搜索、光标下符号和 TODO 搜索都走这条入口，后两者只额外提供初始搜索词。
 
+### 一个 target 一条连接
+
+对照 VS Code Remote：一个 target 只有一条受管连接，编辑器各部分的请求都在它上面
+复用，能记住的事实不再反复去问。这里的对应是 pipeline 的一个 ControlMaster（一条
+TCP、一次认证）加上 tramp-rpc 的一条 RPC 通道；文件、同步/异步进程、watch、
+Magit/VC、项目文件列表、搜索、Dired 与 PTY 都走它。实测在 Aaron-PC 上，这些操作
+合起来只占一条 TCP 连接。批量传输（rsync）和可达性探测按设计各用一条自己的连接
+（见“客户端批量工具”与失败矩阵）。
+
+由此有两条规则：
+
+- 一个裸程序名指向哪个可执行文件，是 target 和 workspace 环境的事实，与哪个
+  backend 负责启动无关。`remote-make-process` 因此不在启动路由上调用
+  `executable-find`，而是经 `remote-executable-find` 走该 target 的进程路由问一次
+  （tramp-rpc 上是一次 `process.run`）。以前 PTY 选中 SSH-PTY 路由时，
+  `executable-find` 会让 TRAMP 为算 PATH 再开一个 shell 会话，也就是第二条 SSH
+  连接；只有调用方显式覆盖 PATH 时，才在它自己的环境里查找。
+- 只有在同一 generation 内确实不变的答案才缓存，失效跟随 transport generation、
+  tramp-rpc 的元数据 TTL（它尊重 `remote-file-name-inhibit-cache` 与 watcher 降级）
+  和服务端推送的文件事件。目录能否进入就是这样一条：TRAMP 的文件属性在每次
+  `process-file` 后都会被清掉，于是 Magit 每次刷新都要多问七次。
+
+已测到、尚未处理的重复请求（按单次操作的往返计）：
+
+- 同一 target 的登录 PATH 问了两次：框架的 path facts（交互式登录 shell）和
+  tramp-rpc 自己的 `tramp-own-remote-path`（非交互登录 shell）。合并之前要先决定
+  采用哪一种 PATH 语义。
+- lsp-mode 启动时逐个查找解释器、服务器和 booster，五个程序就是五次往返。可以由
+  批量的 `remote-executable-find` 一次回答。
+- `.projectile` 等标记沿祖先目录逐个 stat，没有经过
+  `remote-prefetch-ancestor-markers`；Dired 首次打开时同一目录会列两次。
+
 `remote-copy-file-to-target` 是 provisioning 的批量传输边界。native backend 使用
 本地复制，TRAMP/tramp-rpc SSH backend 使用 SCP；consumer 只提交客户端绝对源文件、
 逻辑目标文件和 context，不能自行解析 host/method。普通编辑器文件读写仍走 `/fs:`
@@ -1024,6 +1056,12 @@ direnv/Nix PATH，而不是 Emacs 全局 PATH；路由到 target 的 agent 则�
 与历史在这个 buffer 里展开 `~`，投影 target 的 HOME 会指向本机不存在的
 `/home/…`。判断依据是 `remote-client-file-name` 这一放置查询，而非 target ID。找不到可执行文件时报错会写明查找的
 target。workspace 不可达时直接报错，不会被 shell-maker 静默改到本机 `~/`。
+
+ACP 的剪贴板图片与屏幕截图是 client-placement 操作。采集 utility 使用
+`remote-client-process-environment`、`remote-client-exec-path` 与原生客户端目录；
+客户端可直接访问的目标目录直接写入，其他 target 先在客户端临时目录采集，再用
+统一文件 API 复制到会话的 `.agent-shell/screenshots/`。utility 不接收 `/fs:` 名字，
+临时目录在失败或成功后都清理；provider 仍得到原有工作区附件。
 
 Copilot 是纯 client-placement consumer：Remote buffer 的文档内容仍由
 `copilot.el` 同步给 language server，但 binary、PATH、环境、进程 namespace
@@ -1459,6 +1497,7 @@ devcontainer、Dape/tasks 编排、动态 SOCKS forward 与托管 tunnel 不在�
 | TRAMP/RPC network client、remote listener 与 SSH 双向 port forward | 已通过 native 回环、命令测试、SSH `-R` 真机数据往返，以及 `-L` 真机强制重连后原端口数据往返；突发断线与 `-R` 恢复故障注入待补 |
 | pipeline stage 的实际逐段建连 | executor/runtime 已建立；内建 overlay/hop 主要负责 endpoint 变换 |
 | workspace/service/channel/terminal 生命周期 | 基础已建立；service/forward、逻辑 watch 与 lsp-mode resource 已登记恢复，仍缺长期真机故障注入；terminal 手动重启 |
+| 单连接与目标事实缓存 | 常用操作共用一条 SSH/RPC 连接；程序解析与目录访问已按 target 回答，登录 PATH、LSP 批量查找、祖先标记与 Dired 重复列目录待补 |
 | Remote Doctor | 已建立结构化报告与可选 target probe |
 | SSH 真机回归 | `make remote-e2e`，只使用随机临时目录 |
 | WSL2 direnv + C clangd + Python pylsp | 已真实验证走远程环境与 tramp-rpc |

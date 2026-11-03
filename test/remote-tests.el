@@ -519,6 +519,44 @@ refused build on every remote operation."
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(ert-deftest remote-spawn-program-is-a-target-fact ()
+  "A bare program is resolved by the target, not by the spawning backend.
+A PTY route must not open its own shell session just to learn PATH; only an
+invocation that overrides PATH searches its own environment."
+  (remote-test-with-registry
+    (remote-register-adapter
+     "pty-only" :capabilities '(pty) :preferences '((default . ("native"))))
+    (remote-register-adapter
+     "sync" :capabilities '(process-sync) :preferences '((default . ("native"))))
+    (let ((context (remote-context-create :target-id "box"
+                                          :localname "/w/"
+                                          :workspace-root "/fs:box:/w/"))
+          asked)
+      (cl-letf (((symbol-function 'remote-executable-find)
+                 (lambda (program ctx)
+                   (push (list 'target program remote-current-adapter-id
+                               (eq ctx context))
+                         asked)
+                   "/usr/bin/sleep"))
+                ((symbol-function 'executable-find)
+                 (lambda (program &optional _remote)
+                   (push (list 'route program) asked)
+                   "/route/bin/sleep")))
+        (let ((remote-current-adapter-id "pty-only"))
+          (should (equal (remote--resolve-process-program
+                          "sleep" context nil)
+                         "/usr/bin/sleep")))
+        (let ((remote-current-adapter-id "sync"))
+          (remote--resolve-process-program "sleep" context nil))
+        (let ((remote-current-adapter-id "pty-only"))
+          (should (equal (remote--resolve-process-program
+                          "sleep" context '(("PATH" . "/opt/bin")))
+                         "/route/bin/sleep")))
+        (should (equal (reverse asked)
+                       '((target "sleep" "process" t)
+                         (target "sleep" "sync" t)
+                         (route "sleep"))))))))
+
 (ert-deftest remote-interactive-process-class-applies-latency-policy ()
   (remote-test-with-registry
     (remote-register-adapter

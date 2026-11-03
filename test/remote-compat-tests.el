@@ -814,6 +814,65 @@ wait stays within the caller's deadline plus the short liveness ping."
       (let ((remote-backend-tramp-rpc--probe-slot nil))
         (should-not (remote-backend-tramp-rpc--probe-guard generation))))))
 
+(ert-deftest remote-tramp-rpc-directory-search-answer-lives-on-its-generation ()
+  "A directory search answer is reused until its transport, TTL or a
+filesystem event says otherwise; other access questions always go out."
+  (require 'tramp)
+  (remote-tramp-rpc-test--readable
+    (let* ((remote-backend-tramp-rpc--directory-access
+            (make-hash-table :test #'equal))
+           (remote-backend-tramp-rpc--directory-access-hits 0)
+           (first (make-pipe-process :name "remote-dir-access-1" :noquery t))
+           (second (make-pipe-process :name "remote-dir-access-2" :noquery t))
+           (current (remote-tramp-rpc-test--generation :process first))
+           (valid t)
+           (calls 0)
+           (check (lambda (_filename _mode) (cl-incf calls) t)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'tramp-rpc--get-connection)
+                     (lambda (_vec) current))
+                    ((symbol-function 'tramp-rpc--cache-entry-valid-p)
+                     (lambda (_timestamp) valid)))
+            (dotimes (_ 3)
+              (should (remote-backend-tramp-rpc--directory-access-a
+                       check "/ssh:box:/w/./" 'directory)))
+            (should (= calls 1))
+            (should (= remote-backend-tramp-rpc--directory-access-hits 2))
+            ;; Another question about the same name is not this one.
+            (remote-backend-tramp-rpc--directory-access-a
+             check "/ssh:box:/w/" "w")
+            (should (= calls 2))
+            ;; The TTL policy (and `remote-file-name-inhibit-cache') rules.
+            (setq valid nil)
+            (remote-backend-tramp-rpc--directory-access-a
+             check "/ssh:box:/w/" 'directory)
+            (should (= calls 3))
+            (setq valid t)
+            ;; A replacement transport starts empty.
+            (setq current (remote-tramp-rpc-test--generation :process second))
+            (remote-backend-tramp-rpc--directory-access-a
+             check "/ssh:box:/w/" 'directory)
+            (should (= calls 4))
+            (remote-backend-tramp-rpc--directory-access-a
+             check "/ssh:box:/w/sub/" 'directory)
+            (should (= calls 5))
+            ;; A change at /w drops /w and everything below it.
+            (remote-backend-tramp-rpc--directory-access-events-h
+             (tramp-dissect-file-name "/ssh:box:/") '("/ssh:box:/w"))
+            (should (= (hash-table-count
+                        remote-backend-tramp-rpc--directory-access)
+                       0))
+            (remote-backend-tramp-rpc--directory-access-a
+             check "/ssh:box:/w/" 'directory)
+            ;; Lost events forget the whole host.
+            (remote-backend-tramp-rpc--directory-access-events-h
+             (tramp-dissect-file-name "/ssh:box:/") nil)
+            (should (= (hash-table-count
+                        remote-backend-tramp-rpc--directory-access)
+                       0)))
+        (delete-process first)
+        (delete-process second)))))
+
 (ert-deftest remote-tramp-rpc-read-timeout-retires-only-current-generation ()
   "A timed-out request must never close a replacement SSH process."
   (remote-tramp-rpc-test--readable

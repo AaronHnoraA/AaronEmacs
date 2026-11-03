@@ -38,6 +38,7 @@
 (declare-function tramp-rpc--invalidate-timed-out-connection
                   "tramp-rpc-transport" (process vec event))
 (declare-function tramp-rpc--acl-enabled-p "tramp-rpc" (vec))
+(declare-function tramp-rpc--cache-entry-valid-p "tramp-rpc-cache" (timestamp))
 (declare-function tramp-rpc--selinux-enabled-p "tramp-rpc" (vec))
 (declare-function remote-connection-cached-p "remote-connection" (route))
 (declare-function remote-connection-handle "remote-connection" (connection))
@@ -80,7 +81,9 @@
     (tramp-rpc--invalidate-timed-out-connection . (3 . 3))
     (tramp-rpc--cleanup-connection-generation . (4 . 6))
     (tramp-rpc--make-file-notify-descriptor . (3 . 3))
-    (tramp-rpc--make-direct-ssh-pty-process . (9 . 10)))
+    (tramp-rpc--make-direct-ssh-pty-process . (9 . 10))
+    (tramp-rpc--file-access-p . (2 . 2))
+    (tramp-rpc--cache-entry-valid-p . (1 . 1)))
   "Private upstream seams isolated by this backend adapter.
 A connection generation is a `tramp-rpc-connection' record; it is read only
 through `remote-backend-tramp-rpc--connection-slot'.")
@@ -771,6 +774,86 @@ replacement generation is kept."
       (remote-backend-tramp-rpc--release-stderr buffer t)))
   (remote-backend-tramp-rpc--kill-idle-descriptor-buffer))
 
+;;;; Directory search answers
+
+(defvar remote-backend-tramp-rpc--directory-access
+  (make-hash-table :test #'equal)
+  "Directory search answers: DIRECTORY -> (TIMESTAMP PROCESS . ANSWER).")
+
+(defvar remote-backend-tramp-rpc--directory-access-hits 0
+  "Directory search checks answered without a round trip.")
+
+(defconst remote-backend-tramp-rpc--directory-access-limit 2048
+  "Entries kept before the directory search table starts over.")
+
+(defun remote-backend-tramp-rpc--directory-access-key (filename)
+  "Return the table key for directory FILENAME."
+  (file-name-as-directory (expand-file-name filename)))
+
+(defun remote-backend-tramp-rpc--directory-access-process (key)
+  "Return the live RPC transport serving KEY, or nil."
+  (when-let* ((process (remote-backend-tramp-rpc--vec-connection-slot
+                        (ignore-errors (tramp-dissect-file-name key))
+                        :process))
+              ((process-live-p process)))
+    process))
+
+(defun remote-backend-tramp-rpc--directory-access-a (function filename mode)
+  "Answer FUNCTION's directory search check of FILENAME from memory.
+MODE `directory' asks whether FILENAME can be entered; every other MODE
+goes to FUNCTION.  tramp-rpc keeps that answer as a TRAMP file property,
+which each `process-file' flushes, so a tool running one command after
+another (Magit checks `default-directory' before every git) asked the
+server each time.  An answer here lives on its transport generation,
+within tramp-rpc's own metadata TTL, which already honours
+`remote-file-name-inhibit-cache' and a degraded watcher, and until a
+filesystem event touches the directory."
+  (if (not (eq mode 'directory))
+      (funcall function filename mode)
+    (let* ((key (remote-backend-tramp-rpc--directory-access-key filename))
+           (entry (gethash key remote-backend-tramp-rpc--directory-access))
+           (process (and entry
+                         (remote-backend-tramp-rpc--directory-access-process
+                          key))))
+      (if (and entry process
+               (eq (cadr entry) process)
+               (tramp-rpc--cache-entry-valid-p (car entry)))
+          (progn
+            (cl-incf remote-backend-tramp-rpc--directory-access-hits)
+            (cddr entry))
+        (let ((answer (funcall function filename mode)))
+          ;; The check itself may have opened the generation.
+          (when-let* (((memq answer '(t nil)))
+                      (process
+                       (remote-backend-tramp-rpc--directory-access-process
+                        key)))
+            (when (>= (hash-table-count remote-backend-tramp-rpc--directory-access)
+                      remote-backend-tramp-rpc--directory-access-limit)
+              (clrhash remote-backend-tramp-rpc--directory-access))
+            (puthash key (cons (float-time) (cons process answer))
+                     remote-backend-tramp-rpc--directory-access))
+          answer)))))
+
+(defun remote-backend-tramp-rpc--directory-access-events-h (vec paths)
+  "Forget directory search answers that filesystem events on VEC can change.
+PATHS are the changed TRAMP names, or nil when the server lost events.  A
+changed path drops its own answer and, for a directory that may have gone,
+every answer below it."
+  (let ((host (and (tramp-file-name-p vec) (tramp-make-tramp-file-name vec ""))))
+    (when (and host
+               (> (hash-table-count remote-backend-tramp-rpc--directory-access) 0))
+      (let ((prefixes (if paths
+                          (mapcar #'file-name-as-directory paths)
+                        (list host)))
+            stale)
+        (maphash (lambda (key _entry)
+                   (when (cl-some (lambda (prefix) (string-prefix-p prefix key))
+                                  prefixes)
+                     (push key stale)))
+                 remote-backend-tramp-rpc--directory-access)
+        (dolist (key stale)
+          (remhash key remote-backend-tramp-rpc--directory-access))))))
+
 ;;;; Version-gated shims
 
 (defconst remote-backend-tramp-rpc--shims
@@ -815,7 +898,11 @@ replacement generation is kept."
      tramp-rpc--process-connection)
     (watch-descriptor-buffer
      tramp-rpc--make-file-notify-descriptor :filter-return
-     remote-backend-tramp-rpc--detach-descriptor-buffer-a))
+     remote-backend-tramp-rpc--detach-descriptor-buffer-a)
+    (directory-access-cache
+     tramp-rpc--file-access-p :around
+     remote-backend-tramp-rpc--directory-access-a
+     tramp-rpc--cache-entry-valid-p tramp-rpc--get-connection))
   "Workarounds verified against one exact tramp-rpc release.
 Each row is (GROUP SYMBOL HOW ADVICE . REQUIRES).  A row is installed only
 on the verified release, when SYMBOL and every private REQUIRES keep their
@@ -848,7 +935,7 @@ these by name, so a live upgrade cannot keep an old shim on new code.")
                   'file-extended-attributes)
                  '(1 . 1))))
     ((or 'adapter-timeout 'attribute-probe-cache 'transport-death-notice
-         'stderr-relay-release)
+         'stderr-relay-release 'directory-access-cache)
      (remote-backend-tramp-rpc--connection-readable-p))
     (_ t)))
 
@@ -938,6 +1025,13 @@ All shim advice, current and retired, is removed first."
       (remote-backend-tramp-rpc--install-shims verified)
       ;; Buffer hygiene.  The cleanup hooks only use public TRAMP names and
       ;; read a generation only through the verified accessors.
+      (clrhash remote-backend-tramp-rpc--directory-access)
+      (remove-hook 'tramp-rpc-fs-events-functions
+                   #'remote-backend-tramp-rpc--directory-access-events-h)
+      (when (advice-member-p #'remote-backend-tramp-rpc--directory-access-a
+                             'tramp-rpc--file-access-p)
+        (add-hook 'tramp-rpc-fs-events-functions
+                  #'remote-backend-tramp-rpc--directory-access-events-h))
       (when (featurep 'tramp-rpc)
         (add-hook 'tramp-cleanup-connection-hook
                   #'remote-backend-tramp-rpc--cleanup-connection-buffers-h t)

@@ -500,6 +500,40 @@ adapter."
                 (car command) infile destination display
                 (cdr command)))))))
 
+(defun remote--environment-sets-path-p (environment)
+  "Return non-nil when ENVIRONMENT overrides PATH."
+  (when (and (fboundp 'remote-environment-p)
+             (remote-environment-p environment))
+    (setq environment (remote-environment-vars environment)))
+  (and (listp environment)
+       (assoc-string "PATH" environment t)
+       t))
+
+(defun remote--resolve-process-program (program context explicit-environment)
+  "Return the target executable for bare PROGRAM, or nil.
+Called inside the selected spawn route with its physical directory.  Which
+program a bare name means is a fact about the target and its workspace
+environment, not about the backend that will spawn it, so it is asked of
+`remote-executable-find' for CONTEXT, which answers over the target's
+process route in one request.  Asking the spawn route instead made a PTY
+on an SSH-PTY route open a whole TRAMP shell session, a second SSH
+connection, only to compute PATH.  An invocation that overrides PATH in
+EXPLICIT-ENVIRONMENT keeps the search in its own environment."
+  (if (remote--environment-sets-path-p explicit-environment)
+      (executable-find program t)
+    ;; The spawning adapter may be asynchronous only; the lookup is a
+    ;; synchronous question, which every target answers for "process".
+    (let ((remote-current-adapter-id
+           (if-let* ((adapter (and remote-current-adapter-id
+                                   (remote-get-adapter
+                                    remote-current-adapter-id)))
+                     ((memq 'process-sync
+                            (remote-adapter-capabilities adapter))))
+               remote-current-adapter-id
+             "process")))
+      ;; Target-native, as the caller's argv needs it.
+      (remote-executable-find program context))))
+
 (defun remote-make-process (&rest plist)
   "Create an asynchronous process in the selected logical target.
 PLIST accepts all `make-process' keys plus `:remote-adapter',
@@ -574,7 +608,8 @@ workspace root."
                (and
                 (stringp program)
                 (not (file-name-absolute-p program))
-                (executable-find program t)))
+                (remote--resolve-process-program
+                 program context-value explicit-environment)))
               ;; Resolve at the official `make-process' boundary after the
               ;; target environment and physical directory are active.
               ;; Backends differ in whether their remote spawn primitive
