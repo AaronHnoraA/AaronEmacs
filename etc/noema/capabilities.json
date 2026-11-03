@@ -117,11 +117,9 @@
         "description": "Native MarginNote smart OCR to Markdown with Noema authoring and diagrams; organize or merge only when requested",
         "members": [
           "marginnote-digitize",
-          "pdf",
           "noema-authoring-syntax",
           "noema-tikz-figures"
-        ],
-        "preamble": "Smart OCR only: preserve the user's notes, with minimal correction of obvious typos. Organize, expand or merge only when explicitly requested. Load the current Noema syntax document at ~/.config/emacs/docs/noema/design/syntax.md before writing; use that source directly rather than copying syntax rules into the Skill. Keep OCR explanations out of the note body."
+        ]
       },
       "math-writing": {
         "title": "Math writing",
