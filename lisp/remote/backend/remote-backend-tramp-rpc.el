@@ -1368,6 +1368,24 @@ connection."
                               (tramp-make-tramp-file-name vec "/"))))))
         (remote-fs-forget-ancestor-scans target)))))
 
+;;;; Session knowledge report
+
+(defun remote-backend-tramp-rpc-knowledge-report ()
+  "Describe what the session and project knowledge layer holds now.
+Each count is answers kept in memory or questions answered without a
+round trip, for Remote Doctor."
+  (list
+   :path-index-directories
+   (hash-table-count remote-backend-tramp-rpc--path-index)
+   :path-index-hits remote-backend-tramp-rpc--path-index-hits
+   :directory-access-entries
+   (hash-table-count remote-backend-tramp-rpc--directory-access)
+   :directory-access-hits remote-backend-tramp-rpc--directory-access-hits
+   :ancestor-prefetch (and remote-backend-tramp-rpc--ancestor-prefetch t)
+   :event-settle-time remote-backend-tramp-rpc-event-settle-time
+   :metadata (and (fboundp 'remote-backend-tramp-rpc-metadata-report)
+                  (remote-backend-tramp-rpc-metadata-report))))
+
 ;;;; Version-gated shims
 
 (defconst remote-backend-tramp-rpc--shims

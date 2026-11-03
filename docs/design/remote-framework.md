@@ -839,7 +839,11 @@ Magit/VC、项目文件列表、搜索、Dired 与 PTY 都走它。实测在 Aar
   这等同于 tramp-rpc 原来的整体清空；该值设为 0 则恢复原行为。adapter 自己的目录
   访问与 PATH 索引有各自的失效规则，不受这个窗口约束。
 
-还缺的部分：这些知识应有统一的登记与失效入口，并在 Remote Doctor 中显示。
+Remote Doctor 的 `tramp-rpc-session-knowledge` 一行列出这些知识：PATH 索引的
+目录数与免往返回答数、目录访问答案、祖先预取、settle 窗口，以及元数据作用域的复用
+计数（`remote-backend-tramp-rpc-knowledge-report`）。
+
+还缺的部分：这些知识目前分散在 backend 与 remote-fs 里，应有统一的登记与失效入口。
 
 实测（Aaron-PC，单位为往返次数）：冷打开 28→16，Dired 9→4，project-files 12→8，
 compile 15→12，Magit status 40→33。
@@ -1550,7 +1554,7 @@ devcontainer、Dape/tasks 编排、动态 SOCKS forward 与托管 tunnel 不在�
 | TRAMP/RPC network client、remote listener 与 SSH 双向 port forward | 已通过 native 回环、命令测试、SSH `-R` 真机数据往返，以及 `-L` 真机强制重连后原端口数据往返；突发断线与 `-R` 恢复故障注入待补 |
 | pipeline stage 的实际逐段建连 | executor/runtime 已建立；内建 overlay/hop 主要负责 endpoint 变换 |
 | workspace/service/channel/terminal 生命周期 | 基础已建立；service/forward、逻辑 watch 与 lsp-mode resource 已登记恢复，仍缺长期真机故障注入；terminal 手动重启 |
-| 单连接与 session/project 知识层 | 常用操作共用一条 SSH/RPC 连接；登录 PATH 单一来源，session PATH 索引、目录访问、祖先标记与 Dired 列目录已由底层回答；只读命令保留知识、写命令后按 watcher 覆盖失效、backend 程序解析已建立；统一登记与 Doctor 展示待补 |
+| 单连接与 session/project 知识层 | 常用操作共用一条 SSH/RPC 连接；登录 PATH 单一来源，session PATH 索引、目录访问、祖先标记与 Dired 列目录已由底层回答；只读命令保留知识、写命令后按 watcher 覆盖失效、backend 程序解析已建立；Doctor 已展示；统一登记待补 |
 | Remote Doctor | 已建立结构化报告与可选 target probe |
 | SSH 真机回归 | `make remote-e2e`，只使用随机临时目录 |
 | WSL2 direnv + C clangd + Python pylsp | 已真实验证走远程环境与 tramp-rpc |
