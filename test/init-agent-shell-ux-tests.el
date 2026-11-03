@@ -123,6 +123,31 @@
       (let ((+agent-acp-run-owned-functions (list (lambda (_) t))))
         (should (equal (+agent-input--submission #'agent-shell-busy-submit-steer) "queue"))))))
 
+(ert-deftest agent-c56-return-writes-shift-steers-meta-queues ()
+  (dolist (key '("RET" "<return>"))
+    (should (eq (keymap-lookup agent-shell-mode-map key) #'+agent-shell/newline)))
+  (dolist (key '("S-RET" "S-<return>"))
+    (should (eq (keymap-lookup agent-shell-mode-map key) #'agent-shell-submit)))
+  (dolist (key '("M-RET" "M-<return>"))
+    (should (eq (keymap-lookup agent-shell-mode-map key) #'agent-shell-submit-override)))
+  (should (eq agent-shell-busy-submit-default-function #'+agent-shell-busy-submit-steer-or-queue))
+  (should (eq agent-shell-busy-submit-override-function #'agent-shell-busy-submit-queue)))
+
+(ert-deftest agent-c56-return-in-input-breaks-the-line ()
+  (with-temp-buffer
+    (insert "> notes\n- first")
+    (let (submitted)
+      (cl-letf (((symbol-function 'agent-shell--prompt-input-start) (lambda () 3))
+                ((symbol-function 'agent-shell-submit)
+                 (lambda (&rest _) (interactive) (setq submitted t))))
+        (+agent-shell/newline)
+        (should (equal (buffer-string) "> notes\n- first\n- "))
+        (should-not submitted)
+        ;; Outside the input, RET keeps the native submit action.
+        (goto-char 1)
+        (+agent-shell/newline)
+        (should submitted)))))
+
 (ert-deftest agent-appearance-c53-palette-follows-all-aaron-themes ()
   (let ((variant aaron-ui-current-variant))
     (unwind-protect

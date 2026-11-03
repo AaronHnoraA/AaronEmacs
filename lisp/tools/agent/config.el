@@ -755,6 +755,27 @@ double prefix ARG picks among the pool, new and saved conversations."
       (agent-shell-busy-submit-steer prompt)
     (agent-shell-busy-submit-queue prompt)))
 
+(declare-function agent-shell--prompt-input-start "agent-shell-prompt" ())
+(declare-function agent-shell-list-edit-newline "agent-shell-list-edit" ())
+
+(defun +agent-shell/newline ()
+  "Break the line in the input; outside it, keep RET's native action.
+In the input RET only writes: `S-RET' sends (steering a running turn) and
+`M-RET' sends or queues behind it.  Markdown lists continue as usual."
+  (interactive)
+  (let ((start (agent-shell--prompt-input-start)))
+    (cond ((not (and start (>= (point) start))) (call-interactively #'agent-shell-submit))
+          ((fboundp 'agent-shell-list-edit-newline) (agent-shell-list-edit-newline))
+          (t (newline)))))
+
+(after! agent-shell
+  (require 'agent-shell-list-edit nil t)
+  (map! :map agent-shell-mode-map
+        "RET" #'+agent-shell/newline
+        "<return>" #'+agent-shell/newline
+        :desc "Send / steer" "S-RET" #'agent-shell-submit
+        :desc "Send / steer" "S-<return>" #'agent-shell-submit))
+
 (with-eval-after-load 'agent-shell
   (setq agent-shell-markdown-render-function #'+agent-shell-render-markdown))
 
