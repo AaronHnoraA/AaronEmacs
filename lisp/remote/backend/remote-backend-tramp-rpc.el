@@ -39,6 +39,16 @@
                   "tramp-rpc-transport" (process vec event))
 (declare-function tramp-rpc--acl-enabled-p "tramp-rpc" (vec))
 (declare-function tramp-rpc--cache-entry-valid-p "tramp-rpc-cache" (timestamp))
+(declare-function tramp-rpc--call-batch "tramp-rpc-transport" (vec requests))
+(declare-function tramp-rpc--encode-path "tramp-rpc-protocol" (path))
+(declare-function tramp-rpc--decode-filename "tramp-rpc" (entry))
+(declare-function tramp-rpc--batch-error-p "tramp-rpc-transport" (result))
+(declare-function tramp-rpc--cache-file-stat-result "tramp-rpc-cache"
+                  (vec localname stat &optional lstat))
+(declare-function remote-fs-remember-ancestor-listing "remote-fs"
+                  (directory names))
+(declare-function remote-backend-project-file-name "remote-backend"
+                  (route file-name))
 (declare-function tramp-rpc--selinux-enabled-p "tramp-rpc" (vec))
 (declare-function remote-connection-cached-p "remote-connection" (route))
 (declare-function remote-connection-handle "remote-connection" (connection))
@@ -83,7 +93,12 @@
     (tramp-rpc--make-file-notify-descriptor . (3 . 3))
     (tramp-rpc--make-direct-ssh-pty-process . (9 . 10))
     (tramp-rpc--file-access-p . (2 . 2))
-    (tramp-rpc--cache-entry-valid-p . (1 . 1)))
+    (tramp-rpc--cache-entry-valid-p . (1 . 1))
+    (tramp-rpc--call-batch . (2 . 2))
+    (tramp-rpc--encode-path . (1 . 1))
+    (tramp-rpc--decode-filename . (1 . 1))
+    (tramp-rpc--batch-error-p . (1 . 1))
+    (tramp-rpc--cache-file-stat-result . (3 . 4)))
   "Private upstream seams isolated by this backend adapter.
 A connection generation is a `tramp-rpc-connection' record; it is read only
 through `remote-backend-tramp-rpc--connection-slot'.")
@@ -854,6 +869,73 @@ every answer below it."
         (dolist (key stale)
           (remhash key remote-backend-tramp-rpc--directory-access))))))
 
+;;;; Ancestor marker prefetch
+
+(defvar remote-backend-tramp-rpc--ancestor-prefetch nil
+  "Non-nil when the verified release has every seam the prefetch uses.
+Set by `remote-backend-tramp-rpc-install'.")
+
+(defconst remote-backend-tramp-rpc--ancestor-depth-limit 32
+  "Ancestors listed by one prefetch, well inside the server's batch limit.")
+
+(defun remote-backend-tramp-rpc--ancestors (localname)
+  "Return LOCALNAME and its ancestors as directory names, nearest first."
+  (let ((directory (file-name-as-directory localname))
+        result)
+    (while (and directory
+                (< (length result) remote-backend-tramp-rpc--ancestor-depth-limit))
+      (push directory result)
+      (setq directory
+            (unless (equal directory "/")
+              (file-name-directory (directory-file-name directory)))))
+    (nreverse result)))
+
+(defun remote-backend-tramp-rpc-prefetch-ancestor-markers
+    (route directory names)
+  "Learn which NAMES exist above DIRECTORY on tramp-rpc ROUTE in one batch.
+Each ancestor is listed by name only.  A marker missing from its listing
+is recorded in tramp-rpc's own stat cache as missing, under its usual TTL
+and invalidation, so a consumer walking upwards (Projectile, VC, direnv)
+asks nothing more for it; a marker that exists keeps its real stat.  A
+listing the server refuses (too large) leaves that directory to ordinary
+lookups.  Return non-nil when the batch answered."
+  (when (and remote-backend-tramp-rpc--ancestor-prefetch
+             (equal (remote-route-link-plugin-id route) "tramp-rpc"))
+    (condition-case nil
+        (let* ((physical (file-name-as-directory
+                          (remote-backend-project-file-name route directory)))
+               (vec (tramp-dissect-file-name physical nil))
+               (local (tramp-file-name-localname vec))
+               (ancestors (remote-backend-tramp-rpc--ancestors
+                           (if (string-empty-p local) "/" local)))
+               (results
+                (tramp-rpc--call-batch
+                 vec (mapcar (lambda (ancestor)
+                               (cons "dir.list"
+                                     (tramp-rpc--encode-path ancestor)))
+                             ancestors)))
+               (target-id (remote-route-target-id route)))
+          (when (= (length results) (length ancestors))
+            (cl-loop
+             for ancestor in ancestors
+             for listing in results
+             unless (or (tramp-rpc--batch-error-p listing)
+                        (not (listp listing)))
+             do (let ((present (mapcar #'tramp-rpc--decode-filename listing)))
+                  (when (fboundp 'remote-fs-remember-ancestor-listing)
+                    (remote-fs-remember-ancestor-listing
+                     (remote-make-file-name target-id ancestor) present))
+                  (dolist (name names)
+                    (unless (member name present)
+                      (let ((file (concat ancestor name)))
+                        (tramp-rpc--cache-file-stat-result vec file nil)
+                        (tramp-rpc--cache-file-stat-result vec file nil t))))))
+            t))
+      (error nil))))
+
+(add-hook 'remote-ancestor-prefetch-functions
+          #'remote-backend-tramp-rpc-prefetch-ancestor-markers)
+
 ;;;; Version-gated shims
 
 (defconst remote-backend-tramp-rpc--shims
@@ -1023,6 +1105,14 @@ All shim advice, current and retired, is removed first."
                  (ignore-errors
                    (cl-struct-slot-offset 'tramp-rpc-connection 'probing))))
       (remote-backend-tramp-rpc--install-shims verified)
+      (setq remote-backend-tramp-rpc--ancestor-prefetch
+            (and verified
+                 (cl-every #'remote-backend-tramp-rpc--private-compatible-p
+                           '(tramp-rpc--call-batch
+                             tramp-rpc--encode-path
+                             tramp-rpc--decode-filename
+                             tramp-rpc--batch-error-p
+                             tramp-rpc--cache-file-stat-result))))
       ;; Buffer hygiene.  The cleanup hooks only use public TRAMP names and
       ;; read a generation only through the verified accessors.
       (clrhash remote-backend-tramp-rpc--directory-access)
@@ -1232,6 +1322,8 @@ associating that HOME with a named account.  Other names keep upstream lookup."
        :session-owner tramp-rpc
        :spawn-program absolute
        :file-operation-cost batched
+       ;; One stat is still one round trip; ancestor walks batch here.
+       :ancestor-prefetch t
        ;; The server pushes inotify events over the RPC stream, and both
        ;; stat spellings report the same integer-second mtime.
        :file-watch-cost push

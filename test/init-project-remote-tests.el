@@ -1242,5 +1242,37 @@ cannot be repeated here."
   (should (advice-member-p #'+project--directory-marker
                            'projectile--directory-marker)))
 
+(ert-deftest remote-tramp-memoize-keeps-found-answers-only ()
+  (let ((+tramp--vc-git-root-cache nil)
+        (calls 0))
+    (cl-letf (((symbol-function '+remote-per-file-subprocess-affordable-p)
+               #'ignore))
+      (let ((lookup (lambda (value) (cl-incf calls) value)))
+        (should-not (+tramp-memoize "/d/" '+tramp--vc-git-root-cache lookup nil))
+        (should-not +tramp--vc-git-root-cache)
+        (should (equal (+tramp-memoize "/d/" '+tramp--vc-git-root-cache
+                                       lookup "root")
+                       "root"))
+        (should (equal (+tramp-memoize "/d/" '+tramp--vc-git-root-cache
+                                       lookup "other")
+                       "root"))
+        (should (= calls 2))))))
+
+(ert-deftest remote-project-memo-does-not-keep-a-prompted-project ()
+  "What a prompt returns is the user's pick, not the directory's project."
+  (let ((+tramp--project-current-cache nil))
+    (cl-letf (((symbol-function '+remote-per-file-subprocess-affordable-p)
+               #'ignore))
+      (let ((prompting (lambda (maybe-prompt _directory)
+                         (and maybe-prompt 'picked))))
+        (should (eq (project-current@+tramp-memoize prompting t "/d/")
+                    'picked))
+        (should-not +tramp--project-current-cache)
+        (should-not (project-current@+tramp-memoize prompting nil "/d/")))
+      (let ((found (lambda (&rest _) 'project)))
+        (should (eq (project-current@+tramp-memoize found nil "/d/") 'project))
+        (should (eq (project-current@+tramp-memoize #'ignore t "/d/")
+                    'project))))))
+
 (provide 'init-project-remote-tests)
 ;;; init-project-remote-tests.el ends here

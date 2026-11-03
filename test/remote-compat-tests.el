@@ -310,38 +310,6 @@
                          "answer 3")))
       (delete-directory root t))))
 
-(ert-deftest remote-tramp-memoize-keeps-found-answers-only ()
-  (let ((+tramp--vc-git-root-cache nil)
-        (calls 0))
-    (cl-letf (((symbol-function '+remote-per-file-subprocess-affordable-p)
-               #'ignore))
-      (let ((lookup (lambda (value) (cl-incf calls) value)))
-        (should-not (+tramp-memoize "/d/" '+tramp--vc-git-root-cache lookup nil))
-        (should-not +tramp--vc-git-root-cache)
-        (should (equal (+tramp-memoize "/d/" '+tramp--vc-git-root-cache
-                                       lookup "root")
-                       "root"))
-        (should (equal (+tramp-memoize "/d/" '+tramp--vc-git-root-cache
-                                       lookup "other")
-                       "root"))
-        (should (= calls 2))))))
-
-(ert-deftest remote-project-memo-does-not-keep-a-prompted-project ()
-  "What a prompt returns is the user's pick, not the directory's project."
-  (let ((+tramp--project-current-cache nil))
-    (cl-letf (((symbol-function '+remote-per-file-subprocess-affordable-p)
-               #'ignore))
-      (let ((prompting (lambda (maybe-prompt _directory)
-                         (and maybe-prompt 'picked))))
-        (should (eq (project-current@+tramp-memoize prompting t "/d/")
-                    'picked))
-        (should-not +tramp--project-current-cache)
-        (should-not (project-current@+tramp-memoize prompting nil "/d/")))
-      (let ((found (lambda (&rest _) 'project)))
-        (should (eq (project-current@+tramp-memoize found nil "/d/") 'project))
-        (should (eq (project-current@+tramp-memoize #'ignore t "/d/")
-                    'project))))))
-
 ;;;; tramp-rpc connection generations
 
 ;; tramp-rpc 0.16.0 keeps each connection generation in a
@@ -872,6 +840,52 @@ filesystem event says otherwise; other access questions always go out."
                        0)))
         (delete-process first)
         (delete-process second)))))
+
+(ert-deftest remote-tramp-rpc-ancestor-prefetch-lists-each-ancestor-once ()
+  "One batch lists every ancestor; only absent markers are seeded missing."
+  (require 'tramp)
+  (let ((remote-backend-tramp-rpc--ancestor-prefetch t)
+        (route (remote-route-create :target-id "box" :link-id "box/ssh"
+                                    :link-plugin-id "tramp-rpc"))
+        requests seeded listings)
+    (cl-letf (((symbol-function 'remote-backend-project-file-name)
+               (lambda (_route _file) "/ssh:box:/w/p/"))
+              ((symbol-function 'tramp-rpc--encode-path)
+               (lambda (path) `((path . ,path))))
+              ((symbol-function 'tramp-rpc--decode-filename)
+               (lambda (entry) (alist-get 'name entry)))
+              ((symbol-function 'tramp-rpc--batch-error-p)
+               (lambda (result) (eq (car-safe result) :error)))
+              ((symbol-function 'tramp-rpc--call-batch)
+               (lambda (_vec batch)
+                 (setq requests batch)
+                 (list '(((name . ".git")) ((name . "a.c")))
+                       '(:error -32000 :message "too large")
+                       '(((name . ".projectile"))))))
+              ((symbol-function 'tramp-rpc--cache-file-stat-result)
+               (lambda (_vec file stat &optional lstat)
+                 (push (list file stat lstat) seeded)))
+              ((symbol-function 'remote-fs-remember-ancestor-listing)
+               (lambda (directory names) (push (cons directory names) listings))))
+      (should (remote-backend-tramp-rpc-prefetch-ancestor-markers
+               route "/fs:box:/w/p/" '(".git" ".projectile")))
+      (should (equal (mapcar (lambda (r) (cons (car r) (alist-get 'path (cdr r))))
+                             requests)
+                     '(("dir.list" . "/w/p/") ("dir.list" . "/w/")
+                       ("dir.list" . "/"))))
+      ;; /w/p/ has .git but not .projectile; /w/ was refused; / has .projectile.
+      (should (equal (sort (mapcar #'car seeded) #'string<)
+                     '("/.git" "/.git" "/w/p/.projectile" "/w/p/.projectile")))
+      (should (cl-every (lambda (entry) (null (nth 1 entry))) seeded))
+      (should (equal (mapcar #'car listings) '("/fs:box:/" "/fs:box:/w/p/"))))
+    ;; Another backend's route, or an unverified release, is not served here.
+    (should-not (remote-backend-tramp-rpc-prefetch-ancestor-markers
+                 (remote-route-create :target-id "box" :link-id "box/ssh"
+                                      :link-plugin-id "tramp")
+                 "/fs:box:/w/" '(".git")))
+    (let ((remote-backend-tramp-rpc--ancestor-prefetch nil))
+      (should-not (remote-backend-tramp-rpc-prefetch-ancestor-markers
+                   route "/fs:box:/w/" '(".git"))))))
 
 (ert-deftest remote-tramp-rpc-read-timeout-retires-only-current-generation ()
   "A timed-out request must never close a replacement SSH process."
@@ -2112,6 +2126,61 @@ write to the file sends its next check to the server again."
   (dolist (bad '(nil t ((errno . 13)) ((errno . -1)) ((errno . "0"))
                  (:error -32001 :message "missing")))
     (should-not (remote-backend-tramp-rpc-metadata--access-result-p bad))))
+
+(ert-deftest remote-tramp-rpc-metadata-dired-reads-a-directory-once ()
+  "Within one Dired read, `directory-files' reuses the complete listing.
+Its answer keeps `directory-files' semantics; outside a scope, after an
+invalidation, or from a filtered listing, the server is asked."
+  (let ((remote-backend-tramp-rpc-metadata-scope t)
+        (remote-backend-tramp-rpc-metadata--counters
+         (list :listing-reuse 0))
+        (listings 0)
+        (asked 0)
+        (dir "/ssh:box:/w/"))
+    (cl-flet ((list-all (_directory &optional _full match _nosort _id count)
+                (cl-incf listings)
+                (ignore match count)
+                '(("." . a) (".." . a) ("b" . a) ("a\nz" . a) ("c" . a))))
+      (let ((files (lambda (&rest _) (cl-incf asked) 'server)))
+        (remote-backend-tramp-rpc-metadata--listing-scope-a
+         (lambda ()
+           (remote-backend-tramp-rpc-metadata--listing-record-a
+            #'list-all dir)
+           (should (equal (remote-backend-tramp-rpc-metadata--listing-answer-a
+                           files dir nil "\n")
+                          '("a\nz")))
+           (should (equal (remote-backend-tramp-rpc-metadata--listing-answer-a
+                           files "/ssh:box:/w" t "\\`[bc]" nil 1)
+                          '("/ssh:box:/w/b")))
+           (should (equal (remote-backend-tramp-rpc-metadata--listing-answer-a
+                           files dir nil nil t)
+                          '("." ".." "b" "a\nz" "c")))
+           ;; Another directory is not this one.
+           (should (eq (remote-backend-tramp-rpc-metadata--listing-answer-a
+                        files "/ssh:box:/other/")
+                       'server))
+           ;; A change inside the directory forgets its listing.
+           (remote-backend-tramp-rpc-metadata--forget-listing
+            "/ssh:box:/w/new")
+           (should (eq (remote-backend-tramp-rpc-metadata--listing-answer-a
+                        files dir)
+                       'server))
+           ;; A filtered listing is not complete and is never recorded.
+           (remote-backend-tramp-rpc-metadata--listing-record-a
+            #'list-all dir nil "b")
+           (should (eq (remote-backend-tramp-rpc-metadata--listing-answer-a
+                        files dir)
+                       'server))))
+        (should (= listings 2))
+        (should (= asked 3))
+        (should (= (plist-get remote-backend-tramp-rpc-metadata--counters
+                              :listing-reuse)
+                   3))
+        ;; No scope, no reuse.
+        (remote-backend-tramp-rpc-metadata--listing-record-a #'list-all dir)
+        (should (eq (remote-backend-tramp-rpc-metadata--listing-answer-a
+                     files dir)
+                    'server))))))
 
 (ert-deftest remote-tramp-rpc-metadata-scope-forgets-written-file ()
   "After a write, a forced stat in the same save is a real round trip."

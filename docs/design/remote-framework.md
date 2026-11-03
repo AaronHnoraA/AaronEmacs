@@ -788,8 +788,13 @@ Magit/VC、项目文件列表、搜索、Dired 与 PTY 都走它。实测在 Aar
   采用哪一种 PATH 语义。
 - lsp-mode 启动时逐个查找解释器、服务器和 booster，五个程序就是五次往返。可以由
   批量的 `remote-executable-find` 一次回答。
-- `.projectile` 等标记沿祖先目录逐个 stat，没有经过
-  `remote-prefetch-ancestor-markers`；Dired 首次打开时同一目录会列两次。
+
+已处理：祖先标记在 tramp-rpc 上也走 `remote-prefetch-ancestor-markers`。backend 以
+`:ancestor-prefetch t` 声明自己有 provider，一个 `batch` 列出全部祖先目录，不存在
+的标记写进 tramp-rpc 自己的 stat 缓存。tramp-rpc 在每次 `process-file` 后会清空这份
+缓存，所以此后的查询仍会再走网络；改为以 session/project 为单位的知识层后，这一点
+才算真正解决。一次 Dired 读取（`dired-internal-noselect`、`dired-revert`）内，
+`directory-files` 直接用同一次完整列目录的结果回答，所以只列一次。
 
 `remote-copy-file-to-target` 是 provisioning 的批量传输边界。native backend 使用
 本地复制，TRAMP/tramp-rpc SSH backend 使用 SCP；consumer 只提交客户端绝对源文件、
@@ -1497,7 +1502,7 @@ devcontainer、Dape/tasks 编排、动态 SOCKS forward 与托管 tunnel 不在�
 | TRAMP/RPC network client、remote listener 与 SSH 双向 port forward | 已通过 native 回环、命令测试、SSH `-R` 真机数据往返，以及 `-L` 真机强制重连后原端口数据往返；突发断线与 `-R` 恢复故障注入待补 |
 | pipeline stage 的实际逐段建连 | executor/runtime 已建立；内建 overlay/hop 主要负责 endpoint 变换 |
 | workspace/service/channel/terminal 生命周期 | 基础已建立；service/forward、逻辑 watch 与 lsp-mode resource 已登记恢复，仍缺长期真机故障注入；terminal 手动重启 |
-| 单连接与目标事实缓存 | 常用操作共用一条 SSH/RPC 连接；程序解析与目录访问已按 target 回答，登录 PATH、LSP 批量查找、祖先标记与 Dired 重复列目录待补 |
+| 单连接与目标事实缓存 | 常用操作共用一条 SSH/RPC 连接；程序解析、目录访问、祖先标记与 Dired 列目录已按 target 回答；登录 PATH 与 LSP 批量查找待补 |
 | Remote Doctor | 已建立结构化报告与可选 target probe |
 | SSH 真机回归 | `make remote-e2e`，只使用随机临时目录 |
 | WSL2 direnv + C clangd + Python pylsp | 已真实验证走远程环境与 tramp-rpc |

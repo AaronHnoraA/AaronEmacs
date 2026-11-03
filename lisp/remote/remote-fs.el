@@ -823,7 +823,11 @@ directory scanned moments ago, and it never signals."
     (when-let* ((remote-ancestor-marker-names)
                 (canonical (file-name-as-directory
                             (remote-canonicalize-file-name directory)))
-                ((eq (remote-file-operation-cost canonical) 'round-trip))
+                ;; A batched backend still pays one round trip per stat; it
+                ;; opts in by declaring its own provider.
+                ((or (eq (remote-file-operation-cost canonical) 'round-trip)
+                     (remote-fs--backend-property
+                      canonical :ancestor-prefetch)))
                 ((remote-connection-target-open-p
                   (remote-file-name-target canonical))))
       (let ((scanned (gethash canonical remote-fs--ancestor-prefetched))

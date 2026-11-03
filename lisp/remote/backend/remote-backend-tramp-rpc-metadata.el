@@ -84,6 +84,8 @@ after a save, such as a formatter or `git checkout' on the target."
   '((tramp-rpc--call-batch . (2 . 2))
     (tramp-rpc--call-file-stat . (2 . 3))
     (tramp-rpc--call-file-access . (3 . 4))
+    (tramp-rpc-handle-directory-files . (1 . 5))
+    (tramp-rpc-handle-directory-files-and-attributes . (1 . 6))
     (tramp-rpc--cache-file-stat-result . (3 . 4))
     (tramp-rpc--cache-put . (3 . 3))
     (tramp-rpc--cache-entry-valid-p . (1 . 1))
@@ -122,7 +124,7 @@ after a save, such as a formatter or `git checkout' on the target."
 
 (defvar remote-backend-tramp-rpc-metadata--counters
   (list :batches 0 :fresh-reuse 0 :modtime-reuse 0 :access-reuse 0
-        :locate-hits 0 :locate-misses 0)
+        :listing-reuse 0 :locate-hits 0 :locate-misses 0)
   "Counters for Remote Doctor and benchmarks.")
 
 (defun remote-backend-tramp-rpc-metadata--count (key)
@@ -487,6 +489,88 @@ modtime and a disconnected buffer keep TRAMP's own answers."
         (remote-fs-call-verified-stat (lambda () (funcall function buffer)))
       (funcall function buffer))))
 
+;;;; Directory listing scope
+
+(defvar remote-backend-tramp-rpc-metadata--listings nil
+  "Within one Dired read, a list of (DIRECTORY . NAMES), else t or nil.
+t means a scope is open and has seen no complete listing yet.")
+
+(defun remote-backend-tramp-rpc-metadata--listing-scope-a
+    (function &rest arguments)
+  "Run FUNCTION with ARGUMENTS in a directory listing scope.
+One Dired read lists its directory for the buffer and then again only to
+ask whether a name contains a newline; inside the scope the second
+question is answered from the first listing, as VS Code reads a directory
+once per refresh.  Nested reads get their own scope."
+  (let ((remote-backend-tramp-rpc-metadata--listings t))
+    (apply function arguments)))
+
+(defun remote-backend-tramp-rpc-metadata--listing-key (directory)
+  "Return the listing key for DIRECTORY."
+  (file-name-as-directory (expand-file-name directory)))
+
+(defun remote-backend-tramp-rpc-metadata--listing-record-a
+    (function directory &optional full match nosort id-format count)
+  "Call FUNCTION for DIRECTORY and remember a complete listing in scope.
+FULL, MATCH, NOSORT, ID-FORMAT and COUNT are FUNCTION's arguments; only an
+unfiltered, uncounted listing is complete."
+  (let ((result (funcall function directory full match nosort id-format
+                         count)))
+    (when (and remote-backend-tramp-rpc-metadata--listings
+               remote-backend-tramp-rpc-metadata-scope
+               (null match) (null count) (listp result))
+      (let ((names (mapcar (lambda (entry)
+                             (if full
+                                 (file-name-nondirectory
+                                  (directory-file-name (car entry)))
+                               (car entry)))
+                           result)))
+        (when (cl-every #'stringp names)
+          (setq remote-backend-tramp-rpc-metadata--listings
+                (cons (cons (remote-backend-tramp-rpc-metadata--listing-key
+                             directory)
+                            names)
+                      (and (listp remote-backend-tramp-rpc-metadata--listings)
+                           remote-backend-tramp-rpc-metadata--listings))))))
+    result))
+
+(defun remote-backend-tramp-rpc-metadata--listing-answer-a
+    (function directory &optional full match nosort count)
+  "Answer FUNCTION's listing of DIRECTORY from the scope when it can.
+FULL, MATCH, NOSORT and COUNT keep `directory-files' semantics: names
+matching the MATCH regexp, absolute when FULL, sorted with `string<'
+unless NOSORT, at most COUNT of them."
+  (if-let* (((listp remote-backend-tramp-rpc-metadata--listings))
+            (entry (assoc (remote-backend-tramp-rpc-metadata--listing-key
+                           directory)
+                          remote-backend-tramp-rpc-metadata--listings))
+            ((or (null count) (natnump count))))
+      (let* ((names (if match
+                        (seq-filter (lambda (name) (string-match-p match name))
+                                    (cdr entry))
+                      (copy-sequence (cdr entry))))
+             (names (if nosort names (sort names #'string<)))
+             (names (if count (seq-take names count) names)))
+        (remote-backend-tramp-rpc-metadata--count :listing-reuse)
+        (if full
+            (mapcar (lambda (name) (expand-file-name name directory)) names)
+          names))
+    (funcall function directory full match nosort count)))
+
+(defun remote-backend-tramp-rpc-metadata--forget-listing (filename)
+  "Drop a scope listing that a change to FILENAME can alter."
+  (when (and (consp remote-backend-tramp-rpc-metadata--listings)
+             (stringp filename))
+    (let ((parent (remote-backend-tramp-rpc-metadata--listing-key
+                   (file-name-directory (directory-file-name
+                                         (expand-file-name filename)))))
+          (self (remote-backend-tramp-rpc-metadata--listing-key filename)))
+      (setq remote-backend-tramp-rpc-metadata--listings
+            (or (seq-remove (lambda (entry)
+                              (member (car entry) (list parent self)))
+                            remote-backend-tramp-rpc-metadata--listings)
+                t)))))
+
 ;;;; locate-dominating-file
 
 (defun remote-backend-tramp-rpc-metadata--locate-start (file)
@@ -586,6 +670,7 @@ Parent directory stats that an in-place rewrite cannot change are restored."
   (let ((kept (remote-backend-tramp-rpc-metadata--kept-directory-stats
                filename)))
     (remote-backend-tramp-rpc-metadata--forget filename)
+    (remote-backend-tramp-rpc-metadata--forget-listing filename)
     (remote-backend-tramp-rpc-metadata--flush-name filename)
     (prog1 (funcall function filename)
       (pcase-dolist (`(,key . ,cached) kept)
@@ -617,6 +702,8 @@ DIRECTORY is the invalidated subtree; any scope file may lie below it."
     (ignore directory)
     (setf (remote-backend-tramp-rpc-metadata--scope-stats scope) nil
           (remote-backend-tramp-rpc-metadata--scope-access scope) nil))
+  (when remote-backend-tramp-rpc-metadata--listings
+    (setq remote-backend-tramp-rpc-metadata--listings t))
   (remote-backend-tramp-rpc-metadata-flush))
 
 (defun remote-backend-tramp-rpc-metadata--flush-file-a (vec localname)
@@ -642,6 +729,14 @@ DIRECTORY is the invalidated subtree; any scope file may lie below it."
      :around remote-backend-tramp-rpc-metadata--stat-a)
     (tramp-rpc--call-file-access
      :around remote-backend-tramp-rpc-metadata--access-a)
+    (dired-internal-noselect
+     :around remote-backend-tramp-rpc-metadata--listing-scope-a)
+    (dired-revert
+     :around remote-backend-tramp-rpc-metadata--listing-scope-a)
+    (tramp-rpc-handle-directory-files-and-attributes
+     :around remote-backend-tramp-rpc-metadata--listing-record-a)
+    (tramp-rpc-handle-directory-files
+     :around remote-backend-tramp-rpc-metadata--listing-answer-a)
     (tramp-handle-set-visited-file-modtime
      :around remote-backend-tramp-rpc-metadata--modtime-a)
     (tramp-handle-verify-visited-file-modtime
