@@ -342,56 +342,94 @@
         (should (eq (project-current@+tramp-memoize #'ignore t "/d/")
                     'project))))))
 
+;;;; tramp-rpc connection generations
+
+;; tramp-rpc 0.16.0 keeps each connection generation in a
+;; `tramp-rpc-connection' record.  These tests run without tramp-rpc on the
+;; load path, so they define the same slots the adapter reads.
+(unless (featurep 'tramp-rpc-connection)
+  ;; Ask for the feature: expanding `cl-defstruct' at load time already
+  ;; defines its predicate before this test runs.
+  (cl-defstruct (tramp-rpc-connection
+                 (:constructor tramp-rpc--make-connection)
+                 (:copier nil))
+    process buffer stderr-buffer vec cleanup-started probing))
+
+(defmacro remote-tramp-rpc-test--readable (&rest body)
+  "Run BODY with tramp-rpc connection generations readable."
+  (declare (indent 0))
+  `(let ((remote-backend-tramp-rpc--connection-shape t))
+     ,@body))
+
+(defun remote-tramp-rpc-test--generation (&rest slots)
+  "Return a tramp-rpc connection generation with SLOTS."
+  (apply #'tramp-rpc--make-connection slots))
+
+(eval-and-compile
+  (defun remote-tramp-rpc-test--arglist (arity)
+    "Return a lambda list with ARITY."
+    (let ((min (car arity)) (max (cdr arity)) args)
+      (dotimes (i min) (push (intern (format "_a%d" i)) args))
+      (cond
+       ((eq max 'many) (push '&rest args) (push '_rest args))
+       ((> max min)
+        (push '&optional args)
+        (dotimes (i (- max min))
+          (push (intern (format "_o%d" i)) args))))
+      (nreverse args))))
+
+(defmacro remote-tramp-rpc-test--with-stub-seams (&rest body)
+  "Run BODY with every shim target defined at its contracted arity."
+  (declare (indent 0))
+  `(cl-letf* ,(mapcar
+               (lambda (entry)
+                 `((symbol-function ',(car entry))
+                   (lambda ,(remote-tramp-rpc-test--arglist (cdr entry))
+                     (ignore ,@(seq-remove
+                                (lambda (arg) (memq arg '(&optional &rest)))
+                                (remote-tramp-rpc-test--arglist (cdr entry))))
+                     nil)))
+               (append
+                (seq-remove
+                 (lambda (entry)
+                   (memq (car entry)
+                         '(tramp-rpc-connection-p
+                           tramp-rpc-connection-process
+                           tramp-rpc-connection-buffer
+                           tramp-rpc-connection-stderr-buffer
+                           tramp-rpc-connection-cleanup-started)))
+                 remote-backend-tramp-rpc--private-contracts)
+                '((tramp-rpc-deploy--arch-to-rust-target . (1 . 1))
+                  (tramp-rpc-handle-make-process . (0 . many))
+                  (tramp-rpc--compute-remote-path . (1 . 1))
+                  (tramp-rpc--deliver-process-output . (4 . 4)))))
+     ,@body))
+
+(defconst remote-tramp-rpc-test--verified
+  (list :client-version remote-backend-tramp-rpc--verified-client-version
+        :git-checkout t
+        :revision remote-backend-tramp-rpc--verified-client-revision
+        :release-checkout t)
+  "A release contract describing exactly the verified client.")
+
 (ert-deftest remote-tramp-rpc-upgrade-removes-unverified-private-shims ()
   "A newer client must not inherit advice written for the verified release."
+  (should (equal remote-backend-tramp-rpc--verified-client-version "0.16.0"))
   (should
-   (remote-backend-tramp-rpc--verified-release-p
-    '(:client-version "0.13.1" :git-checkout t
-      :revision "e1d4632d576ecf2472c321de1e713b776ea2b78f"
-      :release-checkout t)))
-  (should-not
-   (remote-backend-tramp-rpc--verified-release-p
-    '(:client-version "0.14.0" :git-checkout t
-      :revision "e1d4632d576ecf2472c321de1e713b776ea2b78f"
-      :release-checkout t)))
-  (should-not
-   (remote-backend-tramp-rpc--verified-release-p
-    '(:client-version "0.13.1" :git-checkout t
-      :revision "e1d4632d576ecf2472c321de1e713b776ea2b78f"
-      :release-checkout nil)))
-  (should-not
-   (remote-backend-tramp-rpc--verified-release-p
-    '(:client-version "0.13.1" :git-checkout t
-      :revision "different-commit" :release-checkout t)))
-  (should-not
-   (remote-backend-tramp-rpc--verified-release-p
-    '(:client-version "0.13.1" :git-checkout nil
-      :revision "e1d4632d576ecf2472c321de1e713b776ea2b78f"
-      :release-checkout t)))
+   (remote-backend-tramp-rpc--verified-release-p remote-tramp-rpc-test--verified))
+  (dolist (change '((:client-version "0.17.0")
+                    (:release-checkout nil)
+                    (:revision "different-commit")
+                    (:git-checkout nil)))
+    (let ((release (copy-sequence remote-tramp-rpc-test--verified)))
+      (setq release (plist-put release (car change) (cadr change)))
+      (should-not (remote-backend-tramp-rpc--verified-release-p release))))
   (let ((original-require (symbol-function 'require))
         (pairs
-         '((tramp-rpc-deploy--arch-to-rust-target
-            . remote-backend-tramp-rpc--arch-to-rust-target-a)
-           (tramp-rpc-handle-make-process
-            . remote-backend-tramp-rpc--local-relay-cwd-a)
-           (tramp-rpc--controlmaster-socket-path
-            . remote-backend-tramp-rpc--local-controlmaster-path-a)
-           (tramp-rpc--ensure-controlmaster-directory
-            . remote-backend-tramp-rpc--local-controlmaster-path-a)
-           (tramp-rpc--call
-            . remote-backend-tramp-rpc--adapter-timeout-a)
-           (tramp-rpc--acl-enabled-p
-            . remote-backend-tramp-rpc--acl-enabled-a)
-           (tramp-rpc--selinux-enabled-p
-            . remote-backend-tramp-rpc--selinux-enabled-a)
-           (tramp-rpc-handle-write-region
-            . remote-backend-tramp-rpc--write-region-in-place-a)
-           (file-extended-attributes
-            . remote-backend-tramp-rpc--extended-attributes-in-place-a)
-           (tramp-rpc--deliver-process-output
-            . remote-backend-tramp-rpc--closed-relay-exit-a)
-           (tramp-rpc--compute-remote-path
-            . remote-backend-tramp-rpc--compute-remote-path-a))))
+         (append
+          (mapcar (lambda (shim) (cons (nth 1 shim) (nth 3 shim)))
+                  remote-backend-tramp-rpc--shims)
+          remote-backend-tramp-rpc--retired-shims)))
     (cl-letf (((symbol-function 'require)
                (lambda (feature &rest arguments)
                  (pcase feature
@@ -399,40 +437,51 @@
                    ('tramp-rpc-deploy t)
                    (_ (apply original-require feature arguments)))))
               ((symbol-function 'remote-backend-tramp-rpc-release-contract)
-               (lambda () '(:client-version "0.14.0"
-                            :release-checkout t)))
-              ((symbol-function 'tramp-rpc-deploy--arch-to-rust-target)
-               (lambda (_architecture) nil))
-              ((symbol-function 'tramp-rpc-handle-make-process)
-               (lambda (&rest _arguments) nil))
-              ((symbol-function 'tramp-rpc--controlmaster-socket-path)
-               (lambda (_vector) nil))
-              ((symbol-function 'tramp-rpc--ensure-controlmaster-directory)
-               (lambda () nil))
-              ((symbol-function 'tramp-rpc--call)
-               (lambda (_vector _method _params &optional _connection) nil))
-              ((symbol-function 'tramp-rpc--call-with-timeout)
-               (lambda (_vector _method _params _timeout _poll
-                        &optional _connection)
-                 nil))
-              ((symbol-function 'tramp-rpc--acl-enabled-p)
-               (lambda (_vector) nil))
-              ((symbol-function 'tramp-rpc--selinux-enabled-p)
-               (lambda (_vector) nil))
-              ((symbol-function 'tramp-rpc-handle-write-region)
-               (lambda (_start _end _filename &optional _append _visit
-                        _lockname _mustbenew)
-                 nil))
-              ((symbol-function 'tramp-rpc--deliver-process-output)
-               (lambda (_process _stdout _stderr _buffer) nil))
-              ((symbol-function 'tramp-rpc--compute-remote-path)
-               (lambda (_vector) nil)))
-      (dolist (pair pairs)
-        (advice-add (car pair) :around (cdr pair))
-        (should (advice-member-p (cdr pair) (car pair))))
-      (remote-backend-tramp-rpc-install)
-      (dolist (pair pairs)
-        (should-not (advice-member-p (cdr pair) (car pair)))))))
+               (lambda () '(:client-version "0.17.0"
+                            :release-checkout t))))
+      (remote-tramp-rpc-test--with-stub-seams
+        (dolist (pair pairs)
+          (advice-add (car pair) :around (cdr pair))
+          (should (advice-member-p (cdr pair) (car pair))))
+        (remote-backend-tramp-rpc-install)
+        (dolist (pair pairs)
+          (should-not (advice-member-p (cdr pair) (car pair))))))))
+
+(ert-deftest remote-tramp-rpc-verified-install-drops-retired-shims ()
+  "The verified release installs current shims and none fixed upstream."
+  (let ((original-require (symbol-function 'require))
+        (remote-backend-tramp-rpc--connection-shape nil)
+        (remote-backend-tramp-rpc--probe-slot nil))
+    (cl-letf (((symbol-function 'require)
+               (lambda (feature &rest arguments)
+                 (pcase feature
+                   ('msgpack nil)
+                   ('tramp-rpc-deploy t)
+                   (_ (apply original-require feature arguments)))))
+              ((symbol-function 'remote-backend-tramp-rpc-release-contract)
+               (lambda () remote-tramp-rpc-test--verified))
+              ((symbol-function 'remote-backend-tramp-rpc-metadata-install)
+               #'ignore))
+      (remote-tramp-rpc-test--with-stub-seams
+        (unwind-protect
+            (progn
+              (pcase-dolist (`(,symbol . ,advice)
+                             remote-backend-tramp-rpc--retired-shims)
+                (advice-add symbol :around advice))
+              (remote-backend-tramp-rpc-install)
+              (pcase-dolist (`(,symbol . ,advice)
+                             remote-backend-tramp-rpc--retired-shims)
+                (should-not (advice-member-p advice symbol)))
+              (should remote-backend-tramp-rpc--connection-shape)
+              (should (integerp remote-backend-tramp-rpc--probe-slot))
+              (dolist (shim remote-backend-tramp-rpc--shims)
+                (should (advice-member-p (nth 3 shim) (nth 1 shim))))
+              ;; A second install, as a package reload runs, is idempotent.
+              (remote-backend-tramp-rpc-install)
+              (dolist (shim remote-backend-tramp-rpc--shims)
+                (should (advice-member-p (nth 3 shim) (nth 1 shim)))))
+          (dolist (shim remote-backend-tramp-rpc--shims)
+            (advice-remove (nth 1 shim) (nth 3 shim))))))))
 
 (ert-deftest remote-tramp-rpc-in-place-metadata-scope-is-exact ()
   "Only the current RPC write can bypass redundant metadata commands."
@@ -490,162 +539,139 @@
        (lambda (&rest _) (push 'disabled calls)) file 1 1)
       (should (eq (car calls) 'disabled)))))
 
-(ert-deftest remote-tramp-rpc-closed-relay-exit-race-is-narrow ()
-  "Only a closed write end on an exited relay is safe to discard."
-  (let ((process (make-pipe-process
-                  :name "remote-closed-relay-test" :noquery t)))
-    (unwind-protect
-        (let ((calls 0)
-              (closed
-               (format "Output file descriptor of %s is closed"
-                       (process-name process))))
-          (cl-labels ((deliver (_process _stdout _stderr _buffer)
-                        (cl-incf calls)
-                        (error "%s" closed)))
-            (should-error
-            (remote-backend-tramp-rpc--closed-relay-exit-a
-              #'deliver process "data" nil nil))
-            (process-put process :tramp-rpc-exited t)
-            (should-not
-             (remote-backend-tramp-rpc--closed-relay-exit-a
-              #'deliver process "data" nil nil))
-            (should (= calls 2))
-            (should-error
-             (remote-backend-tramp-rpc--closed-relay-exit-a
-              (lambda (&rest _) (error "different failure"))
-              process "data" nil nil))))
-      (delete-process process))))
-
 (ert-deftest remote-tramp-rpc-attribute-probes-cache-per-live-generation ()
   "A successful probe is reused only on its own live RPC transport."
-  (let* ((remote-backend-tramp-rpc-attribute-probe-ttl 60)
-         (first (make-pipe-process
-                 :name "remote-attribute-first-test" :noquery t))
-         (second (make-pipe-process
-                  :name "remote-attribute-second-test" :noquery t))
-         (current first)
-         (calls 0))
-    (unwind-protect
-        (cl-letf (((symbol-function 'tramp-rpc--get-connection)
-                   (lambda (_vector) (list :process current)))
-                  ((symbol-function 'tramp-rpc--call)
-                   (lambda (_vector method params &optional _connection)
-                     (should (equal method "process.run"))
-                     (should (equal (alist-get 'cmd params) "getfacl"))
-                     (cl-incf calls)
-                     '((exit_code . 0)))))
-          (should (remote-backend-tramp-rpc--acl-enabled-a
-                   #'ignore 'vector))
-          (should (remote-backend-tramp-rpc--acl-enabled-a
-                   #'ignore 'vector))
-          (should (= calls 1))
-          (setq current second)
-          (should (remote-backend-tramp-rpc--acl-enabled-a
-                   #'ignore 'vector))
-          (should (= calls 2))
-          (process-put second 'remote-backend-tramp-rpc--acl-available
-                       (cons (- (float-time) 61) t))
-          (should (remote-backend-tramp-rpc--acl-enabled-a
-                   #'ignore 'vector))
-          (should (= calls 3))
-          (let ((remote-backend-tramp-rpc-attribute-probe-ttl 0))
-            (should (remote-backend-tramp-rpc--acl-enabled-a
-                     #'ignore 'vector)))
-          (should (= calls 4)))
-      (delete-process first)
-      (delete-process second))))
+  (remote-tramp-rpc-test--readable
+   (let* ((remote-backend-tramp-rpc-attribute-probe-ttl 60)
+          (first (make-pipe-process
+                  :name "remote-attribute-first-test" :noquery t))
+          (second (make-pipe-process
+                   :name "remote-attribute-second-test" :noquery t))
+          (current first)
+          (calls 0))
+     (unwind-protect
+         (cl-letf (((symbol-function 'tramp-rpc--get-connection)
+                    (lambda (_vector) (remote-tramp-rpc-test--generation :process current)))
+                   ((symbol-function 'tramp-rpc--call)
+                    (lambda (_vector method params &optional _connection)
+                      (should (equal method "process.run"))
+                      (should (equal (alist-get 'cmd params) "getfacl"))
+                      (cl-incf calls)
+                      '((exit_code . 0)))))
+           (should (remote-backend-tramp-rpc--acl-enabled-a
+                    #'ignore 'vector))
+           (should (remote-backend-tramp-rpc--acl-enabled-a
+                    #'ignore 'vector))
+           (should (= calls 1))
+           (setq current second)
+           (should (remote-backend-tramp-rpc--acl-enabled-a
+                    #'ignore 'vector))
+           (should (= calls 2))
+           (process-put second 'remote-backend-tramp-rpc--acl-available
+                        (cons (- (float-time) 61) t))
+           (should (remote-backend-tramp-rpc--acl-enabled-a
+                    #'ignore 'vector))
+           (should (= calls 3))
+           (let ((remote-backend-tramp-rpc-attribute-probe-ttl 0))
+             (should (remote-backend-tramp-rpc--acl-enabled-a
+                      #'ignore 'vector)))
+           (should (= calls 4)))
+       (delete-process first)
+       (delete-process second)))))
 
 (ert-deftest remote-tramp-rpc-attribute-probe-does-not-cache-on-replacement ()
   "A probe completed across a transport swap cannot populate the new cache."
-  (let* ((remote-backend-tramp-rpc-attribute-probe-ttl 60)
-         (first (make-pipe-process
-                 :name "remote-attribute-race-first" :noquery t))
-         (second (make-pipe-process
-                  :name "remote-attribute-race-second" :noquery t))
-         (current first)
-         (calls 0))
-    (unwind-protect
-        (cl-letf (((symbol-function 'tramp-rpc--get-connection)
-                   (lambda (_vector) (list :process current)))
-                  ((symbol-function 'tramp-rpc--call)
-                   (lambda (&rest _arguments)
-                     (cl-incf calls)
-                     (setq current second)
-                     '((exit_code . 0)))))
-          (should (remote-backend-tramp-rpc--acl-enabled-a
-                   #'ignore 'vector))
-          (should-not
-           (process-get second 'remote-backend-tramp-rpc--acl-available))
-          (should (remote-backend-tramp-rpc--acl-enabled-a
-                   #'ignore 'vector))
-          (should (= calls 2)))
-      (delete-process first)
-      (delete-process second))))
+  (remote-tramp-rpc-test--readable
+   (let* ((remote-backend-tramp-rpc-attribute-probe-ttl 60)
+          (first (make-pipe-process
+                  :name "remote-attribute-race-first" :noquery t))
+          (second (make-pipe-process
+                   :name "remote-attribute-race-second" :noquery t))
+          (current first)
+          (calls 0))
+     (unwind-protect
+         (cl-letf (((symbol-function 'tramp-rpc--get-connection)
+                    (lambda (_vector) (remote-tramp-rpc-test--generation :process current)))
+                   ((symbol-function 'tramp-rpc--call)
+                    (lambda (&rest _arguments)
+                      (cl-incf calls)
+                      (setq current second)
+                      '((exit_code . 0)))))
+           (should (remote-backend-tramp-rpc--acl-enabled-a
+                    #'ignore 'vector))
+           (should-not
+            (process-get second 'remote-backend-tramp-rpc--acl-available))
+           (should (remote-backend-tramp-rpc--acl-enabled-a
+                    #'ignore 'vector))
+           (should (= calls 2)))
+       (delete-process first)
+       (delete-process second)))))
 
 (ert-deftest remote-tramp-rpc-attribute-probes-cache-only-proven-missing-command ()
   "Missing-command results are cached; transport failures remain retryable."
-  (dolist (missing
-           '((file-missing "RPC" "No such file" "spawn failed"
-                           ((os_errno . 2) (spawn_not_found . t)))
-             (file-missing
-              "RPC No such file Failed to spawn process: No such file or directory (os error 2) ((os_errno . 2) (spawn_not_found . t))")))
-    (let ((process (make-pipe-process
-                    :name "remote-attribute-missing-test" :noquery t))
-          (remote-backend-tramp-rpc-attribute-probe-ttl 60)
-          (calls 0))
-      (unwind-protect
-          (cl-letf (((symbol-function 'tramp-rpc--get-connection)
-                     (lambda (_vector) (list :process process)))
-                    ((symbol-function 'tramp-rpc--call)
-                     (lambda (&rest _arguments)
-                       (cl-incf calls)
-                       (signal (car missing) (cdr missing)))))
-            (should-not
-             (remote-backend-tramp-rpc--selinux-enabled-a
-              #'ignore 'vector))
-            (should-not
-             (remote-backend-tramp-rpc--selinux-enabled-a
-              #'ignore 'vector))
-            (should (= calls 1)))
-        (delete-process process))))
-  (let ((process (make-pipe-process
-                  :name "remote-attribute-error-test" :noquery t))
-        (remote-backend-tramp-rpc-attribute-probe-ttl 60)
-        (calls 0))
-    (unwind-protect
-        (cl-letf (((symbol-function 'tramp-rpc--get-connection)
-                   (lambda (_vector) (list :process process)))
-                  ((symbol-function 'tramp-rpc--call)
-                   (lambda (&rest _arguments)
-                     (cl-incf calls)
-                     (signal 'remote-file-error '("transport lost")))))
-          (should-not
-           (remote-backend-tramp-rpc--selinux-enabled-a
-            #'ignore 'vector))
-          (should-not
-           (remote-backend-tramp-rpc--selinux-enabled-a
-            #'ignore 'vector))
-          (should (= calls 2)))
-      (delete-process process)))
-  (let ((process (make-pipe-process
-                  :name "remote-attribute-nonzero-test" :noquery t))
-        (remote-backend-tramp-rpc-attribute-probe-ttl 60)
-        (calls 0))
-    (unwind-protect
-        (cl-letf (((symbol-function 'tramp-rpc--get-connection)
-                   (lambda (_vector) (list :process process)))
-                  ((symbol-function 'tramp-rpc--call)
-                   (lambda (&rest _arguments)
-                     (cl-incf calls)
-                     '((exit_code . 1)))))
-          (should-not
-           (remote-backend-tramp-rpc--selinux-enabled-a
-            #'ignore 'vector))
-          (should-not
-           (remote-backend-tramp-rpc--selinux-enabled-a
-            #'ignore 'vector))
-          (should (= calls 2)))
-      (delete-process process))))
+  (remote-tramp-rpc-test--readable
+   (dolist (missing
+            '((file-missing "RPC" "No such file" "spawn failed"
+                            ((os_errno . 2) (spawn_not_found . t)))
+              (file-missing
+               "RPC No such file Failed to spawn process: No such file or directory (os error 2) ((os_errno . 2) (spawn_not_found . t))")))
+     (let ((process (make-pipe-process
+                     :name "remote-attribute-missing-test" :noquery t))
+           (remote-backend-tramp-rpc-attribute-probe-ttl 60)
+           (calls 0))
+       (unwind-protect
+           (cl-letf (((symbol-function 'tramp-rpc--get-connection)
+                      (lambda (_vector) (remote-tramp-rpc-test--generation :process process)))
+                     ((symbol-function 'tramp-rpc--call)
+                      (lambda (&rest _arguments)
+                        (cl-incf calls)
+                        (signal (car missing) (cdr missing)))))
+             (should-not
+              (remote-backend-tramp-rpc--selinux-enabled-a
+               #'ignore 'vector))
+             (should-not
+              (remote-backend-tramp-rpc--selinux-enabled-a
+               #'ignore 'vector))
+             (should (= calls 1)))
+         (delete-process process))))
+   (let ((process (make-pipe-process
+                   :name "remote-attribute-error-test" :noquery t))
+         (remote-backend-tramp-rpc-attribute-probe-ttl 60)
+         (calls 0))
+     (unwind-protect
+         (cl-letf (((symbol-function 'tramp-rpc--get-connection)
+                    (lambda (_vector) (remote-tramp-rpc-test--generation :process process)))
+                   ((symbol-function 'tramp-rpc--call)
+                    (lambda (&rest _arguments)
+                      (cl-incf calls)
+                      (signal 'remote-file-error '("transport lost")))))
+           (should-not
+            (remote-backend-tramp-rpc--selinux-enabled-a
+             #'ignore 'vector))
+           (should-not
+            (remote-backend-tramp-rpc--selinux-enabled-a
+             #'ignore 'vector))
+           (should (= calls 2)))
+       (delete-process process)))
+   (let ((process (make-pipe-process
+                   :name "remote-attribute-nonzero-test" :noquery t))
+         (remote-backend-tramp-rpc-attribute-probe-ttl 60)
+         (calls 0))
+     (unwind-protect
+         (cl-letf (((symbol-function 'tramp-rpc--get-connection)
+                    (lambda (_vector) (remote-tramp-rpc-test--generation :process process)))
+                   ((symbol-function 'tramp-rpc--call)
+                    (lambda (&rest _arguments)
+                      (cl-incf calls)
+                      '((exit_code . 1)))))
+           (should-not
+            (remote-backend-tramp-rpc--selinux-enabled-a
+             #'ignore 'vector))
+           (should-not
+            (remote-backend-tramp-rpc--selinux-enabled-a
+             #'ignore 'vector))
+           (should (= calls 2)))
+       (delete-process process)))))
 
 (ert-deftest remote-tramp-rpc-timeout-advice-preserves-connection-generation ()
   "An RPC request pinned to an old connection must never use a new one."
@@ -674,7 +700,7 @@
 (ert-deftest remote-tramp-rpc-read-query-deadlines-keep-writes-unchanged ()
   "Only a routed retry-safe read receives the shorter RPC deadline."
   (let ((remote-fs-current-retry-safe-query t)
-        (generation (list :process nil))
+        (generation (remote-tramp-rpc-test--generation :process nil))
         seen)
     (cl-letf (((symbol-function 'tramp-rpc--call-with-timeout)
                (lambda (&rest arguments)
@@ -712,96 +738,127 @@
            'upstream))
       (should (equal seen (list 'vector "file.stat" 'params generation))))))
 
-(ert-deftest remote-tramp-rpc-read-timeout-retires-only-current-generation ()
-  "A timed-out request must never close a replacement SSH process."
-  (let* ((remote-fs-current-retry-safe-query t)
-         (process (make-pipe-process
-                   :name "remote-read-timeout-test" :noquery t))
-         (generation (list :process process))
-         (current generation)
-         (deletions 0))
-    (unwind-protect
-        (cl-letf (((symbol-function 'tramp-rpc--call-with-timeout)
-                   (lambda (&rest _)
-                     (signal 'remote-file-error
-                             '("Timeout waiting for RPC response"))))
-                  ((symbol-function 'tramp-rpc--get-connection)
-                   (lambda (_vector) current))
-                  ((symbol-function 'delete-process)
-                   (lambda (_process) (cl-incf deletions))))
-          (should-error
-           (remote-backend-tramp-rpc--adapter-timeout-a
-            #'ignore 'vector "file.stat" 'params generation)
-           :type 'remote-file-error)
-          (should (= deletions 1))
-          (setq current (list :process process))
-          (should-error
-           (remote-backend-tramp-rpc--adapter-timeout-a
-            #'ignore 'vector "file.stat" 'params generation)
-           :type 'remote-file-error)
-          (should (= deletions 1))
-          (let ((remote-fs-current-retry-safe-query nil)
-                (remote-current-adapter-id "environment"))
-            (setq current generation)
+(ert-deftest remote-tramp-rpc-timeout-keeps-a-transport-that-still-answers ()
+  "A timed-out bounded read closes its transport only when a ping also fails.
+The bounded request suppresses upstream's own 10 s probe, so the whole
+wait stays within the caller's deadline plus the short liveness ping."
+  (remote-tramp-rpc-test--readable
+    (let* ((remote-fs-current-retry-safe-query t)
+           (remote-backend-tramp-rpc--probe-slot
+            (cl-struct-slot-offset 'tramp-rpc-connection 'probing))
+           (process (make-pipe-process
+                     :name "remote-liveness-test" :noquery t))
+           (generation (remote-tramp-rpc-test--generation :process process))
+           (ping-answers t)
+           (invalidations 0)
+           calls)
+      (unwind-protect
+          (cl-letf (((symbol-function 'tramp-rpc--get-connection)
+                     (lambda (_vector) generation))
+                    ((symbol-function 'tramp-rpc--invalidate-timed-out-connection)
+                     (lambda (dead _vector _event)
+                       (should (eq dead process))
+                       (cl-incf invalidations)))
+                    ((symbol-function 'tramp-rpc--call-with-timeout)
+                     (lambda (_vector method _params timeout _poll &optional _c)
+                       (push (list method timeout
+                                   (tramp-rpc-connection-probing generation))
+                             calls)
+                       (if (and (equal method "system.ping") ping-answers)
+                           t
+                         (signal 'remote-file-error
+                                 '("Timeout waiting for RPC response"))))))
             (should-error
              (remote-backend-tramp-rpc--adapter-timeout-a
-              #'ignore 'vector "process.run" 'params generation)
+              #'ignore 'vector "file.stat" 'params nil)
              :type 'remote-file-error)
-            (should (= deletions 2))))
-      (delete-process process)))
-  (should
-   (eq (plist-get
-        (remote-backend-tramp-rpc-classify-error
-         '(remote-file-error "Timeout waiting for RPC response")
-         'file-read)
-        :scope)
-       'transport)))
+            ;; Both waits ran with upstream's probe suppressed.
+            (should (equal (reverse calls)
+                           (list (list "file.stat" 5 t)
+                                 (list "system.ping"
+                                       remote-backend-tramp-rpc-liveness-probe-timeout
+                                       t))))
+            (should (= invalidations 0))
+            (should-not (tramp-rpc-connection-probing generation))
+            (setq ping-answers nil calls nil)
+            (should-error
+             (remote-backend-tramp-rpc--adapter-timeout-a
+              #'ignore 'vector "file.stat" 'params nil)
+             :type 'remote-file-error)
+            (should (= invalidations 1))
+            (should-not (tramp-rpc-connection-probing generation))
+            (let ((remote-backend-tramp-rpc-liveness-probe-timeout 0))
+              (setq calls nil)
+              (should-error
+               (remote-backend-tramp-rpc--adapter-timeout-a
+                #'ignore 'vector "file.stat" 'params nil)
+               :type 'remote-file-error)
+              (should (equal (mapcar #'car calls) '("file.stat")))
+              (should (= invalidations 2))))
+        (delete-process process)))))
 
-(ert-deftest remote-tramp-rpc-path-batch-keeps-order-and-falls-back ()
-  "One target check preserves PATH order and rejects malformed responses."
-  (let (request)
-    (cl-letf (((symbol-function 'tramp-rpc--call)
-               (lambda (_vector method params &optional _connection)
-                 (setq request (cons method params))
-                 '((exit_code . 0) (stdout . "101"))))
-              ((symbol-function 'tramp-rpc--decode-output)
-               (lambda (data _encoding) data)))
-      (should
-       (equal
-        (remote-backend-tramp-rpc--existing-paths
-         'vector '("/bin" "/missing path" "/bin/odd;name"))
-        '(t "/bin" "/bin/odd;name")))
-      (should (equal (car request) "process.run"))
-      (should
-       (equal (append (alist-get 'args (cdr request)) nil)
-              (list "-c" remote-backend-tramp-rpc--path-directory-script
-                    "sh" "/bin" "/missing path" "/bin/odd;name")))))
-  (cl-letf (((symbol-function 'tramp-rpc--call)
-             (lambda (&rest _) '((exit_code . 0) (stdout . "bad"))))
-            ((symbol-function 'tramp-rpc--decode-output)
-             (lambda (data _encoding) data)))
-    (should-not
-     (remote-backend-tramp-rpc--existing-paths
-      'vector '("/bin" "/missing"))))
-  (let ((fallback 0))
-    (cl-letf (((symbol-function 'tramp-rpc--effective-remote-path-spec)
-               (lambda (_vector) '("/bin")))
-              ((symbol-function 'tramp-rpc--expand-remote-path-entry)
-               (lambda (_vector entry) entry))
-              ((symbol-function 'tramp-rpc--append-path-entries)
-               (lambda (entries result) (append result entries)))
-              ((symbol-function
-                'remote-backend-tramp-rpc--existing-paths)
-               (lambda (_vector _paths) nil)))
-      (should
-       (equal
-        (remote-backend-tramp-rpc--compute-remote-path-a
-         (lambda (_vector)
-           (cl-incf fallback)
-           '("/upstream/bin"))
-         'vector)
-        '("/upstream/bin")))
-      (should (= fallback 1)))))
+(ert-deftest remote-tramp-rpc-probe-guard-restores-a-running-probe ()
+  "Suppressing upstream's probe never clears a probe already in progress."
+  (remote-tramp-rpc-test--readable
+    (let* ((remote-backend-tramp-rpc--probe-slot
+            (cl-struct-slot-offset 'tramp-rpc-connection 'probing))
+           (generation (remote-tramp-rpc-test--generation :probing 'running))
+           (guard (remote-backend-tramp-rpc--probe-guard generation)))
+      (should (integerp guard))
+      (ignore-errors
+        (remote-backend-tramp-rpc--with-probe-guard generation guard
+          (should (eq (tramp-rpc-connection-probing generation) t))
+          (error "Interrupted")))
+      (should (eq (tramp-rpc-connection-probing generation) 'running))
+      ;; Without the verified slot nothing is touched.
+      (let ((remote-backend-tramp-rpc--probe-slot nil))
+        (should-not (remote-backend-tramp-rpc--probe-guard generation))))))
+
+(ert-deftest remote-tramp-rpc-read-timeout-retires-only-current-generation ()
+  "A timed-out request must never close a replacement SSH process."
+  (remote-tramp-rpc-test--readable
+   (let* ((remote-fs-current-retry-safe-query t)
+          (process (make-pipe-process
+                    :name "remote-read-timeout-test" :noquery t))
+          (generation (remote-tramp-rpc-test--generation :process process))
+          (current generation)
+          (deletions 0))
+     (unwind-protect
+         (cl-letf (((symbol-function 'tramp-rpc--call-with-timeout)
+                    (lambda (&rest _)
+                      (signal 'remote-file-error
+                              '("Timeout waiting for RPC response"))))
+                   ((symbol-function 'tramp-rpc--get-connection)
+                    (lambda (_vector) current))
+                   ((symbol-function 'delete-process)
+                    (lambda (_process) (cl-incf deletions))))
+           (should-error
+            (remote-backend-tramp-rpc--adapter-timeout-a
+             #'ignore 'vector "file.stat" 'params generation)
+            :type 'remote-file-error)
+           (should (= deletions 1))
+           (setq current (remote-tramp-rpc-test--generation :process process))
+           (should-error
+            (remote-backend-tramp-rpc--adapter-timeout-a
+             #'ignore 'vector "file.stat" 'params generation)
+            :type 'remote-file-error)
+           (should (= deletions 1))
+           (let ((remote-fs-current-retry-safe-query nil)
+                 (remote-current-adapter-id "environment"))
+             (setq current generation)
+             (should-error
+              (remote-backend-tramp-rpc--adapter-timeout-a
+               #'ignore 'vector "process.run" 'params generation)
+              :type 'remote-file-error)
+             (should (= deletions 2))))
+       (delete-process process)))
+   (should
+    (eq (plist-get
+         (remote-backend-tramp-rpc-classify-error
+          '(remote-file-error "Timeout waiting for RPC response")
+          'file-read)
+         :scope)
+        'transport))))
 
 (ert-deftest remote-watch-terminal-close-enters-public-removal-api ()
   (let* ((remote-file-watches (make-hash-table :test #'equal))
@@ -1099,38 +1156,39 @@
 
 (ert-deftest remote-tramp-rpc-transport-exit-ignores-stale-generation ()
   "A late old SSH sentinel must not invalidate its replacement session."
-  (let* ((remote-workspaces (make-hash-table :test #'equal))
-         (route (remote-route-create
-                 :target-id "box" :link-id "box/ssh"
-                 :link-plugin-id "tramp-rpc"))
-         (owner (remote-workspace-create :routes (list route)))
-         (connection (remote-connection-create
-                      :handle "/rpc:box:/tmp/"))
-         (process (make-pipe-process
-                   :name "remote-stale-generation-test" :noquery t))
-         (current 'replacement)
-         (reports 0))
-    (unwind-protect
-        (progn
-          (puthash 'owner owner remote-workspaces)
-          (cl-letf (((symbol-function 'tramp-rpc--get-connection)
-                     (lambda (_vec) (list :process current)))
-                    ((symbol-function 'tramp-rpc--connection-key)
-                     (lambda (_vec) 'same-connection))
-                    ((symbol-function 'tramp-dissect-file-name)
-                     (lambda (_name &optional _nodefault) 'vec))
-                    ((symbol-function 'remote-connection-cached-p)
-                     (lambda (_route) connection))
-                    ((symbol-function 'remote-report-route-failure)
-                     (lambda (_route _error) (cl-incf reports))))
-            (remote-backend-tramp-rpc--transport-death-before-a
-             process 'vec "old process exited")
-            (should (= reports 0))
-            (setq current process)
-            (remote-backend-tramp-rpc--transport-death-before-a
-             process 'vec "current process exited")
-            (should (= reports 1))))
-      (delete-process process))))
+  (remote-tramp-rpc-test--readable
+   (let* ((remote-workspaces (make-hash-table :test #'equal))
+          (route (remote-route-create
+                  :target-id "box" :link-id "box/ssh"
+                  :link-plugin-id "tramp-rpc"))
+          (owner (remote-workspace-create :routes (list route)))
+          (connection (remote-connection-create
+                       :handle "/rpc:box:/tmp/"))
+          (process (make-pipe-process
+                    :name "remote-stale-generation-test" :noquery t))
+          (current 'replacement)
+          (reports 0))
+     (unwind-protect
+         (progn
+           (puthash 'owner owner remote-workspaces)
+           (cl-letf (((symbol-function 'tramp-rpc--get-connection)
+                      (lambda (_vec) (remote-tramp-rpc-test--generation :process current)))
+                     ((symbol-function 'tramp-rpc--connection-key)
+                      (lambda (_vec) 'same-connection))
+                     ((symbol-function 'tramp-dissect-file-name)
+                      (lambda (_name &optional _nodefault) 'vec))
+                     ((symbol-function 'remote-connection-cached-p)
+                      (lambda (_route) connection))
+                     ((symbol-function 'remote-report-route-failure)
+                      (lambda (_route _error) (cl-incf reports))))
+             (remote-backend-tramp-rpc--transport-death-before-a
+              process 'vec "old process exited")
+             (should (= reports 0))
+             (setq current process)
+             (remote-backend-tramp-rpc--transport-death-before-a
+              process 'vec "current process exited")
+             (should (= reports 1))))
+       (delete-process process)))))
 
 (ert-deftest remote-background-retries-reentrancy-and-coalesces-jobs ()
   (let ((remote-background-jobs (make-hash-table :test #'equal))
@@ -1839,7 +1897,7 @@ server answers from `remote-tramp-rpc-metadata-test--server'."
          (remote-backend-tramp-rpc-metadata--locate-cache
           (make-hash-table :test #'equal))
          (remote-backend-tramp-rpc-metadata--counters
-          (list :batches 0 :fresh-reuse 0 :modtime-reuse 0
+          (list :batches 0 :fresh-reuse 0 :modtime-reuse 0 :access-reuse 0
                 :locate-hits 0 :locate-misses 0))
          (remote-backend-tramp-rpc-metadata-scope t)
          (remote-backend-tramp-rpc-locate-cache t)
@@ -1882,6 +1940,10 @@ server answers from `remote-tramp-rpc-metadata-test--server'."
   "Answer one fake batch REQUEST for a regular file below /tmp/p/."
   (let ((path (alist-get 'path (cdr request))))
     (cond
+     ((equal (car request) "file.access")
+      (if (string-prefix-p "/tmp/ro/" path)
+          '((errno . 13) (message . "Permission denied"))
+        '((errno . 0))))
      ;; The real server answers a missing file's stat with nil and its
      ;; truename with a file-not-found error.
      ((equal path "/tmp/p/missing.c")
@@ -1919,7 +1981,9 @@ server answers from `remote-tramp-rpc-metadata-test--server'."
                        ("file.stat" "/tmp/p/a.c" t)
                        ("file.truename" "/tmp/p/a.c" nil)
                        ("file.stat" "/tmp/p/" nil)
-                       ("file.stat" "/tmp/p/" t))))
+                       ("file.stat" "/tmp/p/" t)
+                       ("file.access" "/tmp/p/a.c" nil)
+                       ("file.access" "/tmp/p/" nil))))
       ;; The first stat still asks its own function after the batch; it now
       ;; hits the cache in production.  The forced stat never went out.
       (should (= calls 1))
@@ -1932,6 +1996,63 @@ server answers from `remote-tramp-rpc-metadata-test--server'."
       (should (= (plist-get remote-backend-tramp-rpc-metadata--counters
                             :fresh-reuse)
                  1)))))
+
+(ert-deftest remote-tramp-rpc-metadata-scope-answers-save-write-checks ()
+  "A save's two `file-writable-p' checks come from the scope's one batch.
+The answer is the server's own kernel decision, denials included, and a
+write to the file sends its next check to the server again."
+  (require 'tramp)
+  (remote-tramp-rpc-metadata-test--with-stubs batches
+    (let* ((calls nil)
+           (access (lambda (_vec localname mode &optional check-parent)
+                     (push (list localname mode check-parent) calls)
+                     '((errno . 0)))))
+      (dolist (case '(("/ssh:box:/tmp/p/a.c" . 0) ("/ssh:box:/tmp/ro/a.c" . 13)))
+        (let* ((vec (tramp-dissect-file-name (car case)))
+               (localname (tramp-file-name-localname vec))
+               (directory (file-name-directory localname)))
+          (setq calls nil)
+          (remote-backend-tramp-rpc-metadata--scope-a
+           (lambda ()
+             ;; The first write check opens the scope's batch itself.
+             (should (eql (alist-get
+                           'errno
+                           (remote-backend-tramp-rpc-metadata--access-a
+                            access vec localname "w" t))
+                          (cdr case)))
+             (should (eql (alist-get
+                           'errno
+                           (remote-backend-tramp-rpc-metadata--access-a
+                            access vec directory "w" t))
+                          (cdr case)))
+             ;; Another question is not the one the batch asked.
+             (remote-backend-tramp-rpc-metadata--access-a
+              access vec localname "r")
+             (should (equal calls (list (list localname "r" nil))))
+             (remote-backend-tramp-rpc-metadata--invalidate-path-a
+              #'ignore (car case))
+             (remote-backend-tramp-rpc-metadata--access-a
+              access vec localname "w" t)
+             (should (equal (car calls) (list localname "w" t)))))))
+      (should (= (length batches) 2))
+      (should (= (plist-get remote-backend-tramp-rpc-metadata--counters
+                            :access-reuse)
+                 4))
+      ;; Without a scope every check is the server's.
+      (setq calls nil)
+      (remote-backend-tramp-rpc-metadata--access-a
+       access (tramp-dissect-file-name "/ssh:box:/tmp/p/a.c") "/tmp/p/a.c"
+       "w" t)
+      (should (= (length calls) 1)))))
+
+(ert-deftest remote-tramp-rpc-metadata-scope-rejects-malformed-access ()
+  "An access answer of an unexpected shape is never served from the scope."
+  (should (remote-backend-tramp-rpc-metadata--access-result-p '((errno . 0))))
+  (should (remote-backend-tramp-rpc-metadata--access-result-p
+           '((errno . 13) (message . "Permission denied"))))
+  (dolist (bad '(nil t ((errno . 13)) ((errno . -1)) ((errno . "0"))
+                 (:error -32001 :message "missing")))
+    (should-not (remote-backend-tramp-rpc-metadata--access-result-p bad))))
 
 (ert-deftest remote-tramp-rpc-metadata-scope-forgets-written-file ()
   "After a write, a forced stat in the same save is a real round trip."
@@ -2243,36 +2364,37 @@ server answers from `remote-tramp-rpc-metadata-test--server'."
 
 (ert-deftest remote-tramp-rpc-explicit-cleanup-does-not-report-failure ()
   "Transport death caused by an explicit cleanup must not schedule reconnect."
-  (let* ((remote-workspaces (make-hash-table :test #'equal))
-         (route (remote-route-create
-                 :target-id "box" :link-id "box/ssh"
-                 :link-plugin-id "tramp-rpc"))
-         (owner (remote-workspace-create :routes (list route)))
-         (connection (remote-connection-create :handle "/rpc:box:/tmp/"))
-         (process (make-pipe-process
-                   :name "remote-explicit-cleanup-test" :noquery t))
-         (reports 0))
-    (unwind-protect
-        (progn
-          (puthash 'owner owner remote-workspaces)
-          (cl-letf (((symbol-function 'tramp-rpc--get-connection)
-                     (lambda (_vec) (list :process process)))
-                    ((symbol-function 'tramp-rpc--connection-key)
-                     (lambda (_vec) 'same-connection))
-                    ((symbol-function 'tramp-dissect-file-name)
-                     (lambda (_name &optional _nodefault) 'vec))
-                    ((symbol-function 'remote-connection-cached-p)
-                     (lambda (_route) connection))
-                    ((symbol-function 'remote-report-route-failure)
-                     (lambda (_route _error) (cl-incf reports))))
-            (let ((remote-backend-tramp-explicit-cleanup t))
-              (remote-backend-tramp-rpc--transport-death-before-a
-               process 'vec "killed: 9"))
-            (should (= reports 0))
-            (remote-backend-tramp-rpc--transport-death-before-a
-             process 'vec "killed: 9")
-            (should (= reports 1))))
-      (delete-process process))))
+  (remote-tramp-rpc-test--readable
+   (let* ((remote-workspaces (make-hash-table :test #'equal))
+          (route (remote-route-create
+                  :target-id "box" :link-id "box/ssh"
+                  :link-plugin-id "tramp-rpc"))
+          (owner (remote-workspace-create :routes (list route)))
+          (connection (remote-connection-create :handle "/rpc:box:/tmp/"))
+          (process (make-pipe-process
+                    :name "remote-explicit-cleanup-test" :noquery t))
+          (reports 0))
+     (unwind-protect
+         (progn
+           (puthash 'owner owner remote-workspaces)
+           (cl-letf (((symbol-function 'tramp-rpc--get-connection)
+                      (lambda (_vec) (remote-tramp-rpc-test--generation :process process)))
+                     ((symbol-function 'tramp-rpc--connection-key)
+                      (lambda (_vec) 'same-connection))
+                     ((symbol-function 'tramp-dissect-file-name)
+                      (lambda (_name &optional _nodefault) 'vec))
+                     ((symbol-function 'remote-connection-cached-p)
+                      (lambda (_route) connection))
+                     ((symbol-function 'remote-report-route-failure)
+                      (lambda (_route _error) (cl-incf reports))))
+             (let ((remote-backend-tramp-explicit-cleanup t))
+               (remote-backend-tramp-rpc--transport-death-before-a
+                process 'vec "killed: 9"))
+             (should (= reports 0))
+             (remote-backend-tramp-rpc--transport-death-before-a
+              process 'vec "killed: 9")
+             (should (= reports 1))))
+       (delete-process process)))))
 
 (ert-deftest remote-tramp-internal-session-disconnect-keeps-target-buffers ()
   "Reconnect/stale-session cleanup must not invoke user-level teardown."
@@ -2337,30 +2459,34 @@ server answers from `remote-tramp-rpc-metadata-test--server'."
 
 (ert-deftest remote-tramp-rpc-generation-cleanup-spares-replacement-relay ()
   "A finished generation drops its relay but never the live replacement's."
-  (let* ((buffer (get-buffer-create " remote-generation-stderr-test"))
-         (relay (make-pipe-process :name "remote-generation-relay-test"
-                                   :buffer buffer :noquery t))
-         (transport (make-pipe-process :name "remote-generation-test"
-                                       :noquery t))
-         current)
-    (unwind-protect
-        (cl-letf (((symbol-function 'remote-backend-tramp-rpc--current-stderr-buffer)
-                   (lambda (_vec) current)))
-          (process-put transport :tramp-rpc-connection
-                       (list :stderr-buffer buffer))
-          (setq current buffer)
-          (remote-backend-tramp-rpc--generation-cleanup-after-a
-           transport 'vec "late\n" :transport-death)
-          (should (process-live-p relay))
-          (setq current nil)
-          (remote-backend-tramp-rpc--generation-cleanup-after-a
-           transport 'vec "killed\n" :transport-death)
-          (should-not (process-live-p relay))
-          ;; The buffer stays for diagnostics until TRAMP cleanup.
-          (should (buffer-live-p buffer)))
-      (dolist (process (list relay transport))
-        (when (process-live-p process) (delete-process process)))
-      (kill-buffer buffer))))
+  (remote-tramp-rpc-test--readable
+   (let* ((buffer (get-buffer-create " remote-generation-stderr-test"))
+          (relay (make-pipe-process :name "remote-generation-relay-test"
+                                    :buffer buffer :noquery t))
+          (transport (make-pipe-process :name "remote-generation-test"
+                                        :noquery t))
+          current)
+     (unwind-protect
+         (cl-letf (((symbol-function 'remote-backend-tramp-rpc--current-stderr-buffer)
+                    (lambda (_vec) current))
+                   ((symbol-function 'tramp-rpc--process-connection)
+                    (lambda (process)
+                      (process-get process :tramp-rpc-connection))))
+           (process-put transport :tramp-rpc-connection
+                        (remote-tramp-rpc-test--generation :stderr-buffer buffer))
+           (setq current buffer)
+           (remote-backend-tramp-rpc--generation-cleanup-after-a
+            transport 'vec "late\n" :transport-death)
+           (should (process-live-p relay))
+           (setq current nil)
+           (remote-backend-tramp-rpc--generation-cleanup-after-a
+            transport 'vec "killed\n" :transport-death)
+           (should-not (process-live-p relay))
+           ;; The buffer stays for diagnostics until TRAMP cleanup.
+           (should (buffer-live-p buffer)))
+       (dolist (process (list relay transport))
+         (when (process-live-p process) (delete-process process)))
+       (kill-buffer buffer)))))
 
 (ert-deftest remote-tramp-rpc-cleanup-removes-numbered-stderr-buffers ()
   (let* ((vec (tramp-dissect-file-name "/ssh:cleanup-box:/"))

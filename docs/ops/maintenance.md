@@ -625,19 +625,35 @@ Emacs 后旧版本目录不再被加载，却一直占着空间。board 的 “O
 拒绝下载已发布的 server，并尝试在本机交叉编译。macOS 造不出 Linux 二进制，
 于是每次远端操作都先失败一遍 tramp-rpc 再走 TRAMP。
 
-恢复锁定的 release：
+恢复锁定的 release（`REV` 取 `package-lock.el` 里 tramp-rpc 的 `:rev`）：
 
 ```sh
 cd elpa/tramp-rpc
 git fetch --tags origin
-git checkout "$(git tag --sort=-v:refname | head -1)"
-rm -f lisp/*.elc
+git checkout "$REV"
+command rm -f lisp/*.elc
 cd ../..
-emacs --batch -Q --init-directory="$PWD" -l ./early-init.el \
-  --eval '(byte-recompile-directory (expand-file-name "elpa/tramp-rpc/lisp" user-emacs-directory) 0 t)'
+# lisp/ 的 autoloads 必须带 load-path 前言，否则 init 找不到 tramp-rpc。
+emacs --batch -Q --eval "(progn (require 'loaddefs-gen) (let ((out (expand-file-name \"elpa/tramp-rpc/lisp/tramp-rpc-autoloads.el\"))) (when (file-exists-p out) (delete-file out)) (loaddefs-generate (expand-file-name \"elpa/tramp-rpc/lisp\") out nil \"(add-to-list 'load-path (or (and load-file-name (directory-file-name (file-name-directory load-file-name))) (car load-path)))\n\" nil t)))"
+emacs --batch -Q -L elpa/tramp-rpc/lisp -L "$(ls -d elpa/msgpack-*/ | head -1)" \
+  --eval "(progn (require 'tramp) (byte-recompile-directory (expand-file-name \"elpa/tramp-rpc/lisp\") 0 t))"
 ```
 
 之后首次连接会自动下载并部署匹配的 server 二进制。
+
+升级到新的 tramp-rpc release 时，checkout、autoloads 与编译同上，另外：
+
+1. 逐行复核 `remote-backend-tramp-rpc--shims` 与 metadata 契约所依赖的 upstream
+   代码：upstream 已修好的移进 `remote-backend-tramp-rpc--retired-shims`，仍需要的
+   按新代码改写；arity 不变但返回形状或数据表示变了的，同样要改。
+2. 更新 `remote-backend-tramp-rpc--verified-client-version`、`-revision` 与
+   `package-lock.el` 的 `:rev`，再改契约表。
+3. `make remote-contract-test`，然后完整 init 下看
+   `(remote-backend-tramp-rpc-compat-report)`：每行应为 `active`，退役 advice 不残留。
+4. 在测试机上跑 `REMOTE_E2E=1 REMOTE_E2E_TARGET=… make remote-e2e`（共享 ControlMaster
+   时跳过断开 target 的用例）和 `remote-ssh-visit-benchmark` /
+   `remote-ssh-write-benchmark`，往返次数不应比旧版本多。
+5. 已在运行的 Emacs 仍是旧代码，重启后生效。
 
 ### `+portal/ssh` 没读到主机
 

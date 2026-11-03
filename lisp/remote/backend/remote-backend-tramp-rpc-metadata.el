@@ -83,6 +83,7 @@ after a save, such as a formatter or `git checkout' on the target."
 (defconst remote-backend-tramp-rpc-metadata--private-contracts
   '((tramp-rpc--call-batch . (2 . 2))
     (tramp-rpc--call-file-stat . (2 . 3))
+    (tramp-rpc--call-file-access . (3 . 4))
     (tramp-rpc--cache-file-stat-result . (3 . 4))
     (tramp-rpc--cache-put . (3 . 3))
     (tramp-rpc--cache-entry-valid-p . (1 . 1))
@@ -108,6 +109,8 @@ after a save, such as a formatter or `git checkout' on the target."
   "Metadata owned by one visit or save."
   (prefetched nil :documentation "Non-nil once the scope sent its batch.")
   (stats nil :documentation "Alist of (LOCALNAME . (STAT . LSTAT)).")
+  (access nil :documentation
+          "Alist of ((LOCALNAME MODE CHECK-PARENT) . FILE-ACCESS-RESULT).")
   (host nil :documentation "Connection key of the prefetched file."))
 
 (defvar remote-backend-tramp-rpc-metadata--scope nil
@@ -118,7 +121,7 @@ after a save, such as a formatter or `git checkout' on the target."
   "Map (SEARCH-START . NAMES) to (TIMESTAMP . RESULT).")
 
 (defvar remote-backend-tramp-rpc-metadata--counters
-  (list :batches 0 :fresh-reuse 0 :modtime-reuse 0
+  (list :batches 0 :fresh-reuse 0 :modtime-reuse 0 :access-reuse 0
         :locate-hits 0 :locate-misses 0)
   "Counters for Remote Doctor and benchmarks.")
 
@@ -246,6 +249,58 @@ file."
   (delete-dups (list (file-name-as-directory directory)
                      (directory-file-name directory))))
 
+(defun remote-backend-tramp-rpc-metadata--access-request (path)
+  "Return the `file.access' request a save's write check sends for PATH.
+It matches tramp-rpc's own `file-writable-p': write access, falling back to
+the parent directory for a missing file."
+  (cons "file.access"
+        (append path '((mode . "w") (check_parent_if_missing . t)))))
+
+(defun remote-backend-tramp-rpc-metadata--access-result-p (result)
+  "Return non-nil when RESULT is a well-formed `file.access' answer.
+The same shape tramp-rpc accepts: a non-negative errno, with a message
+whenever it is not zero."
+  (and (listp result)
+       (not (remote-backend-tramp-rpc-metadata--batch-error-p result))
+       (let ((errno (alist-get 'errno result)))
+         (and (integerp errno) (>= errno 0)
+              (or (zerop errno) (stringp (alist-get 'message result)))))))
+
+(defun remote-backend-tramp-rpc-metadata--record-access
+    (scope localnames result)
+  "Record write-check RESULT for each of LOCALNAMES in SCOPE."
+  (when (remote-backend-tramp-rpc-metadata--access-result-p result)
+    (dolist (localname localnames)
+      (push (cons (list localname "w" t) result)
+            (remote-backend-tramp-rpc-metadata--scope-access scope)))))
+
+(defun remote-backend-tramp-rpc-metadata--forget-access (scope localname)
+  "Drop SCOPE's access answers about LOCALNAME."
+  (setf (remote-backend-tramp-rpc-metadata--scope-access scope)
+        (seq-remove (lambda (entry) (equal (caar entry) localname))
+                    (remote-backend-tramp-rpc-metadata--scope-access scope))))
+
+(defun remote-backend-tramp-rpc-metadata--access-a
+    (function vec localname mode &optional check-parent)
+  "Answer FUNCTION's access check of LOCALNAME on VEC from the scope.
+FUNCTION is `tramp-rpc--call-file-access'; MODE and CHECK-PARENT select the
+question.  The check that opens a scope starts its batch, as a stat does."
+  (let ((scope remote-backend-tramp-rpc-metadata--scope))
+    (when (and scope
+               remote-backend-tramp-rpc-metadata-scope
+               (not (remote-backend-tramp-rpc-metadata--scope-prefetched scope)))
+      (remote-backend-tramp-rpc-metadata--prefetch vec localname))
+    (if-let* (((and scope remote-backend-tramp-rpc-metadata-scope))
+              ((equal (remote-backend-tramp-rpc-metadata--scope-host scope)
+                      (remote-backend-tramp-rpc-metadata--host vec)))
+              (entry (assoc (list localname mode (and check-parent t))
+                            (remote-backend-tramp-rpc-metadata--scope-access
+                             scope))))
+        (progn
+          (remote-backend-tramp-rpc-metadata--count :access-reuse)
+          (copy-tree (cdr entry)))
+      (funcall function vec localname mode check-parent))))
+
 (defun remote-backend-tramp-rpc-metadata--prefetch (vec localname)
   "Fetch metadata for LOCALNAME on VEC and its directory in one round trip.
 The batch holds the file's stat, lstat and truename and its directory's stat
@@ -266,7 +321,15 @@ charge."
            (and directory-path
                 (list (cons "file.stat" directory-path)
                       (cons "file.stat"
-                            (append directory-path '((lstat . t))))))))
+                            (append directory-path '((lstat . t))))))
+           ;; `basic-save-buffer' asks whether the file and its directory are
+           ;; writable.  tramp-rpc answers that with a kernel `access' check,
+           ;; one round trip each, so ask both here.
+           (cons (remote-backend-tramp-rpc-metadata--access-request
+                  path)
+                 (and directory-path
+                      (list (remote-backend-tramp-rpc-metadata--access-request
+                             directory-path))))))
          (results
           (condition-case nil
               (tramp-rpc--call-batch vec requests)
@@ -274,7 +337,10 @@ charge."
     (setf (remote-backend-tramp-rpc-metadata--scope-prefetched scope) t)
     (when (= (length results) (length requests))
       (remote-backend-tramp-rpc-metadata--count :batches)
-      (pcase-let ((`(,stat ,lstat ,truename ,dir-stat ,dir-lstat) results))
+      (pcase-let* ((`(,stat ,lstat ,truename ,dir-stat ,dir-lstat)
+                    (if directory-path results
+                      (append (seq-take results 3) (list nil nil))))
+                   (access (nthcdr (if directory-path 5 3) results)))
         (when directory-path
           ;; Callers spell a directory both ways (`file-writable-p' with the
           ;; slash, `file-modes' without), and the cache keys differ.
@@ -298,7 +364,13 @@ charge."
             (setf (remote-backend-tramp-rpc-metadata--scope-host scope)
                   (remote-backend-tramp-rpc-metadata--host vec))
             (push (cons localname (cons (caar answers) (car (cadr answers))))
-                  (remote-backend-tramp-rpc-metadata--scope-stats scope))))
+                  (remote-backend-tramp-rpc-metadata--scope-stats scope))
+            (remote-backend-tramp-rpc-metadata--record-access
+             scope (list localname) (car access))
+            (when directory
+              (remote-backend-tramp-rpc-metadata--record-access
+               scope (remote-backend-tramp-rpc-metadata--spellings directory)
+               (cadr access)))))
         (cond
          ;; The server answers a missing file's stat with nil, and its
          ;; truename with a file-not-found error; accept either spelling.
@@ -350,7 +422,8 @@ FUNCTION is `tramp-rpc--call-file-stat'; LSTAT selects the lstat answer."
     (setf (remote-backend-tramp-rpc-metadata--scope-stats scope)
           (assoc-delete-all
            localname
-           (remote-backend-tramp-rpc-metadata--scope-stats scope)))))
+           (remote-backend-tramp-rpc-metadata--scope-stats scope)))
+    (remote-backend-tramp-rpc-metadata--forget-access scope localname)))
 
 (defun remote-backend-tramp-rpc-metadata--localname (file)
   "Return FILE's target-native name for a TRAMP or logical `/fs:' FILE."
@@ -542,7 +615,8 @@ also seeds this answer would otherwise come one round trip too late."
 DIRECTORY is the invalidated subtree; any scope file may lie below it."
   (when-let* ((scope remote-backend-tramp-rpc-metadata--scope))
     (ignore directory)
-    (setf (remote-backend-tramp-rpc-metadata--scope-stats scope) nil))
+    (setf (remote-backend-tramp-rpc-metadata--scope-stats scope) nil
+          (remote-backend-tramp-rpc-metadata--scope-access scope) nil))
   (remote-backend-tramp-rpc-metadata-flush))
 
 (defun remote-backend-tramp-rpc-metadata--flush-file-a (vec localname)
@@ -553,7 +627,9 @@ DIRECTORY is the invalidated subtree; any scope file may lie below it."
     (setf (remote-backend-tramp-rpc-metadata--scope-stats scope)
           (assoc-delete-all
            (tramp-file-local-name localname)
-           (remote-backend-tramp-rpc-metadata--scope-stats scope))))
+           (remote-backend-tramp-rpc-metadata--scope-stats scope)))
+    (remote-backend-tramp-rpc-metadata--forget-access
+     scope (tramp-file-local-name localname)))
   (remote-backend-tramp-rpc-metadata--flush-name localname))
 
 ;;;; Installation
@@ -564,6 +640,8 @@ DIRECTORY is the invalidated subtree; any scope file may lie below it."
     (write-region :around remote-backend-tramp-rpc-metadata--outer-scope-a)
     (tramp-rpc--call-file-stat
      :around remote-backend-tramp-rpc-metadata--stat-a)
+    (tramp-rpc--call-file-access
+     :around remote-backend-tramp-rpc-metadata--access-a)
     (tramp-handle-set-visited-file-modtime
      :around remote-backend-tramp-rpc-metadata--modtime-a)
     (tramp-handle-verify-visited-file-modtime

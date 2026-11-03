@@ -618,7 +618,8 @@ a forward to the target has to name the target-side one."
       (remote-session-clear t))))
 
 (ert-deftest remote-e2e-rpc-path-batch-preserves-directory-filter ()
-  "The RPC PATH accelerator keeps upstream order and removes absent dirs."
+  "tramp-rpc checks PATH in one batch, keeping order and dropping absent dirs.
+Since 0.16.0 this is upstream's own code; it answers (DIRECTORIES . COMPLETE)."
   (unless (remote-e2e--enabled-p)
     (ert-skip "Set REMOTE_E2E=1 or run make remote-e2e"))
   (remote-fs-install)
@@ -640,12 +641,19 @@ a forward to the target has to name the target-side one."
               :context context :adapter "exec" :check t)))
            (absent (concat present "/not-here")))
       (unwind-protect
-          (cl-letf (((symbol-function 'tramp-rpc--effective-remote-path-spec)
-                     (lambda (_vector)
-                       (list "/usr/bin" present absent "/usr/bin"))))
-            (should
-             (equal (tramp-rpc--compute-remote-path vector)
-                    (list "/usr/bin" present))))
+          (let ((batches 0)
+                (call-batch (symbol-function 'tramp-rpc--call-batch)))
+            (cl-letf (((symbol-function 'tramp-rpc--effective-remote-path-spec)
+                       (lambda (_vector)
+                         (list "/usr/bin" present absent "/usr/bin")))
+                      ((symbol-function 'tramp-rpc--call-batch)
+                       (lambda (&rest arguments)
+                         (cl-incf batches)
+                         (apply call-batch arguments))))
+              (should
+               (equal (tramp-rpc--compute-remote-path vector)
+                      (cons (list "/usr/bin" present) t)))
+              (should (= batches 1))))
         (when (string-match-p
                "\\`/tmp/emacs-remote-path-batch\\.[[:alnum:]]+\\'"
                present)

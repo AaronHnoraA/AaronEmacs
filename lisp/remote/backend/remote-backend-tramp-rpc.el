@@ -16,20 +16,27 @@
                   "tramp-rpc-magit" (filename))
 (declare-function tramp-rpc--invalidate-cache-for-subtree
                   "tramp-rpc-magit" (directory))
-(declare-function tramp-rpc--call "tramp-rpc"
+(declare-function tramp-rpc--call "tramp-rpc-transport"
                   (vec method params &optional connection))
-(declare-function tramp-rpc--decode-output "tramp-rpc" (data encoding))
-(declare-function tramp-rpc--effective-remote-path-spec "tramp-rpc" (vec))
-(declare-function tramp-rpc--expand-remote-path-entry "tramp-rpc"
-                  (vec entry))
-(declare-function tramp-rpc--append-path-entries "tramp-rpc" (entries result))
-(declare-function tramp-rpc--fetch-default-remote-path "tramp-rpc" (vec))
-(declare-function tramp-rpc--fetch-remote-exec-path "tramp-rpc" (vec))
-(declare-function tramp-rpc--call-with-timeout "tramp-rpc"
+(declare-function tramp-rpc--decode-output "tramp-rpc-protocol" (data))
+(declare-function tramp-rpc--call-with-timeout "tramp-rpc-transport"
                   (vec method params total-timeout poll-interval
                        &optional connection))
-(declare-function tramp-rpc--connection-key "tramp-rpc" (vec))
-(declare-function tramp-rpc--get-connection "tramp-rpc" (vec))
+(declare-function tramp-rpc--connection-key "tramp-rpc-transport" (vec))
+(declare-function tramp-rpc--get-connection "tramp-rpc-transport" (vec))
+(declare-function tramp-rpc--process-connection "tramp-rpc-connection"
+                  (process))
+(declare-function tramp-rpc-connection-p "tramp-rpc-connection" (object))
+(declare-function tramp-rpc-connection-process "tramp-rpc-connection"
+                  (connection))
+(declare-function tramp-rpc-connection-buffer "tramp-rpc-connection"
+                  (connection))
+(declare-function tramp-rpc-connection-stderr-buffer "tramp-rpc-connection"
+                  (connection))
+(declare-function tramp-rpc-connection-cleanup-started "tramp-rpc-connection"
+                  (connection))
+(declare-function tramp-rpc--invalidate-timed-out-connection
+                  "tramp-rpc-transport" (process vec event))
 (declare-function tramp-rpc--acl-enabled-p "tramp-rpc" (vec))
 (declare-function tramp-rpc--selinux-enabled-p "tramp-rpc" (vec))
 (declare-function remote-connection-cached-p "remote-connection" (route))
@@ -41,39 +48,82 @@
 (defvar tramp-rpc-deploy-version)
 (defvar remote-fs-current-retry-safe-query)
 (defvar remote-backend-tramp-rpc-skip-in-place-metadata-roundtrip)
+(defvar remote-backend-tramp-rpc--retired-shims)
 
-(defconst remote-backend-tramp-rpc--verified-client-version "0.13.1"
+(defconst remote-backend-tramp-rpc--verified-client-version "0.16.0"
   "tramp-rpc release whose private compatibility shims were tested here.")
 
 (defconst remote-backend-tramp-rpc--verified-client-revision
-  "e1d4632d576ecf2472c321de1e713b776ea2b78f"
+  "543b3bf30b8a80b8cd0200c98d00f22a4e0220ac"
   "Exact tramp-rpc client commit tested by private compatibility shims.")
 
 (defconst remote-backend-tramp-rpc--private-contracts
   '((tramp-rpc--cached-system-info . (1 . 1))
     (tramp-rpc--call . (3 . 4))
     (tramp-rpc--call-with-timeout . (5 . 6))
-    (tramp-rpc--decode-output . (2 . 2))
-    (tramp-rpc--compute-remote-path . (1 . 1))
-    (tramp-rpc--effective-remote-path-spec . (1 . 1))
-    (tramp-rpc--expand-remote-path-entry . (2 . 2))
-    (tramp-rpc--append-path-entries . (2 . 2))
-    (tramp-rpc--fetch-default-remote-path . (1 . 1))
-    (tramp-rpc--fetch-remote-exec-path . (1 . 1))
+    (tramp-rpc--decode-output . (1 . 1))
     (tramp-rpc--connection-key . (1 . 1))
     (tramp-rpc--get-connection . (1 . 1))
+    (tramp-rpc--process-connection . (1 . 1))
+    (tramp-rpc-connection-p . (1 . 1))
+    (tramp-rpc-connection-process . (1 . 1))
+    (tramp-rpc-connection-buffer . (1 . 1))
+    (tramp-rpc-connection-stderr-buffer . (1 . 1))
+    (tramp-rpc-connection-cleanup-started . (1 . 1))
     (tramp-rpc--controlmaster-socket-path . (1 . 1))
     (tramp-rpc--ensure-controlmaster-directory . (0 . 0))
     (tramp-rpc--acl-enabled-p . (1 . 1))
     (tramp-rpc--selinux-enabled-p . (1 . 1))
     (tramp-rpc-handle-write-region . (3 . 7))
     (tramp-rpc-handle-set-file-uid-gid . (1 . 3))
-    (tramp-rpc--deliver-process-output . (4 . 4))
     (tramp-rpc--connection-transport-death . (3 . 3))
-    (tramp-rpc--cleanup-connection-generation . (4 . 5))
+    (tramp-rpc--invalidate-timed-out-connection . (3 . 3))
+    (tramp-rpc--cleanup-connection-generation . (4 . 6))
     (tramp-rpc--make-file-notify-descriptor . (3 . 3))
-    (tramp-rpc-deploy--arch-to-rust-target . (1 . 1)))
-  "Private upstream seams isolated by this backend adapter.")
+    (tramp-rpc--make-direct-ssh-pty-process . (9 . 10)))
+  "Private upstream seams isolated by this backend adapter.
+A connection generation is a `tramp-rpc-connection' record; it is read only
+through `remote-backend-tramp-rpc--connection-slot'.")
+
+(defconst remote-backend-tramp-rpc--connection-accessors
+  '((:process . tramp-rpc-connection-process)
+    (:buffer . tramp-rpc-connection-buffer)
+    (:stderr-buffer . tramp-rpc-connection-stderr-buffer)
+    (:cleanup-started . tramp-rpc-connection-cleanup-started))
+  "Slots of a tramp-rpc connection generation this adapter reads.")
+
+(defvar remote-backend-tramp-rpc--connection-shape nil
+  "Non-nil when tramp-rpc connection generations have the verified shape.
+Set by `remote-backend-tramp-rpc-install', which runs again whenever
+tramp-rpc is loaded, so the check costs nothing per RPC.")
+
+(defun remote-backend-tramp-rpc--connection-shape-check ()
+  "Return non-nil when every connection accessor keeps its contract."
+  (cl-every #'remote-backend-tramp-rpc--private-compatible-p
+            (cons 'tramp-rpc-connection-p
+                  (mapcar #'cdr remote-backend-tramp-rpc--connection-accessors))))
+
+(defun remote-backend-tramp-rpc--connection-readable-p ()
+  "Return non-nil when connection generations have the verified shape."
+  remote-backend-tramp-rpc--connection-shape)
+
+(defun remote-backend-tramp-rpc--connection-slot (connection slot)
+  "Return SLOT of tramp-rpc CONNECTION, or nil.
+SLOT is a key of `remote-backend-tramp-rpc--connection-accessors'.  A
+connection of any other shape answers nil rather than a guess, so a changed
+upstream representation disables the reader instead of misreading it."
+  (when-let* ((accessor
+               (alist-get slot remote-backend-tramp-rpc--connection-accessors))
+              ((remote-backend-tramp-rpc--connection-readable-p))
+              ((tramp-rpc-connection-p connection)))
+    (funcall accessor connection)))
+
+(defun remote-backend-tramp-rpc--vec-connection-slot (vec slot)
+  "Return SLOT of VEC's current tramp-rpc connection generation, or nil."
+  (when (remote-backend-tramp-rpc--private-compatible-p
+         'tramp-rpc--get-connection)
+    (remote-backend-tramp-rpc--connection-slot
+     (ignore-errors (tramp-rpc--get-connection vec)) slot)))
 
 (defun remote-backend-tramp-rpc--upstream-arity (symbol)
   "Return SYMBOL's underlying arity through Emacs advice, or nil.
@@ -125,62 +175,14 @@ advice must neither disable a verified optimization nor hide an API change."
      :release release
      :verified-client-version
      (remote-backend-tramp-rpc--verified-release-p release)
-     :architecture-map
-     (and (fboundp 'tramp-rpc-deploy--arch-to-rust-target)
-          (advice-member-p
-           #'remote-backend-tramp-rpc--arch-to-rust-target-a
-           'tramp-rpc-deploy--arch-to-rust-target)
-          t)
-     :local-relay-cwd
-     (and (fboundp 'tramp-rpc-handle-make-process)
-          (advice-member-p
-           #'remote-backend-tramp-rpc--local-relay-cwd-a
-           'tramp-rpc-handle-make-process)
-          t)
-     :local-controlmaster-path
-     (and (fboundp 'tramp-rpc--controlmaster-socket-path)
-          (advice-member-p
-           #'remote-backend-tramp-rpc--local-controlmaster-path-a
-           'tramp-rpc--controlmaster-socket-path)
-          t)
-     :adapter-timeout
-     (and (fboundp 'tramp-rpc--call)
-          (advice-member-p
-           #'remote-backend-tramp-rpc--adapter-timeout-a
-           'tramp-rpc--call)
-          t)
-     :batched-path-check
-     (and (fboundp 'tramp-rpc--compute-remote-path)
-          (advice-member-p
-           #'remote-backend-tramp-rpc--compute-remote-path-a
-           'tramp-rpc--compute-remote-path)
-          t)
-     :attribute-probe-cache
-     (and (fboundp 'tramp-rpc--acl-enabled-p)
-          (fboundp 'tramp-rpc--selinux-enabled-p)
-          (advice-member-p
-           #'remote-backend-tramp-rpc--acl-enabled-a
-           'tramp-rpc--acl-enabled-p)
-          (advice-member-p
-           #'remote-backend-tramp-rpc--selinux-enabled-a
-           'tramp-rpc--selinux-enabled-p)
-          t)
-     :in-place-write-metadata
-     (and remote-backend-tramp-rpc-skip-in-place-metadata-roundtrip
-          (fboundp 'tramp-rpc-handle-write-region)
-          (advice-member-p
-           #'remote-backend-tramp-rpc--write-region-in-place-a
-           'tramp-rpc-handle-write-region)
-          (advice-member-p
-           #'remote-backend-tramp-rpc--extended-attributes-in-place-a
-           'file-extended-attributes)
-          t)
-     :closed-relay-exit-race
-     (and (fboundp 'tramp-rpc--deliver-process-output)
-          (advice-member-p
-           #'remote-backend-tramp-rpc--closed-relay-exit-a
-           'tramp-rpc--deliver-process-output)
-          t))))
+     :connection-shape (remote-backend-tramp-rpc--connection-readable-p)
+     :shims (remote-backend-tramp-rpc--shim-report)
+     :retired-shims
+     (cl-loop for (symbol . advice) in remote-backend-tramp-rpc--retired-shims
+              collect (list :symbol symbol :advice advice
+                            :installed (and (fboundp symbol)
+                                            (advice-member-p advice symbol)
+                                            t))))))
 
 (defcustom remote-backend-tramp-rpc-adapter-request-timeouts
   '(("direnv" . 120)
@@ -369,53 +371,95 @@ An answer is reused until ROOT's HEAD or index changes."
                 remote-backend-tramp-rpc--verified-client-revision)
          (plist-get release :release-checkout))))
 
-(defun remote-backend-tramp-rpc--arch-to-rust-target-a
-    (function architecture)
-  "Map published release ARCHITECTURE values, otherwise call FUNCTION."
-  (pcase architecture
-    ((or "armv7l-linux" "armv7-linux")
-     "armv7-unknown-linux-musleabihf")
-    ((or "armv6l-linux" "arm-linux")
-     "arm-unknown-linux-musleabihf")
-    ((or "armv5tel-linux" "armv5te-linux")
-     "armv5te-unknown-linux-musleabi")
-    (_
-     (condition-case error
-         (funcall function architecture)
-       (remote-file-error
-        (signal
-         'remote-backend-incompatible
-         (list (error-message-string error)
-               (list :architecture architecture))))))))
-
-(defun remote-backend-tramp-rpc--local-relay-cwd-a
-    (function &rest arguments)
-  "Run tramp-rpc async handler FUNCTION with local relay cwd isolation.
-tramp-rpc creates local `cat' relay processes while `default-directory'
-still names the remote `/rpc:' directory.  Local process creation must not
-inherit that directory; the handler itself still sees it and therefore sends
-the correct target-local cwd to the RPC server."
-  (let ((start-process-function (symbol-function 'start-process)))
-    (cl-letf
-        (((symbol-function 'start-process)
-          (lambda (&rest start-arguments)
-            (let ((default-directory temporary-file-directory))
-              (apply start-process-function start-arguments)))))
-      (apply function arguments))))
-
 (defun remote-backend-tramp-rpc--local-controlmaster-path-a
     (function &rest arguments)
-  "Resolve tramp-rpc's SSH control socket on this Emacs client.
+  "Run FUNCTION with ARGUMENTS where tramp-rpc means this Emacs client.
 The verified client expands `~/.ssh/tramp-rpc/%C' under the current buffer's
 `default-directory'.  Direct SSH PTYs call this from a target buffer, where
 that expansion otherwise points to the target account's home and SSH exits
-before starting a shell.  The control socket and its directory live locally."
+before starting a shell.  The control socket and its directory live locally.
+The direct PTY itself is a local `ssh' started with `start-process'; from a
+routed `/fs:' call the physical `/rpc:' directory is not handled there, so
+Emacs would try to enter it locally (\"Setting current directory\").  The
+remote working directory travels in the PTY's own command line."
   (let ((default-directory temporary-file-directory)
         (process-environment (remote-client-process-environment))
         (exec-path (remote-client-exec-path))
         (remote-current-adapter-id nil)
         (remote-current-route nil))
     (apply function arguments)))
+
+(defcustom remote-backend-tramp-rpc-liveness-probe-timeout 2
+  "Seconds a timed-out RPC transport has to answer a ping.
+A bounded request that timed out may have met a slow server or a dead
+link.  The transport is kept when it still answers within this time, as
+VS Code Remote keeps a slow connection, and is closed otherwise so the
+reconnect job never reuses a dead stream.  Zero closes it at once."
+  :type 'number
+  :group 'remote)
+
+(defvar remote-backend-tramp-rpc--probe-slot nil
+  "Record index of the verified `probing' slot of a tramp-rpc connection.
+Set by `remote-backend-tramp-rpc-install' from the struct's own layout.")
+
+(defmacro remote-backend-tramp-rpc--with-probe-guard (generation guard &rest body)
+  "Run BODY with GENERATION's upstream probe flag at index GUARD set.
+The previous value is restored afterwards.  A nil GUARD runs BODY alone."
+  (declare (indent 2))
+  (let ((g (make-symbol "generation"))
+        (i (make-symbol "guard"))
+        (old (make-symbol "old")))
+    `(let* ((,g ,generation)
+            (,i ,guard)
+            (,old (and ,i (aref ,g ,i))))
+       (unwind-protect
+           (progn
+             (when ,i (aset ,g ,i t))
+             ,@body)
+         (when ,i (aset ,g ,i ,old))))))
+
+(defun remote-backend-tramp-rpc--probe-guard (generation)
+  "Return the record index of GENERATION's upstream probe flag, or nil.
+Setting that flag is how upstream stops a probe from probing again; nil
+means the verified slot is absent and upstream keeps its own probe."
+  (and remote-backend-tramp-rpc--probe-slot
+       (remote-backend-tramp-rpc--connection-readable-p)
+       (tramp-rpc-connection-p generation)
+       remote-backend-tramp-rpc--probe-slot))
+
+(defun remote-backend-tramp-rpc--retire-unless-alive
+    (vector generation guard method)
+  "Close VECTOR's timed-out GENERATION unless it still answers a ping.
+GUARD is the upstream probe flag index set around the ping, or nil.
+METHOD names the request that timed out."
+  (let ((process (remote-backend-tramp-rpc--connection-slot
+                  generation :process))
+        (timeout remote-backend-tramp-rpc-liveness-probe-timeout))
+    (when (and (processp process) (process-live-p process))
+      (unless (and guard (numberp timeout) (> timeout 0)
+                   (condition-case nil
+                       (remote-backend-tramp-rpc--with-probe-guard
+                           generation guard
+                         (tramp-rpc--call-with-timeout
+                          vector "system.ping" nil timeout 0.01 generation)
+                         t)
+                     (error nil)))
+        ;; Claiming the generation removes it from the connection table, so
+        ;; the transport-death notice would no longer recognize it.
+        ;; Best effort: the caller must still see the original timeout.
+        (ignore-errors
+          (remote-backend-tramp-rpc--report-transport-failure
+           vector (format "tramp-rpc transport stopped answering (method=%s)"
+                          method)))
+        (if (remote-backend-tramp-rpc--private-compatible-p
+             'tramp-rpc--invalidate-timed-out-connection)
+            ;; Also tears down a half-open ControlMaster, which a reconnect
+            ;; would otherwise reuse.
+            (ignore-errors
+              (tramp-rpc--invalidate-timed-out-connection
+               process vector
+               (format "RPC timeout without liveness (method=%s)\n" method)))
+          (ignore-errors (delete-process process)))))))
 
 (defun remote-backend-tramp-rpc--adapter-timeout-a
     (function vector method params &optional connection)
@@ -435,21 +479,23 @@ CONNECTION preserves the upstream captured connection generation."
          (timeout (or long-timeout read-timeout)))
     (if (and (numberp timeout) (> timeout 0)
              (fboundp 'tramp-rpc--call-with-timeout))
-        (let ((generation (or connection (tramp-rpc--get-connection vector))))
+        (let* ((generation (or connection (tramp-rpc--get-connection vector)))
+               (guard (remote-backend-tramp-rpc--probe-guard generation)))
           (condition-case err
-              (tramp-rpc--call-with-timeout
-               vector method params timeout 0.1 connection)
+              ;; Upstream answers a timeout with its own 10 s ping; this
+              ;; caller's deadline is the whole budget, so the short ping in
+              ;; `remote-backend-tramp-rpc--retire-unless-alive' replaces it.
+              (remote-backend-tramp-rpc--with-probe-guard generation guard
+                (tramp-rpc--call-with-timeout
+                 vector method params timeout 0.1 connection))
             (remote-file-error
              (when (and generation
                         (string-match-p
                          "[Tt]imeout waiting for RPC response"
                          (error-message-string err))
                         (eq generation (tramp-rpc--get-connection vector)))
-               ;; A live but unresponsive SSH process must not be reused by
-               ;; the reconnect job.  Its sentinel releases relays and watches.
-               (when-let* ((process (plist-get generation :process)))
-                 (when (process-live-p process)
-                   (ignore-errors (delete-process process)))))
+               (remote-backend-tramp-rpc--retire-unless-alive
+                vector generation guard method))
              (signal (car err) (cdr err)))))
       (funcall function vector method params connection))))
 
@@ -479,8 +525,8 @@ CONNECTION preserves the upstream captured connection generation."
 FUNCTION is the verified upstream availability check.  PROPERTY belongs to
 the live process, so replacement transports cannot inherit an old result.
 COMMAND and ARGUMENTS are the exact upstream probe for this release."
-  (let* ((before (tramp-rpc--get-connection vector))
-         (before-process (plist-get before :process))
+  (let* ((before-process
+          (remote-backend-tramp-rpc--vec-connection-slot vector :process))
          (cache (and (processp before-process)
                      (process-live-p before-process)
                      (process-get before-process property)))
@@ -515,8 +561,9 @@ COMMAND and ARGUMENTS are the exact upstream probe for this release."
                      (alist-get 'exit_code response)))))
         (if (integerp code)
             (let* ((enabled (zerop code))
-                   (after (tramp-rpc--get-connection vector))
-                   (after-process (plist-get after :process)))
+                   (after-process
+                    (remote-backend-tramp-rpc--vec-connection-slot
+                     vector :process)))
               (when (and (or enabled
                              (eq response :missing-command))
                          (numberp ttl) (> ttl 0)
@@ -554,7 +601,7 @@ COMMAND and ARGUMENTS are the exact upstream probe for this release."
     (function filename &optional uid gid)
   "Skip FUNCTION's chown of FILENAME after the verified in-place RPC write.
 TRAMP's write skeleton chowns every non-visiting write to the owner it read
-before writing.  The 0.13.1 server truncates the existing inode, so that
+before writing.  The verified server truncates the existing inode, so that
 owner is already in place; a new file keeps the server's default owner and
 group, which is what a local Emacs write produces.  UID and GID are passed
 through unchanged for every other caller."
@@ -568,7 +615,7 @@ through unchanged for every other caller."
 (defun remote-backend-tramp-rpc--extended-attributes-in-place-a
     (function filename)
   "Keep FILENAME's existing metadata on the verified in-place RPC write.
-The 0.13.1 server's `file.write' uses `OpenOptions::truncate' on the same
+The verified server's `file.write' uses `OpenOptions::truncate' on the same
 inode.  TRAMP's generic skeleton reads and reapplies attributes for backends
 that replace files, but those extra remote commands are unnecessary here."
   (if (and remote-backend-tramp-rpc-skip-in-place-metadata-roundtrip
@@ -577,87 +624,34 @@ that replace files, but those extra remote commands are unnecessary here."
       nil
     (funcall function filename)))
 
-(defconst remote-backend-tramp-rpc--path-directory-script
-  "for p do if [ -d \"$p\" ]; then printf 1; else printf 0; fi; done"
-  "Return one existence bit per target PATH entry without shell interpolation.")
-
-(defun remote-backend-tramp-rpc--existing-paths (vector paths)
-  "Return (t . EXISTING) for target PATHS, or nil on unsupported output.
-The shell receives directory names as positional arguments, so spaces and
-shell metacharacters in a configured PATH cannot change the probe program."
-  (if (null paths)
-      (cons t nil)
-    (let* ((result
-            (tramp-rpc--call
-             vector "process.run"
-             `((cmd . "/bin/sh")
-               (args . ,(vconcat
-                         (list "-c"
-                               remote-backend-tramp-rpc--path-directory-script
-                               "sh")
-                         paths))
-               (cwd . "/"))))
-           (bits
-            (when (equal (alist-get 'exit_code result) 0)
-              (tramp-rpc--decode-output
-               (alist-get 'stdout result)
-               (alist-get 'stdout_encoding result)))))
-      (when (and (stringp bits)
-                 (= (length bits) (length paths))
-                 (string-match-p "\\`[01]+\\'" bits))
-        (cons t
-              (cl-loop for path in paths
-                       for bit across bits
-                       when (eq bit ?1)
-                       collect path))))))
-
-(defun remote-backend-tramp-rpc--compute-remote-path-a (function vector)
-  "Compute VECTOR's configured PATH with one directory probe.
-This mirrors tramp-rpc 0.13.1's PATH assembly only while its exact release
-and all private helper signatures match.  Any unexpected target response
-returns to FUNCTION's ordinary directory-by-directory implementation."
-  (let ((checked
-         (condition-case nil
-             (let (own-path default-path result)
-               (dolist (entry (tramp-rpc--effective-remote-path-spec vector))
-                 (setq entry
-                       (tramp-rpc--expand-remote-path-entry vector entry))
-                 (cond
-                  ((eq entry 'tramp-default-remote-path)
-                   (unless default-path
-                     (setq default-path
-                           (tramp-rpc--fetch-default-remote-path vector)))
-                   (setq result
-                         (tramp-rpc--append-path-entries default-path result)))
-                  ((memq entry '(tramp-own-remote-path
-                                 tramp-rpc-own-remote-path))
-                   (unless own-path
-                     (setq own-path
-                           (or (tramp-rpc--fetch-remote-exec-path vector) '())))
-                   (setq result
-                         (tramp-rpc--append-path-entries own-path result)))
-                  ((stringp entry)
-                   (setq result
-                         (tramp-rpc--append-path-entries
-                          (list entry) result)))))
-               (remote-backend-tramp-rpc--existing-paths vector result))
-           (error nil))))
-    (if checked (cdr checked) (funcall function vector))))
-
 (defun remote-backend-tramp-rpc--transport-death-before-a
     (process vec event)
   "Notify Remote before tramp-rpc closes relays owned by PROCESS.
-The early notification keeps LSP and watch resources attached to their
-workspace until Remote has reopened the physical session.  An explicit
-TRAMP cleanup deletes the transport too, but it is a disconnect, not a
-failure, and must not schedule a reconnect."
+EVENT is the transport's process event.  Only the current, unclaimed
+generation of VEC is reported: a generation upstream already claimed was
+retired on purpose, and `remote-backend-tramp-rpc--retire-unless-alive'
+reports its own."
+  (let ((current (ignore-errors (tramp-rpc--get-connection vec))))
+    (when (and (processp process)
+               (eq process
+                   (remote-backend-tramp-rpc--connection-slot current :process))
+               (not (remote-backend-tramp-rpc--connection-slot
+                     current :cleanup-started)))
+      (remote-backend-tramp-rpc--report-transport-failure
+       vec (format "tramp-rpc transport exited: %s" event)))))
+
+(defun remote-backend-tramp-rpc--report-transport-failure (vec message)
+  "Report a lost tramp-rpc transport for VEC to every Remote route using it.
+MESSAGE explains the loss.  Reported before tramp-rpc closes the relays,
+so LSP and watch resources stay attached to their workspace until Remote
+has reopened the physical session.  An explicit TRAMP cleanup is a
+disconnect, not a failure, and never schedules a reconnect."
   (when (and (not remote-backend-tramp-explicit-cleanup)
              (boundp 'remote-workspaces)
              (hash-table-p remote-workspaces)
-             (processp process)
-             (eq process
-                 (plist-get (tramp-rpc--get-connection vec) :process))
-             (not (process-get process :tramp-rpc-cleanup-started)))
+             (> (hash-table-count remote-workspaces) 0)
+             (remote-backend-tramp-rpc--private-compatible-p
+              'tramp-rpc--connection-key))
     (let ((dead-key (tramp-rpc--connection-key vec))
           (reported (make-hash-table :test #'equal)))
       (dolist (workspace (hash-table-values remote-workspaces))
@@ -675,14 +669,12 @@ failure, and must not schedule a reconnect."
                            (error nil)))
                 (puthash (remote-route-link-id route) t reported)
                 (remote-report-route-failure
-                 route
-                 (list 'remote-transport-error
-                       (format "tramp-rpc transport exited: %s" event)))))))))))
+                 route (list 'remote-transport-error message))))))))))
 
 ;;;; Connection buffer hygiene
 
-;; tramp-rpc 0.13.1 leaves three kinds of client state behind a closed
-;; connection.  TRAMP's generic cleanup kills `tramp-buffer-name' but not the
+;; The verified tramp-rpc release leaves three kinds of client state behind
+;; a closed connection.  TRAMP's generic cleanup kills `tramp-buffer-name' but not the
 ;; sibling "NAME stderr" buffer that `tramp-rpc--start-server-process' creates,
 ;; and that buffer's stderr relay process outlives its transport long enough to
 ;; collide with a reconnect ("NAME stderr<1>").  Each file-notify descriptor is
@@ -694,9 +686,7 @@ failure, and must not schedule a reconnect."
 
 (defun remote-backend-tramp-rpc--current-stderr-buffer (vec)
   "Return the stderr buffer of VEC's live tramp-rpc generation, or nil."
-  (and (fboundp 'tramp-rpc--get-connection)
-       (plist-get (ignore-errors (tramp-rpc--get-connection vec))
-                  :stderr-buffer)))
+  (remote-backend-tramp-rpc--vec-connection-slot vec :stderr-buffer))
 
 (defun remote-backend-tramp-rpc--release-stderr (buffer &optional kill)
   "Delete BUFFER's stderr relay process; when KILL, also kill BUFFER."
@@ -713,9 +703,13 @@ failure, and must not schedule a reconnect."
 The buffer stays for diagnostics until TRAMP cleanup or a reconnect reuses
 it.  A late cleanup of an old generation never touches the replacement's
 relay, which reuses the same buffer."
-  (when-let* ((connection (and (processp process)
-                               (process-get process :tramp-rpc-connection)))
-              (stderr (plist-get connection :stderr-buffer)))
+  (when-let* ((connection
+               (and (processp process)
+                    (remote-backend-tramp-rpc--private-compatible-p
+                     'tramp-rpc--process-connection)
+                    (tramp-rpc--process-connection process)))
+              (stderr (remote-backend-tramp-rpc--connection-slot
+                       connection :stderr-buffer)))
     (unless (eq stderr (remote-backend-tramp-rpc--current-stderr-buffer vec))
       (remote-backend-tramp-rpc--release-stderr stderr))))
 
@@ -755,9 +749,8 @@ replacement generation is kept."
                             "\\(?:<[0-9]+>\\)?\\'"))
            (current (remote-backend-tramp-rpc--current-stderr-buffer vec))
            (current-main
-            (and full-cleanup (fboundp 'tramp-rpc--get-connection)
-                 (plist-get (ignore-errors (tramp-rpc--get-connection vec))
-                            :buffer))))
+            (and full-cleanup
+                 (remote-backend-tramp-rpc--vec-connection-slot vec :buffer))))
       (dolist (buffer (buffer-list))
         (when (and (string-match-p pattern (buffer-name buffer))
                    (not (buffer-local-value 'buffer-file-name buffer))
@@ -778,23 +771,137 @@ replacement generation is kept."
       (remote-backend-tramp-rpc--release-stderr buffer t)))
   (remote-backend-tramp-rpc--kill-idle-descriptor-buffer))
 
-(defun remote-backend-tramp-rpc--closed-relay-exit-a
-    (function process stdout stderr stderr-buffer)
-  "Ignore a late RPC output chunk only after PROCESS has exited.
-On tramp-rpc 0.13.1 a large, short-lived `ls' may close its local cat relay
-while a queued output callback is still entering `process-send-string'.  The
-underlying write then signals an error from a timer, although the process is
-already terminal.  An active process or any other error still propagates."
-  (condition-case err
-      (funcall function process stdout stderr stderr-buffer)
-    (error
-     (if (and (processp process)
-              (process-get process :tramp-rpc-exited)
-              (equal (cadr err)
-                     (format "Output file descriptor of %s is closed"
-                             (process-name process))))
-         nil
-       (signal (car err) (cdr err))))))
+;;;; Version-gated shims
+
+(defconst remote-backend-tramp-rpc--shims
+  '((local-controlmaster-path
+     tramp-rpc--controlmaster-socket-path :around
+     remote-backend-tramp-rpc--local-controlmaster-path-a)
+    (local-controlmaster-path
+     tramp-rpc--ensure-controlmaster-directory :around
+     remote-backend-tramp-rpc--local-controlmaster-path-a)
+    (local-ssh-pty
+     tramp-rpc--make-direct-ssh-pty-process :around
+     remote-backend-tramp-rpc--local-controlmaster-path-a)
+    (adapter-timeout
+     tramp-rpc--call :around remote-backend-tramp-rpc--adapter-timeout-a
+     tramp-rpc--call-with-timeout tramp-rpc--get-connection
+     tramp-rpc--invalidate-timed-out-connection)
+    (attribute-probe-cache
+     tramp-rpc--acl-enabled-p :around remote-backend-tramp-rpc--acl-enabled-a
+     tramp-rpc--call tramp-rpc--get-connection)
+    (attribute-probe-cache
+     tramp-rpc--selinux-enabled-p :around
+     remote-backend-tramp-rpc--selinux-enabled-a
+     tramp-rpc--call tramp-rpc--get-connection)
+    (in-place-write-metadata
+     tramp-rpc-handle-write-region :around
+     remote-backend-tramp-rpc--write-region-in-place-a)
+    (in-place-write-metadata
+     file-extended-attributes :around
+     remote-backend-tramp-rpc--extended-attributes-in-place-a
+     tramp-rpc-handle-write-region)
+    (in-place-write-metadata
+     tramp-rpc-handle-set-file-uid-gid :around
+     remote-backend-tramp-rpc--uid-gid-in-place-a
+     tramp-rpc-handle-write-region)
+    (transport-death-notice
+     tramp-rpc--connection-transport-death :before
+     remote-backend-tramp-rpc--transport-death-before-a
+     tramp-rpc--connection-key tramp-rpc--get-connection)
+    (stderr-relay-release
+     tramp-rpc--cleanup-connection-generation :after
+     remote-backend-tramp-rpc--generation-cleanup-after-a
+     tramp-rpc--process-connection)
+    (watch-descriptor-buffer
+     tramp-rpc--make-file-notify-descriptor :filter-return
+     remote-backend-tramp-rpc--detach-descriptor-buffer-a))
+  "Workarounds verified against one exact tramp-rpc release.
+Each row is (GROUP SYMBOL HOW ADVICE . REQUIRES).  A row is installed only
+on the verified release, when SYMBOL and every private REQUIRES keep their
+contract, and when GROUP's own condition holds.  Every other release keeps
+upstream behaviour unchanged.")
+
+(defconst remote-backend-tramp-rpc--retired-shims
+  '((tramp-rpc-deploy--arch-to-rust-target
+     . remote-backend-tramp-rpc--arch-to-rust-target-a)
+    (tramp-rpc-handle-make-process
+     . remote-backend-tramp-rpc--local-relay-cwd-a)
+    (tramp-rpc--compute-remote-path
+     . remote-backend-tramp-rpc--compute-remote-path-a)
+    (tramp-rpc--deliver-process-output
+     . remote-backend-tramp-rpc--closed-relay-exit-a))
+  "Advice of earlier adapter versions whose fix is now upstream.
+0.16.0 maps the published ARM releases, starts local relays from a client
+directory, checks PATH in one batch (returning a different shape), and
+holds a process exit until its queued output is written.  Install removes
+these by name, so a live upgrade cannot keep an old shim on new code.")
+
+(defun remote-backend-tramp-rpc--shim-group-condition-p (group)
+  "Return non-nil when shim GROUP's own preconditions hold."
+  (pcase group
+    ('in-place-write-metadata
+     (and remote-backend-tramp-rpc-skip-in-place-metadata-roundtrip
+          (= emacs-major-version 31)
+          (fboundp 'file-extended-attributes)
+          (equal (remote-backend-tramp-rpc--upstream-arity
+                  'file-extended-attributes)
+                 '(1 . 1))))
+    ((or 'adapter-timeout 'attribute-probe-cache 'transport-death-notice
+         'stderr-relay-release)
+     (remote-backend-tramp-rpc--connection-readable-p))
+    (_ t)))
+
+(defun remote-backend-tramp-rpc--shim-state (shim verified)
+  "Return the install state of SHIM on a release VERIFIED or not.
+The state is `active', `absent', `unverified', `contract' or `condition'."
+  (pcase-let ((`(,group ,symbol ,_how ,_advice . ,requires) shim))
+    (cond
+     ((not (fboundp symbol)) 'absent)
+     ((not verified) 'unverified)
+     ((not (cl-every
+            (lambda (required)
+              (or (not (assq required
+                             remote-backend-tramp-rpc--private-contracts))
+                  (remote-backend-tramp-rpc--private-compatible-p required)))
+            (cons symbol requires)))
+      'contract)
+     ((not (remote-backend-tramp-rpc--shim-group-condition-p group))
+      'condition)
+     (t 'active))))
+
+(defun remote-backend-tramp-rpc--install-shims (verified)
+  "Install exactly the shims valid on a release VERIFIED or not.
+All shim advice, current and retired, is removed first."
+  (pcase-dolist (`(,symbol . ,advice) remote-backend-tramp-rpc--retired-shims)
+    (when (fboundp symbol)
+      (advice-remove symbol advice)))
+  ;; Remove every row before judging any: a group's condition can read a
+  ;; function that another row of the same group advises.
+  (pcase-dolist (`(,_group ,symbol ,_how ,advice . ,_)
+                 remote-backend-tramp-rpc--shims)
+    (when (fboundp symbol)
+      (advice-remove symbol advice)))
+  (let ((active
+         (seq-filter
+          (lambda (shim)
+            (eq (remote-backend-tramp-rpc--shim-state shim verified) 'active))
+          remote-backend-tramp-rpc--shims)))
+    (pcase-dolist (`(,_group ,symbol ,how ,advice . ,_) active)
+      (advice-add symbol how advice))))
+
+(defun remote-backend-tramp-rpc--shim-report ()
+  "Describe each version-gated shim and whether it is installed."
+  (let ((verified (remote-backend-tramp-rpc--verified-release-p)))
+    (mapcar
+     (lambda (shim)
+       (pcase-let ((`(,group ,symbol ,_how ,advice . ,_) shim))
+         (list :group group :symbol symbol
+               :state (remote-backend-tramp-rpc--shim-state shim verified)
+               :installed (and (fboundp symbol)
+                               (advice-member-p advice symbol)
+                               t))))
+     remote-backend-tramp-rpc--shims)))
 
 (defun remote-backend-tramp-rpc-install ()
   "Install deployment compatibility owned by the tramp-rpc backend."
@@ -822,158 +929,20 @@ already terminal.  An active process or any other error still propagates."
     (let ((verified (and release
                          (remote-backend-tramp-rpc--verified-release-p
                           release))))
-      ;; These private workarounds were verified against one exact client
-      ;; release.  Remove old advice first so a live package upgrade cannot
-      ;; leave a stale shim installed on a changed upstream implementation.
-      (when (fboundp 'tramp-rpc-deploy--arch-to-rust-target)
-        (advice-remove
-         'tramp-rpc-deploy--arch-to-rust-target
-         #'remote-backend-tramp-rpc--arch-to-rust-target-a)
-        (when (and verified
-                   (remote-backend-tramp-rpc--private-compatible-p
-                    'tramp-rpc-deploy--arch-to-rust-target))
-          (advice-add
-           'tramp-rpc-deploy--arch-to-rust-target
-           :around #'remote-backend-tramp-rpc--arch-to-rust-target-a)))
-      (when (fboundp 'tramp-rpc-handle-make-process)
-        (advice-remove
-         'tramp-rpc-handle-make-process
-         #'remote-backend-tramp-rpc--local-relay-cwd-a)
-        (when verified
-          (advice-add
-           'tramp-rpc-handle-make-process
-           :around #'remote-backend-tramp-rpc--local-relay-cwd-a)))
-      (dolist (symbol '(tramp-rpc--controlmaster-socket-path
-                        tramp-rpc--ensure-controlmaster-directory))
-        (when (fboundp symbol)
-          (advice-remove
-           symbol #'remote-backend-tramp-rpc--local-controlmaster-path-a)
-          (when (and verified
-                     (remote-backend-tramp-rpc--private-compatible-p symbol))
-            (advice-add
-             symbol :around
-             #'remote-backend-tramp-rpc--local-controlmaster-path-a))))
-      (when (fboundp 'tramp-rpc--call)
-        (advice-remove
-         'tramp-rpc--call
-         #'remote-backend-tramp-rpc--adapter-timeout-a)
-        (when (and verified
-                   (remote-backend-tramp-rpc--private-compatible-p
-                    'tramp-rpc--call)
-                   (remote-backend-tramp-rpc--private-compatible-p
-                    'tramp-rpc--call-with-timeout)
-                   (remote-backend-tramp-rpc--private-compatible-p
-                    'tramp-rpc--get-connection))
-          (advice-add
-           'tramp-rpc--call
-           :around #'remote-backend-tramp-rpc--adapter-timeout-a)))
-      (when (fboundp 'tramp-rpc--compute-remote-path)
-        (advice-remove
-         'tramp-rpc--compute-remote-path
-         #'remote-backend-tramp-rpc--compute-remote-path-a)
-        (when (and verified
-                   (cl-every
-                    #'remote-backend-tramp-rpc--private-compatible-p
-                    '(tramp-rpc--call
-                      tramp-rpc--decode-output
-                      tramp-rpc--compute-remote-path
-                      tramp-rpc--effective-remote-path-spec
-                      tramp-rpc--expand-remote-path-entry
-                      tramp-rpc--append-path-entries
-                      tramp-rpc--fetch-default-remote-path
-                      tramp-rpc--fetch-remote-exec-path)))
-          (advice-add
-           'tramp-rpc--compute-remote-path
-           :around #'remote-backend-tramp-rpc--compute-remote-path-a)))
-      (dolist (entry
-               '((tramp-rpc--acl-enabled-p
-                  . remote-backend-tramp-rpc--acl-enabled-a)
-                 (tramp-rpc--selinux-enabled-p
-                  . remote-backend-tramp-rpc--selinux-enabled-a)))
-        (when (fboundp (car entry))
-          (advice-remove (car entry) (cdr entry))
-          (when (and verified
-                     (remote-backend-tramp-rpc--private-compatible-p
-                      'tramp-rpc--call)
-                     (remote-backend-tramp-rpc--private-compatible-p
-                      'tramp-rpc--get-connection)
-                     (remote-backend-tramp-rpc--private-compatible-p
-                     (car entry)))
-            (advice-add (car entry) :around (cdr entry)))))
-      (when (fboundp 'tramp-rpc-handle-write-region)
-        (advice-remove
-         'tramp-rpc-handle-write-region
-         #'remote-backend-tramp-rpc--write-region-in-place-a))
-      (when (fboundp 'file-extended-attributes)
-        (advice-remove
-         'file-extended-attributes
-         #'remote-backend-tramp-rpc--extended-attributes-in-place-a))
-      (when (fboundp 'tramp-rpc-handle-set-file-uid-gid)
-        (advice-remove
-         'tramp-rpc-handle-set-file-uid-gid
-         #'remote-backend-tramp-rpc--uid-gid-in-place-a))
-      (when (and verified
-                 remote-backend-tramp-rpc-skip-in-place-metadata-roundtrip
-                 (= emacs-major-version 31)
-                 (remote-backend-tramp-rpc--private-compatible-p
-                  'tramp-rpc-handle-write-region)
-                 (fboundp 'file-extended-attributes)
-                 (equal (func-arity 'file-extended-attributes) '(1 . 1)))
-        (advice-add
-         'tramp-rpc-handle-write-region :around
-         #'remote-backend-tramp-rpc--write-region-in-place-a)
-        (advice-add
-         'file-extended-attributes :around
-         #'remote-backend-tramp-rpc--extended-attributes-in-place-a)
-        (when (remote-backend-tramp-rpc--private-compatible-p
-               'tramp-rpc-handle-set-file-uid-gid)
-          (advice-add
-           'tramp-rpc-handle-set-file-uid-gid :around
-           #'remote-backend-tramp-rpc--uid-gid-in-place-a)))
-      (when (fboundp 'tramp-rpc--deliver-process-output)
-        (advice-remove
-         'tramp-rpc--deliver-process-output
-         #'remote-backend-tramp-rpc--closed-relay-exit-a)
-        (when (and verified
-                   (remote-backend-tramp-rpc--private-compatible-p
-                    'tramp-rpc--deliver-process-output))
-          (advice-add
-           'tramp-rpc--deliver-process-output
-           :around #'remote-backend-tramp-rpc--closed-relay-exit-a)))
-      (when (fboundp 'tramp-rpc--connection-transport-death)
-        (advice-remove
-         'tramp-rpc--connection-transport-death
-         #'remote-backend-tramp-rpc--transport-death-before-a)
-        (when (and verified
-                   (remote-backend-tramp-rpc--private-compatible-p
-                    'tramp-rpc--connection-key)
-                   (remote-backend-tramp-rpc--private-compatible-p
-                    'tramp-rpc--get-connection)
-                   (remote-backend-tramp-rpc--private-compatible-p
-                    'tramp-rpc--connection-transport-death))
-          (advice-add
-           'tramp-rpc--connection-transport-death
-           :before #'remote-backend-tramp-rpc--transport-death-before-a)))
+      (setq remote-backend-tramp-rpc--connection-shape
+            (remote-backend-tramp-rpc--connection-shape-check)
+            remote-backend-tramp-rpc--probe-slot
+            (and verified remote-backend-tramp-rpc--connection-shape
+                 (ignore-errors
+                   (cl-struct-slot-offset 'tramp-rpc-connection 'probing))))
+      (remote-backend-tramp-rpc--install-shims verified)
       ;; Buffer hygiene.  The cleanup hooks only use public TRAMP names and
-      ;; are safe on any release; the two private seams stay version-gated.
+      ;; read a generation only through the verified accessors.
       (when (featurep 'tramp-rpc)
         (add-hook 'tramp-cleanup-connection-hook
                   #'remote-backend-tramp-rpc--cleanup-connection-buffers-h t)
         (add-hook 'tramp-cleanup-all-connections-hook
                   #'remote-backend-tramp-rpc--cleanup-all-buffers-h t))
-      (dolist (entry
-               '((tramp-rpc--cleanup-connection-generation
-                  :after remote-backend-tramp-rpc--generation-cleanup-after-a)
-                 (tramp-rpc--make-file-notify-descriptor
-                  :filter-return
-                  remote-backend-tramp-rpc--detach-descriptor-buffer-a)))
-        (pcase-let ((`(,symbol ,how ,advice) entry))
-          (when (fboundp symbol)
-            (advice-remove symbol advice)
-            (when (and verified
-                       (remote-backend-tramp-rpc--private-compatible-p
-                        symbol))
-              (advice-add symbol how advice)))))
       (remote-backend-tramp-rpc-metadata-install
        verified
        (lambda (contract)
@@ -993,7 +962,7 @@ already terminal.  An active process or any other error still propagates."
 
 (defun remote-backend-tramp-rpc--seed-named-current-home (name link)
   "Seed the current account's `~USER' home from verified RPC system info.
-The 0.13.1 client uses `getent' for a named user when the connection vector
+The verified client uses `getent' for a named user when the connection vector
 omits USER.  macOS has no `getent', although the server already supplied the
 current HOME.  Confirm the effective account through target `id -un' before
 associating that HOME with a named account.  Other names keep upstream lookup."
@@ -1022,9 +991,7 @@ associating that HOME with a named account.  Other names keep upstream lookup."
               (error nil)))
            (output
             (and (equal (alist-get 'exit_code result) 0)
-                 (tramp-rpc--decode-output
-                  (alist-get 'stdout result)
-                  (alist-get 'stdout_encoding result)))))
+                 (tramp-rpc--decode-output (alist-get 'stdout result)))))
       (when (and (stringp output)
                  (equal (string-trim output) user))
         (tramp-set-connection-property vec (concat "~" user) home)))))
@@ -1114,10 +1081,12 @@ associating that HOME with a named account.  Other names keep upstream lookup."
      ;; every remote operation, which is exactly the cost the cooldown exists
      ;; to avoid, so record the backend as incompatible instead.  Clearing
      ;; route health (a config reload or `remote-reset') re-evaluates it.
-     ((and (string-match-p "failed to obtain tramp-rpc-server" message)
-           (string-match-p
-            (rx (or "cannot cross-compile" "unknown architecture"))
-            message))
+     ((or (and (string-match-p "failed to obtain tramp-rpc-server" message)
+               (string-match-p
+                (rx (or "cannot cross-compile" "unknown architecture"))
+                message))
+          ;; The deploy step also signals an unmapped target on its own.
+          (string-match-p (rx bos "unknown architecture") message))
       (list :scope 'backend
             :phase phase
             :retryable nil
@@ -1193,10 +1162,8 @@ file properties.  Keep that private cache boundary inside this adapter."
 
 (defun remote-backend-tramp-rpc-transport-process (physical)
   "Return the current RPC transport process for PHYSICAL, if connected."
-  (when (fboundp 'tramp-rpc--get-connection)
-    (plist-get (tramp-rpc--get-connection
-                (tramp-dissect-file-name physical))
-               :process)))
+  (remote-backend-tramp-rpc--vec-connection-slot
+   (tramp-dissect-file-name physical) :process))
 
 (remote-backend-tramp-rpc-install)
 

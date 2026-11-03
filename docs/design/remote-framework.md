@@ -401,6 +401,38 @@ handler、external operation 和 file-notify API；旧版本所需的窄 fallbac
 能力。tramp-rpc 的少数私有 seam 仅存在于 backend adapter，安装 advice 前验证
 arity；形状改变时相应优化自动停用，文件、进程和 channel 主路径仍可继续工作。
 
+tramp-rpc 的私有适配分三层，全部在 `remote-backend-tramp-rpc.el`：
+
+- 契约表 `remote-backend-tramp-rpc--private-contracts` 记录每个私有函数的 arity，
+  检查时穿过其他 advice 看到 upstream 原函数。connection generation 是
+  `tramp-rpc-connection` record，只经 `remote-backend-tramp-rpc--connection-slot`
+  读取；读到其他形状一律回答 nil，绝不按旧 plist 猜测（arity 不变而表示改变时，
+  `plist-get` 会静默返回 nil，这正是要防的升级故障）。
+- shim 表 `remote-backend-tramp-rpc--shims` 每行是 (组 符号 方式 advice . 依赖)。
+  只有在已验证的精确 release（版本、提交、干净 tag 三者都对上）、该行及其依赖的
+  契约都成立、组条件也满足时才安装；其他 release 一律保持 upstream 行为。安装先
+  卸下全部行再逐行判断，所以同组内互相读取的函数不会被自己的 advice 干扰。
+- 退役表 `remote-backend-tramp-rpc--retired-shims` 列出 upstream 已修复而撤掉的
+  advice（0.16.0 起：发布架构映射、本地 `cat` relay 的 cwd、PATH 批量检查、relay
+  关闭后的迟到输出），安装时按名字卸下，在线升级不会把旧 shim 留在新代码上。
+  直连 PTY 不在其中：0.16.0 用本地 `start-process` 起 `ssh`，`/fs:` 路由调用时
+  物理 `/rpc:` 目录在那里不被识别，Emacs 会尝试在本机进入它（"Setting current
+  directory"）；`local-ssh-pty` 行让它与 ControlMaster 路径一样在客户端目录、
+  客户端 PATH 与环境下启动，远端 cwd 由 PTY 命令行自带。
+
+`remote-backend-tramp-rpc-compat-report` 与 `remote-doctor` 从同一张表报告每行状态
+（`active`、`unverified`、`contract`、`condition`、`absent`）以及残留的退役
+advice。升级 tramp-rpc 时逐行复核 upstream 新代码，更新已验证版本与提交，再改
+契约表和 shim 表；步骤见 [maintenance.md](../ops/maintenance.md)。
+
+有界请求超时后不直接关掉 transport。upstream 超时后会用 10 秒的 `system.ping`
+探测，这会让 5 秒的只读查询在死链上等 15 秒；adapter 在有界请求期间置位
+generation 自己的 probing 标志跳过它，改为在同一 generation 上发一次
+`remote-backend-tramp-rpc-liveness-probe-timeout`（默认 2 秒）的 ping：仍应答说明
+服务端只是慢，像 VS Code Remote 一样保留连接，其上的进程与 LSP 不受影响；不应答
+才先向 Remote 报告 transport 失败，再经 upstream 的
+`tramp-rpc--invalidate-timed-out-connection` 关闭它，连同半开的 ControlMaster。
+
 tramp-rpc 的文件元数据按“每个用户操作的往返次数”设预算，对标 VS Code Remote 的
 stat + read / stat + write。`remote-backend-tramp-rpc-metadata.el` 在
 `find-file-noselect` 与 `basic-save-buffer` 外包一个文件操作作用域：作用域内第一次
@@ -411,8 +443,12 @@ stat、lstat，并写入 tramp-rpc 自己的缓存；TRAMP 为数据安全强制
 “changed on disk”，不会掩盖更新的磁盘内容。写入会使作用域遗忘该文件，写后的
 modtime stat 仍是真实往返。服务端并发执行 batch 条目，所以 read/write 从不并入
 batch。`locate-dominating-file` 结果在 tramp-rpc 元数据 TTL 内复用，只有可能增删
-marker 的失效（同名 marker、目录/子树/连接级 flush）才清空。实测 Aaron-PC
-（RTT≈5ms）：热打开 6→2 次往返（约 155→90ms），保存 8→3 次往返。该适配只在已验证
+marker 的失效（同名 marker、目录/子树/连接级 flush）才清空。保存时
+`basic-save-buffer` 还会问文件及其目录是否可写；tramp-rpc 0.16.0 用服务端内核
+`access` 回答，每问一次往返，所以同一个 batch 也带上这两条 `file.access`，作用域
+在写入该文件之前直接用它们回答，答案格式与 upstream 校验的一致，写入或 flush
+即遗忘。实测 Aaron-PC（RTT≈5ms）：热打开 6→2 次往返（约 155→90ms），保存
+8→3 次往返（batch、write、写后 stat）。该适配只在已验证
 release 与私有 seam arity 完整时安装，`remote-backend-tramp-rpc-metadata-report`
 给出计数器。
 
@@ -577,7 +613,7 @@ session 时返回 nil。auto-revert、VC、recentf 等后台调用方用这个�
 远端；用户再次访问文件时才按需重开。保留的未保存 buffer 另有上述 startup 标志，
 不能仅依靠 CONNECTED 查询防止排队的主动启动回调。
 
-tramp-rpc 0.13.1 在客户端还留下两类状态，由 `remote-backend-tramp-rpc.el` 回收：
+已验证的 tramp-rpc release 在客户端还留下两类状态，由 `remote-backend-tramp-rpc.el` 回收：
 `tramp-buffer-name` 旁边的 `NAME stderr` buffer 及其 relay 进程（TRAMP 通用清理
 不认识它，旧 relay 存活还会让重连得到 `NAME stderr<1>`，这些编号残留也会回收）；
 单目标清理也扫描已脱离 connection 表的该主机 RPC 通讯 buffer，全局清理扫描全部。

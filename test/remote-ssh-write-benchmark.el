@@ -88,8 +88,12 @@
               0
             remote-backend-tramp-rpc-attribute-probe-ttl))
          buffer values)
-    (unless (plist-get (remote-backend-tramp-rpc-compat-report)
-                       :attribute-probe-cache)
+    (unless (cl-every
+             (lambda (shim) (eq (plist-get shim :state) 'active))
+             (seq-filter
+              (lambda (shim)
+                (eq (plist-get shim :group) 'attribute-probe-cache))
+              (plist-get (remote-backend-tramp-rpc-compat-report) :shims)))
       (error "Installed tramp-rpc has no verified attribute-probe cache"))
     (advice-add 'tramp-rpc--call :around
                 #'remote-ssh-write-benchmark--call-a)

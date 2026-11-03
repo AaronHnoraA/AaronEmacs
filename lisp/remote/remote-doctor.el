@@ -392,39 +392,49 @@ using the same plist format as `remote-doctor--check'.")
             (concat "Private tramp-rpc signatures changed; their optional "
                     "accelerations are disabled until the adapter is updated")))
          checks)
-        (push
-         (remote-doctor--check
-          'tramp-rpc-versioned-shims
-          (if (and (plist-get report :verified-client-version)
-                   (plist-get report :architecture-map)
-                   (plist-get report :local-relay-cwd)
-                   (plist-get report :adapter-timeout))
-              'ok 'warning)
-          (format "verified release=%s architecture map=%s relay cwd=%s adapter timeout=%s"
-                  (if (plist-get report :verified-client-version)
-                      "yes" "no")
-                  (if (plist-get report :architecture-map)
-                      "active" "upstream")
-                  (if (plist-get report :local-relay-cwd)
-                      "active" "upstream")
-                  (if (plist-get report :adapter-timeout)
-                      "active" "upstream"))
-          (unless (plist-get report :verified-client-version)
-            (concat "Private tramp-rpc workarounds are disabled on this "
-                    "client release; revalidate its process and RPC "
-                    "contracts before enabling them")))
-         checks)
-        (push
-         (remote-doctor--check
-          'tramp-rpc-path-batch
-          (if (plist-get report :batched-path-check) 'ok 'warning)
-          (format "batched PATH directory check=%s"
-                  (if (plist-get report :batched-path-check)
-                      "enabled" "upstream fallback"))
-          (unless (plist-get report :batched-path-check)
-            (concat "Inspect the installed tramp-rpc release and private "
-                    "interfaces before re-enabling this acceleration")))
-         checks)))
+        (let* ((shims (plist-get report :shims))
+               (inactive
+                ;; `condition' is a precondition the user or Emacs chose,
+                ;; such as a disabled optimization: not a fault.
+                (seq-remove (lambda (shim)
+                              (memq (plist-get shim :state) '(active condition)))
+                            shims))
+               (stale
+                (seq-filter (lambda (shim) (plist-get shim :installed))
+                            (plist-get report :retired-shims))))
+          (push
+           (remote-doctor--check
+            'tramp-rpc-versioned-shims
+            (if (and (plist-get report :verified-client-version)
+                     (null inactive) (null stale))
+                'ok 'warning)
+            (format "verified release=%s connection shape=%s active=%d/%d%s%s"
+                    (if (plist-get report :verified-client-version) "yes" "no")
+                    (if (plist-get report :connection-shape) "ok" "changed")
+                    (- (length shims) (length inactive)) (length shims)
+                    (if inactive
+                        (format " inactive=%S"
+                                (mapcar (lambda (shim)
+                                          (list (plist-get shim :symbol)
+                                                (plist-get shim :state)))
+                                        inactive))
+                      "")
+                    (if stale
+                        (format " retired-but-installed=%S"
+                                (mapcar (lambda (shim) (plist-get shim :symbol))
+                                        stale))
+                      ""))
+            (cond
+             ((not (plist-get report :verified-client-version))
+              (concat "Private tramp-rpc workarounds are disabled on this "
+                      "client release; revalidate its process and RPC "
+                      "contracts before enabling them"))
+             (stale
+              "Reload the tramp-rpc backend to drop advice retired upstream")
+             (inactive
+              (concat "Some verified workarounds are off; their state names "
+                      "the failed check (contract or absent)"))))
+           checks))))
     (nreverse checks)))
 
 (defun remote-doctor--probe (target)

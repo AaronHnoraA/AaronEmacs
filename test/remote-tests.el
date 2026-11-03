@@ -430,6 +430,13 @@ refused build on every remote operation."
     (should
      (equal
       (plist-get
+       (remote-backend-tramp-rpc-classify-error
+        '(remote-file-error "Unknown architecture" "sparc-linux") 'connect)
+       :status)
+      'incompatible))
+    (should
+     (equal
+      (plist-get
        (remote-backend-tramp-rpc-classify-error transient 'connect)
        :status)
       'failed))
@@ -1836,13 +1843,6 @@ returns, so this covers a different ownership window from backend cancellation."
            :status)
           'failed))))))
 
-(ert-deftest remote-tramp-rpc-maps-published-armv7-release ()
-  (should
-   (equal
-    (remote-backend-tramp-rpc--arch-to-rust-target-a
-     #'identity "armv7l-linux")
-    "armv7-unknown-linux-musleabihf")))
-
 (ert-deftest remote-tramp-ssh-options-preserve-argv-boundaries ()
   (should
    (equal
@@ -1879,21 +1879,6 @@ returns, so this covers a different ownership window from backend cancellation."
                        (lambda (option)
                          (string-prefix-p "ServerAliveCountMax=" option))
                        options)))))))
-
-(ert-deftest remote-tramp-rpc-local-relays-use-a-local-directory ()
-  (let ((default-directory "/rpc:box:/work/")
-        seen-directory)
-    (cl-letf
-        (((symbol-function 'start-process)
-          (lambda (&rest _arguments)
-            (setq seen-directory default-directory)
-            'relay)))
-      (should
-       (eq
-        (remote-backend-tramp-rpc--local-relay-cwd-a
-         (lambda () (start-process "relay" nil "cat")))
-        'relay)))
-    (should (equal seen-directory temporary-file-directory))))
 
 (ert-deftest remote-tramp-rpc-controlmaster-path-stays-on-client ()
   "The PTY socket path uses client HOME despite a target buffer context."
