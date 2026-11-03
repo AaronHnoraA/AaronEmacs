@@ -154,6 +154,13 @@ the last message is its answer."
         (shell-maker-mark-output)
         (+agent-menu--reply-in (region-beginning) (region-end))))))
 
+(defun +agent-last-reply (&optional buffer)
+  "Return the Markdown of BUFFER's last reply, or nil when there is none.
+BUFFER defaults to the session the agent menu and slash commands mean.  A
+domain that keeps a reply (Noema filing it as a Wiki page) asks here."
+  (let ((text (string-trim (or (+agent-menu--last-reply (or buffer (+agent-menu--buffer))) ""))))
+    (unless (string-empty-p text) text)))
+
 (defun +agent-menu--reply-file (buffer text)
   "Write TEXT, BUFFER's reply, to a bounded reply directory and return the file.
 The same reply maps to the same file, so opening it twice reuses one page."

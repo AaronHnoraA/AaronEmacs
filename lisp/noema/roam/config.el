@@ -1852,6 +1852,11 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
         '+noema-roam-ui-path)
        (+noema-roam-ui-insert-field
         "Create engine" "Noema create-node runtime" '+noema-roam-ui-meta)
+       (when-let* ((body (plist-get draft :body)))
+         (+noema-roam-ui-insert-field
+          "Body" (format "%d lines from the agent reply, after the template"
+                         (length (split-string body "\n")))
+          '+noema-roam-ui-meta))
        (widget-setup)))
     (unless (get-text-property (point) 'aaron-ui-board--item-id)
       (+noema-roam-ui-goto-first-item)))))
@@ -1945,6 +1950,11 @@ directory without DRAFT resumes the current unsubmitted form."
     (unless (and file (file-exists-p file))
       (user-error "Noema runtime did not create the node (path: %s)"
                   (or file "nil")))
+    (when-let* ((body (plist-get draft :body))
+                ((not (string-empty-p (string-trim body)))))
+      ;; The template wrote the meta block and title; the body follows them.
+      (let ((coding-system-for-write 'utf-8-unix))
+        (write-region (concat "\n" (string-trim body) "\n") nil file t 'silent)))
     (+noema-roam--clear-runtime-cache)
     (when (derived-mode-p '+noema-roam-new-mode)
       (setq-local +noema-roam-new--created-file file)
@@ -2031,6 +2041,45 @@ Optional TAGS are normalized with the same rules as the interactive form."
 
 (defalias 'roam-new-note #'+noema-roam/new-node
   "Open the Roam note creation workbench.")
+
+(declare-function +agent-last-reply "tools/agent/menu" (&optional buffer))
+
+(defun +noema-roam--reply-draft (reply)
+  "Return a Roam Node draft holding agent REPLY as its body.
+A reply that opens with a heading gives the title and loses that line,
+since the template writes the title itself; otherwise its first line,
+shortened, is a title for the person to correct."
+  (let* ((reply (string-trim reply))
+         (heading (and (string-match "\\`#+[ \t]+\\(.+\\)" reply)
+                       (string-trim (match-string 1 reply))))
+         (body (if heading
+                   (string-trim (substring reply (match-end 0)))
+                 reply))
+         (first-line (car (split-string reply "\n" t "[ \t]+")))
+         (title (or heading
+                    (truncate-string-to-width
+                     (string-trim
+                      (replace-regexp-in-string "[*_`>#]+" "" (or first-line "")))
+                     60 nil nil t)))
+         (title (if (string-empty-p title) "Untitled" title)))
+    (list :node-type "roam"
+          :title title
+          :path (+noema-roam-new--unique-path
+                 (+noema-roam-new--default-path title ""))
+          :kind "note"
+          :template-key "roam"
+          :tags nil
+          :body body)))
+
+(defun +noema-roam/file-agent-reply ()
+  "File the agent session's last reply in the Wiki as a new page.
+The node workbench opens with the reply as the page body; correct the
+title, place and tags there, and `c' creates the page.  An answer worth
+keeping then compounds in the Wiki instead of staying in the chat."
+  (interactive)
+  (require 'tools/agent/menu)
+  (let ((reply (or (+agent-last-reply) (user-error "No reply yet"))))
+    (+noema-roam-new "" (+noema-roam--reply-draft reply))))
 
 (defun markdown-new-document (&optional directory)
   "Open the Markdown workbench with a plain document selected."

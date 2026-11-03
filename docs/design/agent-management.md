@@ -42,8 +42,9 @@ Research 的逻辑 Session 和 Run ID 不可互换。关闭视图只改变显示
 | 想做的事 | 方式 |
 | --- | --- |
 | 说话、排队、steering | 输入区 `RET` 换行；`S-RET` 发送（生成中 steer），`M-RET` 发送（生成中排队） |
-| 不离开输入区操作会话 | 本地斜杠命令 `/queue`、`/next`、`/changes`、`/resume`、`/fork`、`/rename`、`/restart`、`/new`、`/side`、`/agents`、`/page`，在 `/` 补全里列出 |
+| 不离开输入区操作会话 | 本地斜杠命令 `/queue`、`/next`、`/changes`、`/resume`、`/fork`、`/rename`、`/restart`、`/new`、`/side`、`/agents`、`/page`、`/file`，在 `/` 补全里列出 |
 | 读公式多的回复 | `C-c A o`／`/page` 把上一条回复作为 Noema Markdown 页面在旁边打开；聊天本身不渲染公式 |
+| 留下值得保存的回答 | `C-c A F`／`/file` 把上一条回复交给新建节点工作台，改好标题和位置后成为 Wiki 页面 |
 | 看所有动作 | 输入区外按 `?`，或任意位置 `C-c C-z`，打开同一菜单 |
 | 停止回合 | agent-shell 原生的 `C-c C-c`，走统一的停止路径 |
 | 模型、模式、思考级别 | agent-shell 原生的 `C-c C-v`、`C-c C-m`、`C-c C-t` |
@@ -373,6 +374,12 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   Markdown 原文，写入 `var/agent/replies/`，在另一个窗口作为 Noema 页面打开，聊天保持
   可见。同一回复复用同一文件；目录只保留最近 20 份，正被访问的不删。没有回复时报告
   而不创建文件。测试：`agent-c57-*`。
+- **C58 回答可以归档进 Wiki。** `F`（`/file`）取上一条回复的 Markdown（与 C57 同一来源），
+  打开 Noema 现有的新建节点工作台：回复以标题开头时它成为页面标题，正文去掉该行，否则
+  取首行作暂定标题。命令本身不写文件；人确认标题、位置和标签后按 `c`，由同一创建
+  runtime 建页，正文接在模板之后。通用层只公开 `+agent-last-reply`，建页留在
+  `noema/roam`，不进入 `tools/agent`（C10）。没有回复时报告而不打开工作台。
+  测试：`agent-c58-*`。
 
 ## 实现位置
 
@@ -422,6 +429,10 @@ G4–G9 与 G11 的项目池、显示归属、返回、预览及物理替换问�
 - **G14 Remote 上的项目入口。** Noema host 与 Hy Memory 在客户端，运行在其他 target 的
   Agent 既够不到 API 命令，也没有记忆。C51、C52 在这里不生效：会话不收入口，不是报错。
   要支持需要经 `remote-channel` 转发 host，尚未实现。
+- **G15 撤销会话改动。** ZCode 在回合摘要里按文件撤销，先预检文件自改动后未被他人修改，
+  多次修改按检查点倒序回放，有一个不安全就整体不写。C44 的清单来自 ACP 报告的 diff，
+  不是写前内容的检查点，`oldText` 也可能只是片段。没有可靠的前内容和预检前，不提供
+  “撤销”，以免把部分回退说成安全回退；需要先定契约。
 - **G3 状态迁移。** 模型和配额偏好从旧 Noema 路径复制到 `var/agent/`，保留原文件；
   现有 worktree 使用的 `noemaBase/noemaGroup/noemaAgent` Git 元数据保持可读写，
   避免改名使已存在的分支失去归属。它们不要求 Noema 运行。

@@ -189,6 +189,51 @@
     (should (equal (+agent-menu--reply-in (point-min) (point-max))
                    "The answer is $x^2$\nand $$y$$."))))
 
+(ert-deftest agent-c58-a-reply-files-into-the-wiki-through-the-node-workbench ()
+  (require 'tools/agent/menu)
+  (require 'noema/roam/config)
+  (should (eq (nth 2 (assoc "F" (+agent-actions--rows +agent-actions)))
+              #'+noema-roam/file-agent-reply))
+  ;; A leading heading names the page and leaves the body; the template
+  ;; writes the title itself.
+  (let ((draft (+noema-roam--reply-draft "## Graph isomorphism\n\nIt is in **NP**.")))
+    (should (equal (plist-get draft :title) "Graph isomorphism"))
+    (should (equal (plist-get draft :body) "It is in **NP**."))
+    (should (equal (plist-get draft :node-type) "roam")))
+  (let ((draft (+noema-roam--reply-draft "**Short** answer: yes.\nMore.")))
+    (should (equal (plist-get draft :title) "Short answer: yes."))
+    (should (string-prefix-p "**Short**" (plist-get draft :body))))
+  ;; The command only opens the workbench; nothing is written until `c'.
+  (let (opened)
+    (cl-letf (((symbol-function '+agent-last-reply) (lambda (&rest _) "# T\nbody"))
+              ((symbol-function '+noema-roam-new)
+               (lambda (directory draft) (setq opened (list directory draft)))))
+      (+noema-roam/file-agent-reply))
+    (should (equal (car opened) ""))
+    (should (equal (plist-get (cadr opened) :body) "body")))
+  (cl-letf (((symbol-function '+agent-last-reply) (lambda (&rest _) nil)))
+    (should-error (+noema-roam/file-agent-reply) :type 'user-error))
+  ;; Creating writes the body after what the template wrote.
+  (let* ((root (make-temp-file "noema-file-reply" t))
+         (file (expand-file-name "t.md" root)))
+    (unwind-protect
+        (cl-letf (((symbol-function '+noema-roam--runtime-call)
+                   (lambda (&rest _)
+                     (with-temp-file file (insert "#+begin meta\nid: x\n#+end meta\n\n# T\n"))
+                     (let ((table (make-hash-table :test #'equal)))
+                       (puthash "file" file table)
+                       table)))
+                  ((symbol-function '+noema-roam--clear-runtime-cache) #'ignore)
+                  ((symbol-function '+noema-roam-new--visit-created-file) #'identity))
+          (with-temp-buffer
+            (setq-local +noema-roam-new--base-directory "")
+            (+noema-roam-new--create-draft
+             (list :node-type "roam" :title "T" :path "t.md" :kind "note"
+                   :template-key "roam" :tags nil :body "Body $x^2$.")))
+          (should (equal (with-temp-buffer (insert-file-contents file) (buffer-string))
+                         "#+begin meta\nid: x\n#+end meta\n\n# T\n\nBody $x^2$.\n")))
+      (delete-directory root t))))
+
 (ert-deftest agent-chat-is-a-treemacs-source-by-its-directory ()
   (require 'tools/project/config)
   (should (memq '+agent-shell-treemacs-source-h agent-shell-mode-hook))

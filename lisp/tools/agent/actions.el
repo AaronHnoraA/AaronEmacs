@@ -66,6 +66,8 @@
      ("L" "Leave a watch…" noema-project-graph-add-watch :slash "watch"
       :doc "Tell this Project's Pi something after a countdown")
      ("p" "Promote to Research" noema-agent-promote-current-session :if +agent-menu--session-p)
+     ("F" "File reply in Wiki…" +noema-roam/file-agent-reply :if +agent-menu--session-p
+      :slash "file" :doc "Make the last reply a Wiki page you review first")
      ("e" "Edit page source" noema-md-bridge-edit-source)
      ("J" "Associated work" +agent-menu-jump :if +agent-menu--jump-p)
      ("C" "Context rollover" +agent-menu-compact :if +agent-menu--compact-p)
