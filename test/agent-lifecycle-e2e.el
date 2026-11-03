@@ -9,7 +9,8 @@
 (require 'tools/agent/manager)
 (require 'tools/agent/menu)
 (require 'tools/agent/queue)
-(load (expand-file-name "test/agent-flow-e2e.el" user-emacs-directory) nil t)
+(unless (featurep 'agent-flow-e2e)
+  (load (expand-file-name "test/agent-flow-e2e.el" user-emacs-directory) nil t))
 
 (defvar agent-lifecycle-e2e--asked nil)
 
@@ -168,6 +169,24 @@
                   (lambda (line) (string-match-p "\\\"optionId\\\":\\\"allow\\\"" line))
                   (agent-lifecycle-e2e--events store)))))))
 
+(ert-deftest agent-manager-c15-a-late-broker-decision-cannot-answer-after-remote-disconnect ()
+  (agent-lifecycle-e2e--with-session (buffer store directory)
+    (let (respond replayed)
+      (+agent-acp-set-permission-responder
+       buffer (lambda (permission) (setq respond (map-elt permission :respond)) t))
+      (agent-flow-e2e--send buffer "permission")
+      (agent-flow-e2e--wait (lambda () (functionp respond)))
+      (with-current-buffer buffer
+        (setq-local remote-buffer-disconnected-p t)
+        (run-hooks 'remote-buffer-disconnect-hook))
+      (funcall respond "allow")
+      (+agent-acp-set-permission-responder buffer (lambda (&rest _) (setq replayed t)) t)
+      (should-not replayed)
+      (delete-process (agent-lifecycle-e2e--process buffer))
+      (should-not
+       (cl-some (lambda (line) (string-match-p "\\\"optionId\\\":\\\"allow\\\"" line))
+                (agent-lifecycle-e2e--events store))))))
+
 (ert-deftest agent-process-c38-a-deliberate-shutdown-is-not-a-failure ()
   "The session's own shutdown is not reported as a lost client."
   (agent-lifecycle-e2e--with-session (buffer store directory)
@@ -232,6 +251,52 @@
           (+agent-acp--client-exited agent state process "deleted" nil)
           (should (equal reasons '(failed))))
       (agent-lifecycle-e2e--dispose agent))))
+
+(ert-deftest agent-process-c38-remote-disconnect-fences-work-before-client-teardown ()
+  (agent-lifecycle-e2e--with-session (buffer store directory)
+    (agent-flow-e2e--wait (lambda () (not (buffer-local-value '+agent-acp--title-query buffer))))
+    (agent-flow-e2e--send buffer "hold")
+    (agent-flow-e2e--wait (lambda () (+agent-acp-busy-p buffer)))
+    (agent-flow-e2e--send buffer "must stay held one")
+    (agent-flow-e2e--send buffer "must stay held two")
+    (let* ((process (agent-lifecycle-e2e--process buffer))
+           (id (+agent-acp-state-value buffer '(:session :id)))
+           (state (buffer-local-value 'agent-shell--state buffer))
+           failed ended)
+      ;; This is Remote's actual first teardown phase.  Pending callbacks
+      ;; can run before it gets to delete-process, so the client is live here.
+      (with-current-buffer buffer
+        (setq-local remote-buffer-disconnected-p t)
+        (run-hooks 'remote-buffer-disconnect-hook))
+      (should (process-live-p process))
+      (should (= 2 (+agent-acp-held-prompt-count buffer)))
+      (should-not (+agent-acp-state-value buffer '(:pending-prompts)))
+      (should-error (+agent-queue-resume buffer) :type 'user-error)
+      (with-current-buffer buffer
+        (agent-shell--send-request
+         :state state :client (map-elt state :client)
+         :request (acp-make-session-list-request :cwd directory) :buffer buffer
+         :on-success (lambda (&rest _) (ert-fail "A disconnected client received a new reply"))
+         :on-failure (lambda (error &rest _) (setq failed error))))
+      (should failed)
+      (let ((+agent-acp-client-ended-functions (list (lambda (agent) (push agent ended)))))
+        (delete-process process)
+        (agent-flow-e2e--wait (lambda () ended)))
+      (should (memq buffer ended))
+      (agent-flow-e2e--wait (lambda () (not (+agent-acp-busy-p buffer))))
+      (let ((snapshot (+agent-session-snapshot buffer)))
+        (should (eq (plist-get snapshot :process-state) 'disconnected))
+        (should (eq (plist-get snapshot :turn-state) 'interrupted))
+        (should (equal (plist-get snapshot :native-session-id) id))
+        (should-not (plist-get snapshot :last-error))
+        (should-not (plist-get snapshot :busy)))
+      (with-current-buffer buffer
+        (should-not +agent-acp--stop-timer)
+        (should-not +agent-acp--title-query)
+        (should-not (map-elt agent-shell--state :idle-timer)))
+      (should-not agent-lifecycle-e2e--asked)
+      (should-not (cl-some (lambda (line) (string-match-p "must stay held" line))
+                           (agent-lifecycle-e2e--events store))))))
 
 (ert-deftest agent-attention-c40-a-waiting-pi-is-not-skipped ()
   (let ((pi-chat (agent-lifecycle-e2e--synthetic "pi" '+agent-acp-session-origin 'pi-project))
@@ -738,7 +803,12 @@
           (let ((id (+agent-acp-state-value buffer '(:session :id))))
             (agent-flow-e2e--send buffer "crash-later")
             (agent-flow-e2e--wait
-             (lambda () (equal (+agent-sessions--state (+agent-session-snapshot buffer)) "dead")) 10)
+             (lambda ()
+               (let ((snapshot (+agent-session-snapshot buffer)))
+                 ;; The OS can report exit before Emacs has dispatched the
+                 ;; sentinel.  Wait for the consumer's exit event as well.
+                 (and (equal (+agent-sessions--state snapshot) "dead")
+                      (plist-get snapshot :last-error)))) 10)
             (let ((snapshot (+agent-session-snapshot buffer)))
               (should (eq (plist-get snapshot :turn-state) 'interrupted))
               (should (plist-get snapshot :last-error))

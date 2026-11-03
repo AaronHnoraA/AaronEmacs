@@ -2,6 +2,7 @@
 // No external requests, credentials, shells, or project mutations.
 import { createInterface } from 'node:readline';
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 const store = process.argv[2];
 const log = `${store}.events`;
 const sessions = existsSync(store) ? JSON.parse(readFileSync(store, 'utf8')) : {};
@@ -20,7 +21,7 @@ createInterface({input:process.stdin}).on('line', line => {
   try {
     const msg=JSON.parse(line);
     appendFileSync(log, JSON.stringify({method:msg.method,id:msg.id,params:msg.params,result:msg.result})+'\n');
-    if (!msg.method) {const cb=pending.get(msg.id);pending.delete(msg.id);cb?.(msg.result);return;}
+    if (!msg.method) {const cb=pending.get(msg.id);pending.delete(msg.id);cb?.(msg.result,msg.error);return;}
     const p=msg.params || {}, sid=p.sessionId;
     switch(msg.method) {
       case 'initialize':reply(msg.id,{protocolVersion:1,agentInfo:{name:'agent-flow-fixture',version:'1'},authMethods:[],agentCapabilities:{loadSession:true,promptCapabilities:{embeddedContext:true}},sessionCapabilities:{list:{},resume:{},fork:{}},...(process.env.AGENT_FLOW_STEERING?{_meta:{steering:{supported:true}}}:{})});break;
@@ -30,7 +31,12 @@ createInterface({input:process.stdin}).on('line', line => {
         if(!sessions[sid])throw new Error('Unknown session');
         for(const turn of sessions[sid].turns) {update(sid,{sessionUpdate:'user_message_chunk',content:{type:'text',text:turn}});text(sid,`Restored: ${turn}\n`);}
         reply(msg.id,session(sid));break;
-      case 'session/list':reply(msg.id,{sessions:Object.entries(sessions).map(([id,s])=>({sessionId:id,cwd:s.cwd,title:s.title??id,updatedAt:new Date().toISOString()}))});break;
+      case 'session/list': {
+        const result={sessions:Object.entries(sessions).map(([id,s])=>({sessionId:id,cwd:s.cwd,title:s.title??id,updatedAt:new Date().toISOString()}))};
+        const delay=Number(process.env.AGENT_FLOW_LIST_DELAY_MS||0);
+        if(delay>0)setTimeout(()=>reply(msg.id,result),delay);else reply(msg.id,result);
+        break;
+      }
       case 'session/fork': {const id=`fixture-${Object.keys(sessions).length+1}`;sessions[id]=structuredClone(sessions[sid]);persist();reply(msg.id,session(id));break;}
       case 'session/set_model':case 'session/set_mode':reply(msg.id);break;
       case '_session/steering': {
@@ -46,6 +52,30 @@ createInterface({input:process.stdin}).on('line', line => {
         active.set(sid,msg.id);
         const prompt=p.prompt.map(x=>x.text||'').join('');
         sessions[sid].turns.push(prompt);persist();
+        if(prompt==='runtime'){
+          text(sid,JSON.stringify({cwd:process.cwd(),hostname:hostname(),executable:process.execPath,marker:process.env.AGENT_REMOTE_MARKER??null})+'\n');
+          finish(sid);break;
+        }
+        if(prompt==='fs-read'){
+          ask('fs/read_text_file',{sessionId:sid,path:`${sessions[sid].cwd}/editor.txt`},(result,error)=>{
+            text(sid,error?`FS_ERROR:${JSON.stringify(error)}\n`:`FS_READ:${result.content}\n`);finish(sid);
+          });break;
+        }
+        if(prompt==='fs-read-range'){
+          ask('fs/read_text_file',{sessionId:sid,path:`${sessions[sid].cwd}/editor.txt`,line:2,limit:1},(result,error)=>{
+            text(sid,error?`FS_ERROR:${JSON.stringify(error)}\n`:`FS_RANGE:${JSON.stringify(result.content)}\n`);finish(sid);
+          });break;
+        }
+        if(prompt==='fs-missing'){
+          ask('fs/read_text_file',{sessionId:sid,path:`${sessions[sid].cwd}/missing.txt`},(_result,error)=>{
+            text(sid,`FS_MISSING_CODE:${error?.code??'none'}\n`);finish(sid);
+          });break;
+        }
+        if(prompt==='fs-write'){
+          ask('fs/write_text_file',{sessionId:sid,path:`${sessions[sid].cwd}/editor.txt`,content:'written by ACP\n'},(_result,error)=>{
+            text(sid,error?`FS_ERROR:${JSON.stringify(error)}\n`:'FS_WRITE_OK\n');finish(sid);
+          });break;
+        }
         if(prompt==='crash'){process.exit(23);break;}
         if(prompt==='hold'){text(sid,'Working; waiting for cancellation.\n');break;}
         if(prompt==='refuse'){text(sid,'Refusing.\n');finish(sid,'refusal');break;}

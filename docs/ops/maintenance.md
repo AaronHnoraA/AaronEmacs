@@ -42,6 +42,32 @@ Portal 由 `package-vc` 锁定版本管理。`elpa/portal` 是加载入口，包
 构建后重启 Emacs 才能载入新的原生模块。Portal 终端与 Noema Portal 页面共用
 `portal-input`；`xwidget-webkit` 只在显式选择该浏览后端时加载。
 
+改动终端的 Remote 适配后运行 `make terminal-remote-test`（已纳入 `make remote-test`）。
+`make remote-url-test` 检查明确来源的 URL 映射、项目资源复用、恢复后的句柄读取及
+失败回滚，也由 `make remote-test` 执行。
+`make remote-byte-check` 在独立库环境编译 Remote 公共库，再以完整初始化环境编译
+`remote/framework/config.el`、`tramp.el` 两个配置入口和 Eshell / ACP / Agent queue、
+config 四个 placement 消费模块；两轮都把告警当成错误，
+产物只写临时目录并清理。
+`TERMINAL_REMOTE_TARGET=local make terminal-remote-live` 检查 comint / Eshell；
+`TERMINAL_REMOTE_TARGET=local make terminal-remote-gui-live` 通过 Portal GUI runner
+检查真实 Ghostty / Web，依赖已有 native build。其中来源 URL 用例在目标启动
+临时 HTTP 服务，再由终端 owner 打开客户端
+Web 视图，核对内容和转发清理。换成已配置 target 可检查同一份
+SSH 用例，`TERMINAL_REMOTE_BACKEND=tramp` 或 `tramp-rpc` 限定 Eshell 的异步进程首选；
+它也限定 URL 用例的 port-forward 首选，filesystem 仍沿用默认首选。PTY 独立选路。
+URL 恢复用例让临时 HTTP 服务脱离测试客户端独立运行，仅终止测试转发，核对自动
+恢复后的文件写入与新响应；GUI runner 额外验证重开页面。服务结束前会核对 UID、
+脚本与临时目录，避免 PID 复用时误杀其他进程。普通 batch 跳过的 GUI 项不算通过。
+`TERMINAL_REMOTE_GUI=1 python3 test/terminal-remote-loopback.py` 使用临时本机 SSH
+服务、独立 key/config 和与已安装 package 同版本的缓存 Darwin RPC server，测试后
+释放；它不覆盖首次 server 部署或物理远端网络。
+加 `TERMINAL_REMOTE_AGENT=1` 会在两条 SSH backend 上追加真实 stdio ACP fixture：
+两个项目同时保持活动回合，终止其中一个项目的转发，核对局部恢复、原有 client /
+进程 / 会话 ID 和 transport epoch 保留，并确认另一个项目仍收到协议响应。
+fixture 不调用模型或读取登录凭据；`AGENT_REMOTE_BACKEND` 在这组用例同时限定
+异步进程与 port-forward，filesystem 保持默认选路。
+
 ## 1. 依赖管理
 
 先记住边界：

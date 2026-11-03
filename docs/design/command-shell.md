@@ -130,6 +130,10 @@ master PDF；失败时打开对应的 Eshell，会话也可手动从 `SPC o s` �
   的目录，首个提示符也显示该目录；忙时不改变目录。本机目录和 `/fs:local:` 目录是
   两种写法，结果一致。测试：`command-shell-c1-buffer-is-per-context`、
   `command-shell-c1-first-prompt-shows-target-directory`、`command-shell-c1-fs-local-parity`。
+  上下文键使用 Remote target ID；同一 target 的逻辑路径、SSH 和 RPC 物理写法
+  不拆成不同会话，backend 或 pipeline 的变化不改变 Eshell buffer 与任务队列。
+  Eshell 模块的 Lisp 加载在客户端 cwd/环境内进行；模块初始化、会话状态和外部
+  命令仍属于目标目录。不因首次加载 `em-unix` 的全局默认值而在目标 PATH 上逐项探测。
 - **C2 结果**：`+eshell-run-sync` 返回命令的退出码和输出，外部程序和 eshell 内建命令
   都适用。测试：`command-shell-c2-sync-returns-status-and-output`。
 - **C3 队列**：`+eshell-run` 返回时命令尚未开始；buffer 忙时，后来的命令排队按顺
@@ -137,6 +141,8 @@ master PDF；失败时打开对应的 Eshell，会话也可手动从 `SPC o s` �
   `command-shell-c3-async-call-returns-before-dispatch`、
   `command-shell-c3-commands-queue-in-order`、
   `command-shell-c3-queued-directory-waits-for-dispatch`。
+  队列为空且没有待恢复输入时，不安排空 dispatch timer。
+  测试：`command-shell-c3-idle-completion-does-not-schedule-empty-dispatch`。
 - **C4 不覆盖用户输入**：提示符上未发送的输入在 API 命令结束后放回原处。测试：
   `command-shell-c4-pending-input-is-restored`。
 - **C5 取消与关闭**：`+eshell-cancel` 和关闭 buffer 都会让所有未完成的回调收到结果，
@@ -144,6 +150,14 @@ master PDF；失败时打开对应的 Eshell，会话也可手动从 `SPC o s` �
   `command-shell-c5-cancel-and-kill-resolve-callbacks`、
   `command-shell-c5-callback-error-does-not-stall-queue`、
   `command-shell-c5-start-error-resolves-and-continues`。
+  Remote 显式断开同样终结该 buffer 的当前和等待命令，回调得到 `:reason disconnected`，
+  状态未知而非成功。保留的 buffer 不自动派发旧队列或重开 target；已挂起的草稿
+  随提示符恢复。API 在保留的已断开 buffer 中拒绝新任务，用户明确输入新命令后
+  才恢复使用；其他 target 的队列不受影响。
+  测试：`terminal-remote-eshell-explicit-disconnect-drains-retained-queue`、
+  `terminal-remote-eshell-disconnect-stops-running-work-and-retains-draft`、
+  `terminal-remote-eshell-disconnect-during-cwd-change-cannot-submit-the-popped-item`；
+  实际 target 验证见 `terminal-remote-live-eshell-explicit-disconnect-retains-draft-and-resolves-queue`。
 - **C6 超时有界**：异步命令超过 `:timeout` 后回调收到 `timeout`，后续队列继续；
   批处理的 `+eshell-run-sync` 超时报错，只取消自己的命令；交互 Emacs 中拒绝同步
   调用。测试：

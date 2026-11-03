@@ -13,6 +13,7 @@
 
 (defvar eshell-last-dir-ring)
 (defvar eshell-buffer-name)
+(defvar eshell-path-env-list)
 
 (declare-function aaron-terminal-cd-command "aaron-funcs" (directory))
 (declare-function aaron-terminal-home-directory "aaron-funcs" (&optional directory))
@@ -100,17 +101,26 @@
                          :foreground 'accent-green-soft))))
 
 (defun +terminal-context-key (&optional directory)
-  "Return a stable local-or-remote context key for DIRECTORY."
+  "Return DIRECTORY's stable target key, independent of its path spelling."
   (when-let* ((directory (aaron-terminal-normalize-directory
                           (or directory default-directory))))
-    (if-let* ((remote-prefix (file-remote-p directory))
-              (_ (not (and (remote-fs-file-name-p directory)
-                           (equal (remote-file-name-target directory) "local")))))
-        (replace-regexp-in-string
-         "[^[:alnum:]@._#-]+"
-         ":"
-         (replace-regexp-in-string "\\`/+\\|:+\\'" "" remote-prefix))
-      "local")))
+    (remote-file-name-target (remote-canonicalize-emacs-file-name directory))))
+
+(defun +eshell-load-modules-on-client-a (original &rest args)
+  "Load Eshell module code on the client, leaving initialization on target.
+Module globals such as `eshell-no-grep-available' probe while loading.  They
+must not start target file sessions or walk a target PATH just to load Lisp."
+  (let ((default-directory temporary-file-directory)
+        (process-environment (remote-client-process-environment))
+        (exec-path (remote-client-exec-path))
+        (eshell-path-env-list nil)
+        (remote-current-adapter-id nil)
+        (remote-current-route nil)
+        (remote-current-workspace nil))
+    (apply original args)))
+
+(with-eval-after-load 'esh-module
+  (advice-add 'eshell-load-modules :around #'+eshell-load-modules-on-client-a))
 
 (defun +terminal-context-buffer-name (base-name &optional directory)
   "Return BASE-NAME specialized for DIRECTORY's local-or-remote context."

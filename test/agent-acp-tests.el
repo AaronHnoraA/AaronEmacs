@@ -6,6 +6,25 @@
 (require 'ert)
 (require 'tools/agent/acp)
 
+(ert-deftest agent-process-c38-inbound-handler-fences-closed-and-replaced-session-state ()
+  (let* ((buffer (generate-new-buffer " *ACP inbound owner*"))
+         (state (list (cons :buffer buffer)))
+         called)
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer (setq-local agent-shell--state state))
+          (with-temp-buffer
+            (+agent-shell-in-session-buffer-a (lambda (&rest _) (push (current-buffer) called)) :state state))
+          (should (equal called (list buffer)))
+          (with-current-buffer buffer (setq-local remote-buffer-disconnected-p t))
+          (+agent-shell-in-session-buffer-a (lambda (&rest _) (ert-fail "Disconnected request executed")) :state state)
+          (with-current-buffer buffer
+            (setq remote-buffer-disconnected-p nil agent-shell--state (copy-tree state)))
+          (+agent-shell-in-session-buffer-a (lambda (&rest _) (ert-fail "Obsolete state request executed")) :state state)
+          (kill-buffer buffer)
+          (+agent-shell-in-session-buffer-a (lambda (&rest _) (ert-fail "Dead owner request executed")) :state state))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
 (ert-deftest +agent-acp-export-model-does-not-change-interactive-preference ()
   (let ((saved (make-hash-table :test #'equal))
         (original '((:identifier . codex))))
@@ -243,7 +262,7 @@
             (let (submitted)
               (cl-letf (((symbol-function 'shell-maker--eval-input-on-buffer-v2)
                          (lambda (&rest args) (setq submitted (plist-get args :input)))))
-                (call-interactively (key-binding (kbd "RET"))))
+                (call-interactively (key-binding (kbd "S-RET"))))
               (should (equal submitted "Please explain the second point.")))
             (shell-maker-finish-output :config shell-maker--config :success t)
             ;; Successful, cancelled and failed ACP replies must all restore

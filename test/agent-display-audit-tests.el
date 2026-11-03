@@ -134,15 +134,18 @@
       (should (eq (window-buffer origin) source)))))
 
 (ert-deftest agent-display-c23-pool-is-canonical-target-scoped-and-excludes-private ()
-  (let ((+agent-session-private-functions (list (lambda (s) (eq (plist-get s :origin) 'private)))))
-    (cl-letf (((symbol-function '+agent-acp-sessions)
-               (lambda (&rest _)
-                 '((:name "a" :target "one" :root "/project/")
-                   (:name "b" :target "two" :root "/project/")
-                   (:name "private" :target "one" :root "/project/" :origin private)))))
-      (should (= 1 (length (+agent-pool-sessions "/project/" "one"))))
-      (should (equal (plist-get (car (+agent-pool-sessions "/project/" "two")) :name) "b"))
-      (should (= 2 (length (+agent-pool-sessions))))))
+  (let* ((a (agent-display-audit--agent "a" "/fs:one:/project/"))
+         (b (agent-display-audit--agent "b" "/fs:two:/project/"))
+         (private (agent-display-audit--agent "private" "/fs:one:/project/" 'private))
+         (+agent-session-private-functions (list (lambda (s) (eq (plist-get s :origin) 'private)))))
+    (unwind-protect
+        (cl-letf (((symbol-function 'remote-client-file-name) (lambda (&rest _) nil)))
+          (should (= 1 (length (+agent-pool-sessions "/fs:one:/project/" "one"))))
+          (should (eq (plist-get (car (+agent-pool-sessions "/fs:two:/project/" "two")) :buffer) b))
+          (should (= 2 (cl-count-if
+                        (lambda (row) (memq (plist-get row :buffer) (list a b private)))
+                        (+agent-pool-sessions)))))
+      (mapc #'kill-buffer (list a b private))))
   (should (equal (+agent-pool-key '(:target "local" :root "/project/"))
                  (+agent-pool-key '(:root "/fs:local:/project/")))))
 

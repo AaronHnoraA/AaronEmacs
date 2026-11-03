@@ -1028,7 +1028,9 @@ Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，
 - `SPC o x`
   `aaron-open-xwidget-url`
 - `SPC o P`
-  `+portal/terminal`，在当前窗口打开原生 Ghostty 终端（本地 macOS GUI）
+  `+portal/terminal`，在当前窗口打开原生 Ghostty 视图，shell 属于当前 target
+  和目录（客户端需 macOS GUI）。在终端用 `M-x +portal/open-terminal-url` 打开
+  它输出的 localhost 网页，远端服务经所属项目的转发进入客户端 Portal Web。
 
 普通 Portal 终端在窗口顶部有独立的终端标签组；全局工作区栏不占用顶行。
 终端标签不混入普通文件标签或 popup 标签。
@@ -1832,7 +1834,7 @@ TTY 使用共享表格；`M-x +agent/sessions-table` 可显式打开诊断列表
 标题、数量、状态色与空状态，保留原来的快捷键。
 
 聊天输入区 `RET` 换行，`S-RET` 发送（生成中 steer），`M-RET` 发送（生成中排队）。
-`M-V`（Cmd-Shift-V）把剪贴板图片存进项目的 `.agent-shell/screenshots/` 并插入输入；普通粘贴遇到图片也会这样做。
+`M-V`（Cmd-Shift-V）把剪贴板图片存进项目的 `.agent-shell/screenshots/` 并插入输入；普通粘贴遇到图片也会这样做。剪贴板和截图取自本机，项目在远端时由 Remote 复制附件到目标目录。
 聊天里 `Esc` 回到 Evil normal 状态，可用 `j`／`k`、`gg`／`G`、`/` 等 Vim 移动，`i`／`a` 回到输入；
 再按一次 `Esc` 才关闭弹出的聊天窗口。Treemacs（`SPC c i`）按聊天的工作目录找项目。
 输入上方提示 `S-RET`／`M-RET` 当前会发送、steer 还是排队；有队列时附上数量、

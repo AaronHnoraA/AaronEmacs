@@ -2425,7 +2425,7 @@ its new watcher, kills that watcher and leaves the watch failed."
       (unless was-installed
         (remote-channel-uninstall-compatibility)))))
 
-(ert-deftest remote-forward-unexpected-exit-reports-transport-failure ()
+(ert-deftest remote-forward-local-handle-loss-does-not-report-transport-failure ()
   (remote-framework-test-with-registry
     (let* ((context
             (remote-context-create
@@ -2448,13 +2448,54 @@ its new watcher, kills that watcher and leaves the watch failed."
             (accept-process-output nil 0.01)
             (should (eq (remote-forward-state forward) 'failed))
             (should (eq (remote-channel-state channel) 'failed))
-            (should (eq (car reported)
-                        (remote-channel-route channel)))
-            (should
-             (eq (car (cadr reported))
-                 'remote-transport-error))
+            (should-not reported)
+            (should (eq (plist-get (remote-channel-metadata channel) :failure-scope) 'resource))
             (should-not (remote-channel-list "local")))
         (remote-close-channel forward)))))
+
+(ert-deftest remote-forward-process-error-exit-still-reports-transport-failure ()
+  (remote-framework-test-with-registry
+    (let* ((context (remote-context-create :target-id "local" :localname "/tmp/"))
+           (route (remote-resolve "network" 'port-forward context))
+           (process (make-process :name "forward-error-fixture" :command '("/bin/sh" "-c" "exit 255")
+                                  :noquery t :connection-type 'pipe))
+           (forward (remote-forward-create :handle process :state 'open :route route))
+           reported channel)
+      (unwind-protect
+          (cl-letf (((symbol-function 'remote-report-route-failure)
+                     (lambda (actual error) (setq reported (list actual error)) 'transport)))
+            (setq channel (remote-channel--adopt 'port-forward route context forward))
+            (let ((deadline (+ (float-time) 3)))
+              (while (and (not reported) (< (float-time) deadline))
+                (accept-process-output nil 0.01)))
+            (should (equal (process-exit-status process) 255))
+            (should (eq (remote-forward-state forward) 'failed))
+            (should (eq (remote-channel-state channel) 'failed))
+            (should (eq (car reported) route))
+            (should (eq (car (cadr reported)) 'remote-transport-error)))
+        (when channel (remote-close-channel forward))
+        (when (process-live-p process) (delete-process process))))))
+
+(ert-deftest remote-forward-clean-process-exit-does-not-report-transport-failure ()
+  (remote-framework-test-with-registry
+    (let* ((context (remote-context-create :target-id "local" :localname "/tmp/"))
+           (route (remote-resolve "network" 'port-forward context))
+           (process (make-process :name "forward-clean-fixture" :command '("/bin/sh" "-c" "exit 0")
+                                  :noquery t :connection-type 'pipe))
+           (forward (remote-forward-create :handle process :state 'open :route route))
+           channel)
+      (unwind-protect
+          (cl-letf (((symbol-function 'remote-report-route-failure)
+                     (lambda (&rest _) (ert-fail "Clean local exit invalidated the pipeline"))))
+            (setq channel (remote-channel--adopt 'port-forward route context forward))
+            (let ((deadline (+ (float-time) 3)))
+              (while (and (process-live-p process) (< (float-time) deadline))
+                (accept-process-output nil 0.01)))
+            (should (equal (process-exit-status process) 0))
+            (should (eq (remote-forward-state forward) 'failed))
+            (should (eq (plist-get (remote-channel-metadata channel) :failure-scope) 'resource)))
+        (when channel (remote-close-channel forward))
+        (when (process-live-p process) (delete-process process))))))
 
 (ert-deftest remote-forward-recovery-keeps-allocated-local-port ()
   (remote-framework-test-with-registry

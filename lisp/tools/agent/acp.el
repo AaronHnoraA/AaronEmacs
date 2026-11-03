@@ -37,7 +37,12 @@ query disk/network while the shared registry renders.")
 (defvar +agent-session-operation-functions nil "Predicates receiving OPERATION and BUFFER; non-nil reports a domain capability.")
 (defvar +agent-session-action-functions nil "Functions receiving OPERATION, BUFFER and arguments; non-nil handles it.")
 (defvar +agent-session-attention-functions nil "Queries receiving BUFFER and returning its domain attention reason.")
-(defvar +agent-session-private-functions nil "Predicates receiving a snapshot; non-nil excludes it from ordinary context selection.")
+(defvar +agent-session-private-functions nil
+  "Snapshot predicates; non-nil excludes a session from ordinary selection.")
+(defvar +agent-session-private-buffer-functions nil
+  "Read-only predicates receiving BUFFER; non-nil makes its session private.
+Use registered buffer facts only, without disk or network queries.  Prefer
+this hook when a full snapshot is unnecessary for the privacy decision.")
 (defvar +agent-acp-previewing nil "Non-nil while a reversible session preview is active.")
 (defvar +buffer-end-function)
 (defvar +buffer-hide-function)
@@ -60,9 +65,10 @@ query disk/network while the shared registry renders.")
 
 (declare-function magent-start "magent-agent-shell" ())
 (declare-function remote-client-file-name "remote" (file &optional context))
+(declare-function remote-resolve-emacs-file-name "remote-fs" (file-name &optional directory))
 (declare-function remote-prefetch-ancestor-markers "remote-fs" (directory))
-(declare-function agent-shell-insert "agent-shell" (&key text submit no-focus shell-buffer))
-(declare-function shell-maker-finish-output "shell-maker" (&key config success on-output))
+(declare-function agent-shell-insert "agent-shell" (&rest args))
+(declare-function shell-maker-finish-output "shell-maker" (&rest args))
 (declare-function evil-define-minor-mode-key "evil-core" (state mode key def &rest bindings))
 (declare-function evil-insert-state "evil-states" (&optional arg))
 ;; Session registry commands for the Agent window live in `tools/agent/sessions',
@@ -278,6 +284,85 @@ This is a control request, not a model prompt. The adapter owns pagination."
          :on-failure (lambda (error-object _raw)
                        (when (and (buffer-live-p buffer) (eq state (+agent-acp--state buffer)))
                          (funcall callback nil error-object))))))))
+
+(defvar-local +agent-acp--title-query nil
+  "The one in-flight title query for this physical session, or nil.")
+
+(defun +agent-acp--title-query-live-p (query)
+  "Whether QUERY still names the current buffer's live execution context."
+  (let ((state (plist-get query :state))
+        (client (plist-get query :client))
+        (process (plist-get query :process)))
+    (and (eq state agent-shell--state)
+         (eq client (map-elt state :client))
+         (eq process (map-elt client :process))
+         (processp process) (process-live-p process)
+         (not (bound-and-true-p remote-buffer-disconnected-p))
+         (equal (plist-get query :session-id) (map-nested-elt state '(:session :id)))
+         (equal (plist-get query :directory) default-directory))))
+
+(defun +agent-acp--finish-title-query (buffer query response)
+  "Apply title RESPONSE only to BUFFER's current QUERY, then release it."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when (eq query +agent-acp--title-query)
+        (let ((current (+agent-acp--title-query-live-p query))
+              (dirty (plist-get query :dirty)))
+          (setq +agent-acp--title-query nil)
+          (when (and current response (not dirty)
+                     ;; A notification or a new prompt may have supplied a
+                     ;; newer title while this read was crossing the link.
+                     (equal (plist-get query :title)
+                            (map-nested-elt agent-shell--state '(:session :title))))
+            (when-let* ((row (seq-find
+                             (lambda (row)
+                               (equal (map-elt row 'sessionId)
+                                      (plist-get query :session-id)))
+                             (append (map-elt response 'sessions) nil))))
+              (agent-shell--set-session-title (map-elt row 'title))))
+          ;; A newer turn needs a fresh answer, but duplicate events for
+          ;; the same turn never queue another read or create a timer.
+          (when (and current dirty (+agent-acp--title-query-live-p query))
+            (+agent-acp--refresh-session-title-a #'ignore)))))))
+
+(defun +agent-acp--refresh-session-title-a (_original &optional _event)
+  "Coalesce native title refreshes without starting or resurrecting a client.
+Keep upstream's one-page fallback for providers without title notifications."
+  (let* ((state agent-shell--state)
+         (client (map-elt state :client))
+         (process (map-elt client :process))
+         (id (map-nested-elt state '(:session :id)))
+         (turn (map-elt state :request-count)))
+    (when (and (map-elt state :supports-session-list) id
+               (processp process) (process-live-p process)
+               (not (bound-and-true-p remote-buffer-disconnected-p)))
+      (if (and +agent-acp--title-query
+               (+agent-acp--title-query-live-p +agent-acp--title-query))
+          (unless (equal turn (plist-get +agent-acp--title-query :turn))
+            (setf (plist-get +agent-acp--title-query :dirty) t))
+        (let* ((buffer (current-buffer))
+               (query (list :state state :client client :process process
+                            :session-id id :directory default-directory
+                            :turn turn :title (map-nested-elt state '(:session :title))
+                            :dirty nil)))
+          (setq +agent-acp--title-query query)
+          (condition-case err
+              (acp-send-request
+               :client client
+               :request (acp-make-session-list-request
+                         :cwd (agent-shell--resolve-path default-directory))
+               :buffer buffer
+               :on-success (lambda (response)
+                             (+agent-acp--finish-title-query buffer query response))
+               :on-failure (lambda (_error _raw)
+                             (+agent-acp--finish-title-query buffer query nil)))
+            (error
+             (when (eq query +agent-acp--title-query)
+               (setq +agent-acp--title-query nil))
+             (signal (car err) (cdr err)))))))))
+
+(advice-add 'agent-shell--refresh-session-title :around
+            #'+agent-acp--refresh-session-title-a)
 
 (defun +agent-acp--context-field (item key &optional default)
   "Read KEY from a frozen Noema context ITEM."
@@ -566,7 +651,7 @@ Right-click a tab for its actions;
 
 (defun +agent-acp--sync-shell-buffer-name (buffer)
   "Keep shell-maker's native input/output target attached to BUFFER.
-The shared registry gives sessions stable display names.  Shell-maker resolves its
+The registry gives sessions stable display names.  Shell-maker resolves its
 process through this buffer-local name, so it must follow every rename."
   (with-current-buffer buffer
     (setq-local shell-maker--buffer-name-override (buffer-name))))
@@ -581,12 +666,12 @@ process through this buffer-local name, so it must follow every rename."
 
 (defun +agent-acp--workspace-root (root)
   "Normalize ROOT with Remote's client projection when available."
-  (let ((root (file-name-as-directory (expand-file-name (or root default-directory)))))
+  (let ((root (or root default-directory)))
     (if (and (fboundp 'remote-canonicalize-emacs-file-name)
              (fboundp 'remote-client-file-name))
         (let ((logical (remote-canonicalize-emacs-file-name root)))
-          (or (remote-client-file-name logical) logical))
-      root)))
+          (file-name-as-directory (or (remote-client-file-name logical) logical)))
+      (file-name-as-directory (expand-file-name root)))))
 
 (defun +agent-acp--tab-key (buffer)
   "Return agent BUFFER's stable tab key: named, then retired."
@@ -630,29 +715,29 @@ Pi's managed roles are independent of the provider used by ordinary agents."
                            :target (and (fboundp 'remote-file-name-target)
                                         (remote-file-name-target default-directory))))))
 
-(defun +agent-acp--tab-sessions (&optional root)
+(defun +agent-acp--tab-buffers (&optional root)
   "Query the current chat's management domain, including retired generations."
   (let* ((kind (+agent-session-kind (current-buffer)))
          (main (eq +agent-acp-session-origin 'pi-emacs))
-         (sessions (+agent-pool-sessions (or root +agent-acp-session-root) nil kind)))
-    (if (eq kind 'agent) sessions
-      (seq-filter (lambda (session) (eq main (eq (plist-get session :origin) 'pi-emacs))) sessions))))
+         (buffers (+agent-pool-buffers (or root +agent-acp-session-root) nil kind)))
+    (if (eq kind 'agent) buffers
+      (seq-filter (lambda (buffer)
+                    (eq main (eq (buffer-local-value '+agent-acp-session-origin buffer) 'pi-emacs)))
+                  buffers))))
 
 (defun +agent-acp--project-buffers (&optional root)
   "Return the current management domain's user-facing tabs in order."
-  (let ((sessions (+agent-acp--tab-sessions root)))
-    (sort
-     (mapcar (lambda (session) (plist-get session :buffer))
-             (seq-filter (lambda (session)
-                           (let ((buffer (plist-get session :buffer)))
-                             (or (not (+agent-acp-retired-p buffer))
-                                 (+agent-acp-busy-p buffer)
-                                 (> (+agent-acp-pending-prompt-count buffer) 0)
-                                 (+agent-acp--unsent-input-p buffer)))) sessions))
-     (lambda (left right)
-       (let ((left (+agent-acp--tab-key left)) (right (+agent-acp--tab-key right)))
-         (if (= (car left) (car right)) (string-lessp (cdr left) (cdr right))
-           (< (car left) (car right))))))))
+  (sort
+   (seq-filter (lambda (buffer)
+                 (or (not (+agent-acp-retired-p buffer))
+                     (+agent-acp-busy-p buffer)
+                     (> (+agent-acp-pending-prompt-count buffer) 0)
+                     (+agent-acp--unsent-input-p buffer)))
+               (+agent-acp--tab-buffers root))
+   (lambda (left right)
+     (let ((left (+agent-acp--tab-key left)) (right (+agent-acp--tab-key right)))
+       (if (= (car left) (car right)) (string-lessp (cdr left) (cdr right))
+         (< (car left) (car right)))))))
 
 (defun +agent-acp--tab-label (buffer)
   "Return the tab label of agent BUFFER."
@@ -906,7 +991,8 @@ Unknown requests remain protected; pending RPCs still exclude auto-retention."
 
 (defun +agent-acp-request-active-p (buffer)
   "Whether protocol requests or a domain execution still own BUFFER."
-  (when (+agent-acp-agent-buffer-p buffer)
+  (when (and (+agent-acp-agent-buffer-p buffer)
+             (not (buffer-local-value 'remote-buffer-disconnected-p buffer)))
     (or (and (not (+agent-acp-client-exited-p buffer))
              (let ((state (+agent-acp--state buffer)))
                (or (+agent-acp--working-requests-p state)
@@ -917,6 +1003,7 @@ Unknown requests remain protected; pending RPCs still exclude auto-retention."
 (defun +agent-acp-busy-p (buffer)
   "Return non-nil while agent BUFFER answers a prompt or serves a Noema Run."
   (and (+agent-acp-agent-buffer-p buffer)
+       (not (buffer-local-value 'remote-buffer-disconnected-p buffer))
        (or (and (buffer-local-value 'shell-maker--busy buffer)
                 (not (+agent-acp-client-exited-p buffer)))
            (+agent-acp-request-active-p buffer))))
@@ -1153,7 +1240,7 @@ is not on screen, and cleared when the buffer is shown.")
 Consumers should defer filesystem work outside the event callback.")
 (defvar +agent-acp-client-ended-functions nil
   "Functions called with BUFFER when its physical client ends, including shutdown.
-Release owned callbacks/timers here; native conversation and view identity remain.")
+Release owned callbacks/timers here; keep conversation and view identity.")
 (defvar-local +agent-acp--reported-turn nil)
 
 (defun +agent-acp--report-turn-complete (buffer event)
@@ -1203,6 +1290,7 @@ Emacs host uses this to apply shared notification policy outside Noema.")
 (defun +agent-acp--note-attention (buffer reason)
   "Record that BUFFER's agent needs the person for REASON."
   (when (and (buffer-live-p buffer)
+             (not (buffer-local-value 'remote-buffer-disconnected-p buffer))
              (not (memq (buffer-local-value '+agent-acp-session-origin buffer)
                         (cons 'probe +agent-acp-ephemeral-origins)))
              (not (run-hook-with-args-until-success
@@ -1290,9 +1378,9 @@ A tool call is reported many times; only a finished one changed anything."
   (setq +agent-acp--turn-started-at nil
         +agent-acp--stop-reason reason
         +agent-acp--counted-changes nil)
-  (unless (member reason '("end_turn" ""))
+  (when (or remote-buffer-disconnected-p (not (member reason '("end_turn" ""))))
     (+agent-acp--hold-queue))
-  (unless (member reason '("end_turn" "cancelled" ""))
+  (unless (or remote-buffer-disconnected-p (member reason '("end_turn" "cancelled" "")))
     (setq-local +agent-acp-last-error (format "Turn ended: %s" reason))))
 
 (defun +agent-acp--subscribe-attention (buffer)
@@ -1311,7 +1399,8 @@ A tool call is reported many times; only a finished one changed anything."
     (+agent-acp-subscribe
      :buffer buffer :event 'error
      :callback (lambda (event)
-                 (when (buffer-live-p buffer)
+                 (when (and (buffer-live-p buffer)
+                            (not (buffer-local-value 'remote-buffer-disconnected-p buffer)))
                    (with-current-buffer buffer
                      (setq +agent-acp-last-error (or (map-elt event :data) t)
                            +agent-acp--turn-started-at nil)
@@ -1456,8 +1545,8 @@ context size and, from claude-agent-acp, rate-limit metadata."
   "Return what agent BUFFER's ACP connection reported about its usage.
 A plist with :model, :model-id, :context-used, :context-size, :context-peak,
 :compactions, :input, :output, :thought, :cached-read, :cached-write, :total,
-:cost, :currency, :turns and :report-seq. Counts are non-negative integers, zero when
-never reported; :cost is nil until the agent reports one.
+:cost, :currency, :turns and :report-seq. Counts are non-negative integers,
+zero when never reported; :cost is nil until the agent reports one.
 
 agent-shell already records these from `usage_update' notifications and
 PromptResponse usage, so this only reads that state: no process scan, no
@@ -1705,8 +1794,7 @@ The package's own cleanup still owns the physical client and protocol."
 (defun +agent-acp--close-where (buffer predicate)
   "Close the tabs of BUFFER's project whose buffer satisfies PREDICATE."
   (dolist (other (with-current-buffer buffer
-                  (mapcar (lambda (session) (plist-get session :buffer))
-                          (+agent-acp--tab-sessions +agent-acp-session-root))))
+                  (+agent-acp--tab-buffers +agent-acp-session-root)))
     (when (and (funcall predicate other)
                (+agent-acp-confirm-stop other "close"))
       (+agent-acp-kill other))))
@@ -1841,7 +1929,7 @@ renders.  Return non-nil when a prompt was written now."
        "Agent window
 
 Each tab is one live agent session of this project.  The buffer is the real
-agent-shell: type at its prompt and press RET to send, also during a turn.
+agent-shell: type at its prompt and press S-RET to send, also during a turn.
 
 M-x agent-shell\topen a new session in this window
   with C-u C-u\tpick a session, a new one or a saved conversation
@@ -2017,7 +2105,11 @@ to nil to leave such buffers exactly as upstream created them."
 
 (defun +agent-acp-project-root (&optional directory)
   "Query the registered project scope of DIRECTORY, without creating one."
-  (let ((directory (file-name-as-directory (expand-file-name (or directory default-directory)))))
+  (let ((directory
+         (file-name-as-directory
+          (if (fboundp 'remote-resolve-emacs-file-name)
+              (remote-resolve-emacs-file-name (or directory default-directory))
+            (expand-file-name (or directory default-directory))))))
     (+agent-acp--workspace-root
      (or (run-hook-with-args-until-success '+agent-project-root-functions directory)
          (and (fboundp 'projectile-project-root) (ignore-errors (projectile-project-root directory)))
@@ -2093,19 +2185,63 @@ the runtime does not start a document host or create a business project."
                       (+agent-session-snapshot buffer)))
                   (buffer-list)))))
 
+(defun +agent-acp--pool-candidates (&optional root target kind)
+  "Read ROOT's physical pool members before applying privacy predicates.
+KIND defaults to agent; pi queries managed Pi roles, all includes both.
+TARGET defaults to the invoking execution context.  Nil ROOT includes all
+projects; an explicit TARGET still limits them.  With neither ROOT nor TARGET,
+include all targets.  Query the physical registry without snapshots."
+  (let* ((target (or target (and root (fboundp 'remote-file-name-target)
+                                (remote-file-name-target default-directory))))
+         (key (and root (+agent-pool-key (list :root root :target target))))
+         buffers)
+    (dolist (buffer (buffer-list) (nreverse buffers))
+      ;; Identity is cheap and comes from the physical registry.  Do not
+      ;; build another project's prompt/usage/request snapshot just to
+      ;; discover that its target or project root differs from this pool.
+      (when (and (+agent-acp-agent-buffer-p buffer)
+                 (or (eq kind 'all)
+                     (eq (or kind 'agent) (+agent-session-kind buffer)))
+                 (or (not target)
+                     (equal target
+                            (or (and (fboundp 'remote-file-name-target)
+                                     (remote-file-name-target
+                                      (remote-canonicalize-emacs-file-name
+                                       (buffer-local-value 'default-directory buffer))))
+                                "local")))
+                 (or (not key)
+                     (equal key (+agent-acp--buffer-pool-key buffer))))
+        (push buffer buffers)))))
+
+(defun +agent-session-private-p (session)
+  "Whether SESSION, a physical buffer or full snapshot, is private.
+Buffer predicates run first.  Legacy predicates always receive a full
+snapshot, built only when SESSION is a buffer and that hook is configured."
+  (let ((buffer (if (bufferp session) session (plist-get session :buffer))))
+    (or (and (buffer-live-p buffer)
+             (run-hook-with-args-until-success '+agent-session-private-buffer-functions buffer))
+        (and +agent-session-private-functions
+             (run-hook-with-args-until-success
+              '+agent-session-private-functions
+              (if (bufferp session) (+agent-session-snapshot session) session))))))
+
+(defun +agent-pool-buffers (&optional root target kind)
+  "Read ROOT's public pool buffers without constructing display snapshots.
+Scope and privacy match `+agent-pool-sessions'.  Legacy snapshot privacy
+predicates still receive full candidate snapshots when configured."
+  (seq-remove #'+agent-session-private-p (+agent-acp--pool-candidates root target kind)))
+
 (defun +agent-pool-sessions (&optional root target kind)
   "Read ROOT's public execution pool, or every execution pool when ROOT is nil.
 KIND defaults to agent; pi queries managed Pi roles, all includes both.
-TARGET defaults to the invoking execution context.  This queries one registry."
-  (let* ((target (or target (and (fboundp 'remote-file-name-target)
-                                (remote-file-name-target default-directory))))
-         (key (and root (+agent-pool-key (list :root root :target target)))))
-    (seq-filter
-     (lambda (session)
-       (and (or (not key) (equal key (+agent-pool-key session)))
-            (or (eq kind 'all) (eq (or kind 'agent) (+agent-session-kind session)))
-            (not (run-hook-with-args-until-success '+agent-session-private-functions session))))
-     (+agent-acp-sessions))))
+With ROOT, TARGET defaults to the invoking execution context.  Without ROOT,
+an explicit TARGET limits all projects; nil includes all targets.
+This queries one registry."
+  (let (sessions)
+    (dolist (buffer (+agent-acp--pool-candidates root target kind) (nreverse sessions))
+      (when-let* ((session (+agent-session-snapshot buffer)))
+        (unless (+agent-session-private-p session)
+          (push session sessions))))))
 
 (defun +agent-acp--last-prompt ()
   "Return the first line of the current buffer's latest submitted prompt."
@@ -2121,7 +2257,7 @@ TARGET defaults to the invoking execution context.  This queries one registry."
       (let* ((state (+agent-acp--state buffer))
              (process (map-nested-elt state '(:client :process)))
              (directory default-directory)
-             (live (not (+agent-acp-client-exited-p buffer)))
+             (live (and (not remote-buffer-disconnected-p) (not (+agent-acp-client-exited-p buffer))))
              (permission (+agent-acp--permission-request state))
              (elicitation (+agent-acp--pending-elicitation state))
              (attention (or (run-hook-with-args-until-success '+agent-session-attention-functions buffer)
@@ -2137,7 +2273,8 @@ TARGET defaults to the invoking execution context.  This queries one registry."
                              (remote-canonicalize-emacs-file-name directory) directory)
               :native-session-id (map-nested-elt state '(:session :id))
               :session-id (run-hook-with-args-until-success '+agent-session-id-functions buffer)
-              :process-state (cond ((and (not process) (map-nested-elt state '(:session :id))) 'disconnected)
+              :process-state (cond (remote-buffer-disconnected-p 'disconnected)
+                                   ((and (not process) (map-nested-elt state '(:session :id))) 'disconnected)
                                    ((not process) 'starting)
                                    ((and (processp process) (process-live-p process)) 'live)
                                    (t 'dead))
@@ -2248,6 +2385,7 @@ command, because upstream returns the buffer before its caller can name it."
 (defun +agent-acp--retention-origin-p (buffer)
   "Whether BUFFER's origin permits automatic warm retention."
   (and (buffer-live-p buffer)
+       (not (buffer-local-value 'remote-buffer-disconnected-p buffer))
        (let ((origin (buffer-local-value '+agent-acp-session-origin buffer)))
          (and (not (memq origin '(pi pi-emacs pi-project)))
               (memq origin +agent-acp-auto-stop-origins)))))
@@ -2262,8 +2400,7 @@ LIMIT and IDLE-SECONDS default to the shared settings.  No history is removed."
       (when (and (+agent-acp-agent-buffer-p buffer)
                  (not (eq (buffer-local-value '+agent-acp-session-origin buffer) 'pi))
                  (+agent-acp-resumable-p buffer) (+agent-acp-auto-stoppable-p buffer))
-        (let ((snapshot (+agent-session-snapshot buffer)))
-          (push buffer (gethash (list (plist-get snapshot :target) (plist-get snapshot :root)) groups)))))
+        (push buffer (gethash (+agent-acp--buffer-pool-key buffer) groups))))
     (maphash
      (lambda (_group buffers)
        (let ((ordered (sort buffers (lambda (a b)
@@ -2587,6 +2724,7 @@ visible-only render policy.  Neither setting affects ACP transport or events."
           existing)
       (let ((buffer
              (agent-shell--start :config config :no-focus t :new-session t
+                                 :cwd directory
                                  :session-strategy 'new :session-id session-id
                                  :fork-session-id fork-session-id)))
         (with-current-buffer buffer
@@ -2637,6 +2775,7 @@ visible-only render policy.  Neither setting affects ACP transport or events."
   "Mark ORIGINAL's process exit as deliberate.
 `delete-process' can run the sentinel before upstream forgets the client."
   (let ((+agent-acp--shutting-down t) (buffer (current-buffer)))
+    (setq +agent-acp--title-query nil)
     (unwind-protect (apply original args)
       (when (buffer-live-p buffer)
         (run-hook-with-args '+agent-acp-client-ended-functions buffer)
@@ -2651,28 +2790,33 @@ ready until the next prompt fails.  See C38."
              (not (process-live-p process))
              (+agent-acp-agent-buffer-p buffer)
              (eq state (+agent-acp--state buffer))
-             (eq process (map-nested-elt state '(:client :process)))
-             (not (and (boundp 'remote-buffer-disconnected-p)
-                       (buffer-local-value 'remote-buffer-disconnected-p buffer))))
+             (eq process (map-nested-elt state '(:client :process))))
     (with-current-buffer buffer
-      (setq-local +agent-acp-last-error
-                  (format "Agent process ended: %s" (string-trim (or event "")))
-                  +agent-acp--exit-interrupted interrupted
-                  +agent-acp--turn-started-at nil)
+      (unless remote-buffer-disconnected-p
+        (setq-local +agent-acp-last-error
+                    (format "Agent process ended: %s" (string-trim (or event "")))
+                    +agent-acp--exit-interrupted interrupted
+                    +agent-acp--turn-started-at nil))
       (+agent-acp--clear-stop)
       (+agent-acp--hold-queue)
       (run-hook-with-args '+agent-acp-client-ended-functions buffer)
-      (condition-case nil
-          (agent-shell--update-fragment
-           :state state :block-id "client-exited"
-           :label-left "Agent process ended"
-           :body (concat (if interrupted
-                             "A turn was running, so its result is unknown and it will not be replayed. "
-                           "")
-                         "Submit input or use C-c C-r to reconnect this conversation.")
-           :create-new t :navigation 'never
-           :above-last-prompt (not (shell-maker-busy)))
-        (error nil))
+      (if remote-buffer-disconnected-p
+          (progn
+            ;; A final response may have rearmed these after the disconnect
+            ;; hook ran, before the transport delivered its exit sentinel.
+            (agent-shell--cancel-idle-timer)
+            (agent-shell-heartbeat-stop :heartbeat (map-elt state :heartbeat)))
+        (condition-case nil
+            (agent-shell--update-fragment
+             :state state :block-id "client-exited"
+             :label-left "Agent process ended"
+             :body (concat (if interrupted
+                               "A turn was running, so its result is unknown and it will not be replayed. "
+                             "")
+                           "Submit input or use C-c C-r to reconnect this conversation.")
+             :create-new t :navigation 'never
+             :above-last-prompt (not (shell-maker-busy)))
+          (error nil)))
       (+agent-acp--changed))
     (+agent-acp--note-attention buffer 'failed)))
 
@@ -2701,9 +2845,25 @@ acp.el starts it at the first request, so every session event checks."
 (defvar-local +agent-acp--lifecycle-state nil)
 (defvar-local +agent-acp--lifecycle-subscription nil)
 
+(defun +agent-acp--disconnect-h ()
+  "Fence pending work before Remote closes this buffer's client."
+  (setq +agent-acp--exit-interrupted
+        (or +agent-acp--exit-interrupted
+            (and (or shell-maker--busy (+agent-acp--working-requests-p agent-shell--state)) t))
+        +agent-acp--turn-started-at nil
+        +agent-acp--title-query nil)
+  (+agent-acp--clear-stop)
+  (+agent-acp--hold-queue)
+  (agent-shell--cancel-idle-timer)
+  (agent-shell-heartbeat-stop :heartbeat (map-elt agent-shell--state :heartbeat))
+  (+agent-acp--sync-warm-sweep nil (current-buffer))
+  (+agent-acp--changed))
+
 (defun +agent-acp--watch-lifecycle-h ()
   "Keep one state-scoped lifecycle subscription, including after a reload."
+  (add-hook 'remote-buffer-disconnect-hook #'+agent-acp--disconnect-h nil t)
   (unless (eq +agent-acp--lifecycle-state agent-shell--state)
+    (setq +agent-acp--title-query nil)
     (when (and +agent-acp--lifecycle-state +agent-acp--lifecycle-subscription)
       (setf (map-elt +agent-acp--lifecycle-state :event-subscriptions)
             (seq-remove
@@ -2797,6 +2957,7 @@ different answer has already settled the native ACP request (C15)."
                 (lambda (option)
                   (when (and request
                              (+agent-acp-agent-buffer-p buffer)
+                             (not (buffer-local-value 'remote-buffer-disconnected-p buffer))
                              (eq state (buffer-local-value 'agent-shell--state buffer))
                              (eq client (map-elt state :client))
                              (seq-some
@@ -2815,7 +2976,8 @@ different answer has already settled the native ACP request (C15)."
                        (funcall responder
                                 (+agent-acp--fence-permission-response
                                  buffer (+agent-acp--state buffer) permission)))))
-    (when (and settle-pending (functionp responder) (not (+agent-acp-client-exited-p buffer)))
+    (when (and settle-pending (not remote-buffer-disconnected-p)
+               (functionp responder) (not (+agent-acp-client-exited-p buffer)))
       (let* ((state (+agent-acp--state buffer)) (client (map-elt state :client))
              (calls (copy-sequence (map-pairs (map-elt state :tool-calls)))))
         (dolist (pair calls)
@@ -2826,6 +2988,7 @@ different answer has already settled the native ACP request (C15)."
                            (cons :respond
                                  (lambda (option)
                                    (when (and (buffer-live-p buffer)
+                                              (not (buffer-local-value 'remote-buffer-disconnected-p buffer))
                                               (eq state (+agent-acp--state buffer))
                                               (eq client (map-elt state :client))
                                               (equal request (map-nested-elt state (list :tool-calls tool-call-id :permission-request-id))))
@@ -2911,6 +3074,8 @@ second, concurrent prompt into the same session."
 PROCESS-QUEUE continues native pending prompts after a normal completed turn.
 Research callers retain their explicit queue policy by leaving it nil."
   (with-current-buffer buffer
+    (when remote-buffer-disconnected-p
+      (user-error "Remote target is disconnected; reconnect this agent session before sending"))
     (+agent-acp--clear-stop)
     (+agent-acp--turn-began)
     (setq-local +agent-acp-last-error nil)
@@ -2972,8 +3137,9 @@ Research callers retain their explicit queue policy by leaving it nil."
                                 (eq receipt (buffer-local-value '+agent-acp--prompt-receipt buffer)))
                        (with-current-buffer buffer
                          (+agent-acp--clear-stop)
-                         (setq +agent-acp--turn-started-at nil
-                               +agent-acp-last-error (or error "ACP request failed"))
+                         (setq +agent-acp--turn-started-at nil)
+                         (unless remote-buffer-disconnected-p
+                           (setq +agent-acp-last-error (or error "ACP request failed")))
                          (+agent-acp--hold-queue)))
                      (unwind-protect
                          (when on-failure (funcall on-failure error raw))

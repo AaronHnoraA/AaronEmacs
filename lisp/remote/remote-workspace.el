@@ -494,12 +494,27 @@ scoped `/fs:' handler."
         (remote-terminal-mark-disconnected
          (remote-workspace-resource-value resource) reason)))))
 
+(defun remote-workspace--resource-recovery-key (workspace resource)
+  "Return the background recovery key for owned RESOURCE."
+  (list 'workspace-resource (remote-workspace-id workspace) (remote-workspace-resource-id resource)))
+
+(defun remote-workspace-resource-recovering-p (workspace resource)
+  "Whether RESOURCE has a pending recovery job owned by WORKSPACE."
+  (when-let* ((job (gethash (remote-workspace--resource-recovery-key workspace resource) remote-background-jobs)))
+    (memq (remote-background-job-state job) '(waiting running))))
+
+(defun remote-workspace--owns-resource-p (workspace resource)
+  "Whether WORKSPACE still owns RESOURCE while recovery may be yielding."
+  (and (eq workspace (gethash (remote-workspace-key workspace) remote-workspaces))
+       (not (memq (remote-workspace-state workspace) '(closing closed)))
+       (memq resource (remote-workspace-resources workspace))))
+
 (defun remote-workspace-recover-resource (workspace resource)
   "Recover one automatic RESOURCE owned by WORKSPACE."
   (when (and
          (eq (remote-workspace-resource-recovery-policy resource) 'auto)
          (remote-workspace-resource-recovery-function resource))
-    (let ((old (remote-workspace-resource-value resource)))
+    (let ((old (remote-workspace-resource-value resource)) value produced)
       (condition-case error
           (let ((_closed
                  (when (and (remote-workspace-resource-close-function resource)
@@ -508,10 +523,18 @@ scoped `/fs:' handler."
                    (funcall
                     (remote-workspace-resource-close-function resource)
                     old 'transport-recovery)))
-                (value
-                 (funcall
-                  (remote-workspace-resource-recovery-function resource)
-                  resource workspace)))
+                (_opened
+                 (setq value (funcall (remote-workspace-resource-recovery-function resource) resource workspace)
+                       produced t)))
+            (remote-background-assert-current-epoch)
+            (unless (and (remote-workspace--owns-resource-p workspace resource)
+                         (or (eq old (remote-workspace-resource-value resource))
+                             (eq value (remote-workspace-resource-value resource)))
+                         (or (null remote-background--current-job)
+                             (eq remote-background--current-job
+                                 (gethash (remote-background-job-key remote-background--current-job)
+                                          remote-background-jobs))))
+              (signal 'remote-connection-cancelled '("Resource owner changed during recovery")))
             (setf (remote-workspace-resource-value resource) value
                   (remote-workspace-resource-state resource) 'open
                   (remote-workspace-resource-error resource) nil
@@ -525,18 +548,69 @@ scoped `/fs:' handler."
                 (delq old
                       (remote-workspace-services workspace)))))
             value)
-        (error
-         (setf (remote-workspace-resource-state resource) 'failed
-               (remote-workspace-resource-error resource) error
-               (remote-workspace-resource-attempts resource)
-               (1+ (remote-workspace-resource-attempts resource)))
+        ((error quit)
+         (when (and produced (remote-workspace-resource-close-function resource)
+                    (not (and (remote-workspace--owns-resource-p workspace resource)
+                              (eq value (remote-workspace-resource-value resource)))))
+           (condition-case nil
+               (funcall (remote-workspace-resource-close-function resource) value 'stale-recovery)
+             (error nil)))
+         (when (and (remote-workspace--owns-resource-p workspace resource)
+                    (eq old (remote-workspace-resource-value resource)))
+           (setf (remote-workspace-resource-state resource) 'failed
+                 (remote-workspace-resource-error resource) error
+                 (remote-workspace-resource-attempts resource)
+                 (1+ (remote-workspace-resource-attempts resource))))
          (remote-log
           'workspace-resource-recovery-error
           :workspace (remote-workspace-id workspace)
           :resource (remote-workspace-resource-id resource)
           :kind (remote-workspace-resource-kind resource)
           :error (error-message-string error))
+         (when (eq (car error) 'quit) (signal (car error) (cdr error)))
          nil)))))
+
+(defun remote-workspace-handle-channel-failure (channel error)
+  "Recover CHANNEL's owned resource without invalidating a shared pipeline."
+  (catch 'owned
+    (maphash
+     (lambda (_ workspace)
+       (dolist (resource (remote-workspace-resources workspace))
+         (let* ((value (remote-workspace-resource-value resource))
+                (handles (if (remote-channel-group-p value)
+                             (mapcar #'cdr (remote-channel-group-channels value)) (list value))))
+           (when (and (remote-workspace--owns-resource-p workspace resource)
+                      (seq-some (lambda (handle) (or (eq handle (remote-channel-handle channel))
+                                                     (eq (remote-channel-of handle) channel))) handles))
+             (unless (remote-workspace-resource-recovering-p workspace resource)
+               (setf (remote-workspace-resource-state resource) 'failed
+                     (remote-workspace-resource-error resource) error)
+               (when (and remote-workspace-auto-reconnect
+                          (eq (remote-workspace-resource-recovery-policy resource) 'auto)
+                          (remote-workspace-resource-recovery-function resource))
+                 (remote-background-submit
+                  (remote-workspace--resource-recovery-key workspace resource)
+                  (lambda ()
+                    (cond
+                     ((not (remote-workspace--owns-resource-p workspace resource)) nil)
+                     ((not (eq value (remote-workspace-resource-value resource)))
+                      (remote-workspace-resource-value resource))
+                     ((not (remote-workspace-live-p workspace))
+                      (signal 'remote-connection-busy '("Workspace transport recovery is pending")))
+                     (t
+                      (setf (remote-workspace-resource-state resource) 'recovering)
+                      (let ((replacement (remote-workspace-recover-resource workspace resource)))
+                        (when (eq (remote-workspace-resource-state resource) 'failed)
+                          (let ((failure (remote-workspace-resource-error resource)))
+                            (when (eq (plist-get (remote-backend-classify-error
+                                                 (remote-channel-route channel) failure 'channel-recovery) :scope)
+                                      'transport)
+                              (remote-report-route-failure (remote-channel-route channel) failure))
+                            (signal (car failure) (cdr failure))))
+                        replacement))))
+                  :target-id (remote-workspace-target-id workspace) :owner-buffer nil :non-essential nil)))
+             (throw 'owned t)))))
+     remote-workspaces)))
 
 (defun remote-workspace-close-resource (workspace resource &optional reason)
   "Close RESOURCE owned by WORKSPACE."
@@ -556,6 +630,7 @@ scoped `/fs:' handler."
           (and resource
                (remote-workspace-resource-value resource))))
     (when resource
+      (remote-background-cancel (remote-workspace--resource-recovery-key workspace resource) reason)
       (setf (remote-workspace-resources workspace)
             (delq resource
                   (remote-workspace-resources workspace)))
@@ -712,6 +787,7 @@ intentional shutdown instead of reporting a second transport failure."
                (remote-workspace-resource-recovery-function resource)
                (not (eq (remote-workspace-resource-state resource)
                         'disconnected)))
+      (remote-background-cancel (remote-workspace--resource-recovery-key workspace resource) 'workspace-reconnect)
       (when-let* ((close (remote-workspace-resource-close-function resource)))
         (funcall close (remote-workspace-resource-value resource)
                  'workspace-reconnect))
@@ -729,7 +805,11 @@ route has no explicit connection timeout."
   (dolist (route (remote-workspace-routes workspace))
     (remote-session-invalidate route t 'workspace-reconnect)
     (remote-background-acknowledge-own-invalidation)
-    (remote-workspace--assert-current workspace)
+    (remote-workspace--assert-current workspace))
+  ;; Attachments on one pipeline share transport cleanup.  Finish every
+  ;; old attachment's invalidation before opening a new generation, or a
+  ;; later backend's cleanup can cancel the session just opened for a peer.
+  (dolist (route (remote-workspace-routes workspace))
     (let* ((pipeline (remote-route-pipeline route))
            (configured-timeout
             (and pipeline

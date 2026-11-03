@@ -339,7 +339,7 @@ direction."
    :program-form 'search
    :describe
    (lambda ()
-     '(:kind native :session-owner emacs :file-operation-cost batched
+     '(:kind native :session-owner emacs :network-location client :file-operation-cost batched
        :file-watch-cost push :mtime-compare exact
        :process-write-cost direct))))
 

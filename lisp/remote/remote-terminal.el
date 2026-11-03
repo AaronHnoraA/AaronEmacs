@@ -147,7 +147,7 @@ session.  A shell that is not known is started by the target itself through
               (remote-workspace-open workspace
                                      :adapter "process"
                                      :capability 'pty
-                                     :load-environment t)))
+                                     :load-environment nil)))
          (profile (remote-terminal--profile workspace profile))
          (shell (remote-terminal--shell workspace profile probe))
          (arguments
@@ -155,6 +155,92 @@ session.  A shell that is not known is started by the target itself through
     (if shell
         (cons shell arguments)
       (append remote-terminal--target-shell-command arguments))))
+
+(cl-defun remote-terminal-prepare-client-launch
+    (&optional workspace &key command directory environment profile client-environment-script)
+  "Prepare a client-native PTY launch for WORKSPACE without spawning it.
+COMMAND is a target argv or shell string; nil selects the terminal profile.
+The returned plist holds :command (client argv), :workspace, :route and the
+logical :directory.  It contains the invocation environment; do not log it.
+CLIENT-ENVIRONMENT-SCRIPT is trusted frontend POSIX code run by the native
+host before clearing its environment.  It may append NAME=VALUE entries to
+the initially empty positional arguments, for host-generated UI variables.
+Explicit plan environment entries take precedence over those defaults.
+Backends must provide a client-executable process plan without an around-start
+callback.  The native frontend later registers through `remote-terminal-adopt'."
+  (let* ((remote-environment-inhibit t)
+         (workspace (or (remote-get-workspace workspace)
+                        (remote-workspace-open workspace :adapter "process"
+                                               :capability 'pty :load-environment nil)))
+         (context (remote-workspace-context workspace))
+         (directory (if directory (remote-resolve-emacs-file-name directory)
+                      (remote-workspace-root workspace)))
+         (profile (remote-terminal--profile workspace profile)))
+    (unless (equal (remote-file-name-target directory) (remote-workspace-target-id workspace))
+      (user-error "Terminal directory belongs to another target: %s" directory))
+    (setq command (cond ((null command) (remote-terminal-command workspace profile))
+                        ((stringp command)
+                         (append (remote-terminal-command workspace profile) (list "-c" command)))
+                        (t command)))
+    (unless (and (consp command)
+                 (seq-every-p (lambda (value) (and (stringp value) (not (string-search "\0" value))))
+                              command))
+      (user-error "Terminal command must contain strings without NUL"))
+    (let ((environment (append (when-let* ((capsule (remote-workspace-environment workspace)))
+                                 (remote-environment-vars capsule))
+                               (remote-terminal-profile-environment profile) environment)))
+      (remote--call-with-process-route
+       "process" 'pty context nil
+       (lambda (route physical-directory resolved-environment)
+         (let* ((overrides (remote--merge-environment-overrides resolved-environment environment))
+                (process-environment (remote--apply-environment (remote-client-process-environment) overrides))
+                (exec-path (remote--exec-path-for-environment overrides (remote-client-exec-path)))
+                (execution (remote--prepare-backend-execution
+                            route context command overrides physical-directory directory))
+                (plan (remote-backend-prepare-process
+                       route execution (list :command (remote-backend-execution-command execution)
+                                             :connection-type 'pty) overrides))
+                (client-directory (remote-client-file-name
+                                   (remote-canonicalize-emacs-file-name
+                                    (remote-backend-process-plan-default-directory plan))))
+                (client-environment (or (remote-backend-process-plan-process-environment plan)
+                                        process-environment))
+                (client-command (copy-sequence
+                                 (plist-get (remote-backend-process-plan-arguments plan) :command)))
+                (seen (make-hash-table :test #'equal)) assignments)
+           (unless (and client-directory (not (remote-backend-process-plan-around-start plan)))
+             (signal 'remote-backend-unsupported
+                     (list "Backend has no client-native PTY launch plan" (remote-route-backend-id route))))
+           (unless (file-name-directory (car client-command))
+             (let* ((default-directory client-directory)
+                    (process-environment client-environment)
+                    (exec-path (or (remote-backend-process-plan-exec-path plan) exec-path))
+                    (program (executable-find (car client-command))))
+               (unless program
+                 (signal 'file-missing (list "Client PTY program is unavailable" (car client-command))))
+               (setcar client-command program)))
+           ;; A native host may have started before Emacs acquired its current
+           ;; environment.  Make the complete client process plan explicit,
+           ;; retaining make-process's first-entry precedence for duplicates.
+           (dolist (entry client-environment)
+             (let* ((separator (string-search "=" entry))
+                    (name (if separator (substring entry 0 separator) entry)))
+               (unless (gethash name seen)
+                 (puthash name t seen)
+                 (when separator (push entry assignments)))))
+           (let* ((arguments (append (nreverse assignments)
+                                     (list "/bin/sh" "-c" "cd -- \"$1\" && shift && exec \"$@\""
+                                           "remote-terminal" client-directory)
+                                     client-command))
+                  (argv (if client-environment-script
+                            (list "/bin/sh" "-c"
+                                  (concat "set --; " client-environment-script
+                                          "; exec /usr/bin/env -i \"$@\" "
+                                          (mapconcat #'shell-quote-argument arguments " "))
+                                  "remote-terminal-client-environment")
+                          (append (list "/usr/bin/env" "-i") arguments))))
+             (list :workspace workspace :route route :directory (file-name-as-directory directory)
+                   :client-directory client-directory :command argv))))))))
 
 (defun remote-terminal--detach (terminal)
   "Detach TERMINAL from registries and its owning workspace."
@@ -225,7 +311,36 @@ removed with its process."
       (when (and (processp process)
                  (process-live-p process))
         (delete-process process))
+      (remote-terminal--close-frontend terminal)
       (remote-terminal--detach terminal))))
+
+(defun remote-terminal-live-p (terminal)
+  "Whether TERMINAL has a live process or native frontend handle."
+  (and (remote-terminal-p terminal)
+       (eq (remote-terminal-state terminal) 'open)
+       (buffer-live-p (remote-terminal-buffer terminal))
+       (if-let* ((function (plist-get (remote-terminal-metadata terminal) :live-function)))
+           (with-current-buffer (remote-terminal-buffer terminal) (funcall function terminal))
+         (let ((process (remote-terminal-process terminal)))
+           (and (processp process) (process-live-p process))))))
+
+(defun remote-terminal--close-frontend (terminal)
+  "Release TERMINAL's optional native handle exactly once."
+  (when-let* ((function (plist-get (remote-terminal-metadata terminal) :close-function)))
+    (remote-terminal-put-metadata terminal :close-function nil)
+    (condition-case error-data
+        (when (buffer-live-p (remote-terminal-buffer terminal))
+          (with-current-buffer (remote-terminal-buffer terminal) (funcall function terminal)))
+      (error (remote-log 'terminal-close-function-error
+                         :terminal (remote-terminal-id terminal)
+                         :error (error-message-string error-data))))))
+
+(defun remote-terminal-frontend-exited (terminal &optional status)
+  "Report native TERMINAL's exit STATUS; nil means its result is unknown."
+  (when (and (remote-terminal-p terminal) (eq (remote-terminal-state terminal) 'open))
+    (if (and (integerp status) (zerop status))
+        (remote-terminal--process-finished terminal nil)
+      (remote-terminal-mark-disconnected terminal (list 'frontend-exit status)))))
 
 (cl-defun remote-terminal-adopt
     (workspace buffer
@@ -236,7 +351,11 @@ METADATA can record the frontend and consumer.  The frontend keeps its native
 mode, process filter, and sentinel behavior while the framework owns process,
 buffer, and workspace teardown.
 
-Two METADATA entries are part of the contract.  `:disconnect-function' is
+For a frontend without an Emacs process, METADATA supplies `:live-function'
+and optionally `:send-function' and `:close-function'.  Each receives the
+terminal in BUFFER; send also receives its string.  Close is called once.
+`:route' registers a native frontend's prepared route with the workspace.
+`:disconnect-function' is
 called with the terminal and the reason, in BUFFER, once when the terminal
 loses its transport and before the frontend's sentinel sees the process end;
 a frontend that removes its buffer on exit uses it to keep the buffer instead.
@@ -278,11 +397,11 @@ a frontend that removes its buffer on exit uses it to keep the buffer instead.
            :state 'open
            :opened-at (current-time)
            :metadata metadata)))
-    (unless (and (processp process) (process-live-p process))
+    (unless (remote-terminal-live-p terminal)
       (error "Terminal frontend has no live process: %S" buffer))
     ;; The workspace owns teardown.  Killing a terminal buffer must not leave
     ;; Emacs waiting on the generic live-process query before our hook runs.
-    (set-process-query-on-exit-flag process nil)
+    (when (processp process) (set-process-query-on-exit-flag process nil))
     (when-let* ((existing
                  (buffer-local-value 'remote-terminal-instance buffer)))
       (if (and (remote-terminal-p existing)
@@ -294,36 +413,33 @@ a frontend that removes its buffer on exit uses it to keep the buffer instead.
                (buffer-name buffer)
                (and (remote-terminal-p existing)
                     (remote-terminal-workspace-id existing)))))
-    (let ((frontend-sentinel (process-sentinel process)))
-      (set-process-sentinel
-       process
-       (lambda (finished event)
-         (let ((ended (memq (process-status finished)
-                            '(exit signal failed closed))))
-           ;; Decide before the frontend runs: its sentinel may remove the
-           ;; buffer, and a lost terminal has to keep it.
-           (when (and ended
-                      (remote-terminal--lost-process-p terminal finished))
-             (remote-terminal-mark-disconnected
-              terminal
-              (list 'process-exit (process-exit-status finished))))
-           (unwind-protect
-               (when frontend-sentinel
-                 (funcall frontend-sentinel finished event))
-             (when ended
-               (remote-terminal--process-finished terminal finished)))))))
+    (when (processp process)
+      (let ((frontend-sentinel (process-sentinel process)))
+        (set-process-sentinel
+         process
+         (lambda (finished event)
+           (let ((ended (memq (process-status finished) '(exit signal failed closed))))
+             ;; Decide before the frontend runs: its sentinel may remove the
+             ;; buffer, and a lost terminal has to keep it.
+             (when (and ended (remote-terminal--lost-process-p terminal finished))
+               (remote-terminal-mark-disconnected
+                terminal (list 'process-exit (process-exit-status finished))))
+             (unwind-protect
+                 (when frontend-sentinel (funcall frontend-sentinel finished event))
+               (when ended (remote-terminal--process-finished terminal finished))))))))
     (with-current-buffer buffer
       (setq-local remote-terminal-instance terminal)
       (add-hook 'kill-buffer-hook
                 #'remote-terminal--buffer-killed nil t))
-    (process-put process 'remote-terminal terminal)
+    (when (processp process) (process-put process 'remote-terminal terminal))
     (puthash id terminal remote-terminals)
     (remote-workspace-register-resource
      workspace 'terminal terminal
      (lambda (value _reason)
        (remote-terminal-close value))
      metadata)
-    (when-let* ((route (process-get process 'remote-route)))
+    (when-let* ((route (or (and (processp process) (process-get process 'remote-route))
+                          (plist-get metadata :route))))
       (remote-workspace-track-live-route workspace route))
     terminal))
 
@@ -376,26 +492,35 @@ Marking a terminal that is already disconnected only updates REASON."
 
 (cl-defun remote-terminal-open
     (&optional workspace
-               &key name profile shell arguments environment display)
+               &key name profile shell (arguments nil arguments-supplied-p)
+               environment directory display)
   "Open a routed terminal for WORKSPACE.
 PROFILE supplies shell, arguments, and environment defaults.  SHELL,
-ARGUMENTS, and ENVIRONMENT override the profile.  With DISPLAY, show the
-terminal buffer."
-  (let* ((workspace
+ARGUMENTS, and ENVIRONMENT override the profile.  DIRECTORY selects a logical
+cwd on the workspace target; it defaults to the workspace root and survives
+restart.  With DISPLAY, show the terminal buffer."
+  (let* ((remote-environment-inhibit t)
+         (workspace
          (or (remote-get-workspace workspace)
               (remote-workspace-open workspace
                                      :adapter "process"
                                      :capability 'pty
-                                     :load-environment t)))
-         (_environment
-          (or (remote-workspace-environment workspace)
-              (remote-workspace-refresh-environment workspace)))
+                                     :load-environment nil)))
+         (directory
+          (if directory (remote-resolve-emacs-file-name directory)
+            (remote-workspace-root workspace)))
+         (_target
+          (unless (equal (remote-file-name-target directory)
+                         (remote-workspace-target-id workspace))
+            (user-error "Terminal directory belongs to another target: %s" directory)))
          (profile (remote-terminal--profile workspace profile))
          (command (remote-terminal-command workspace profile))
          (shell (or shell (car command)))
-         (arguments (or arguments (cdr command)))
+         (arguments (if arguments-supplied-p arguments (cdr command)))
          (environment
           (append
+           (when-let* ((capsule (remote-workspace-environment workspace)))
+             (remote-environment-vars capsule))
            (remote-terminal-profile-environment profile)
            environment))
          (name
@@ -411,7 +536,7 @@ terminal buffer."
         (progn
           (with-current-buffer buffer
             (setq default-directory
-                  (remote-workspace-root workspace))
+                  (file-name-as-directory directory))
             (comint-mode)
             (setq process
                   (remote-make-process
@@ -426,6 +551,7 @@ terminal buffer."
                    :remote-process-class 'interactive
                    :remote-context
                    (remote-workspace-context workspace)
+                   :remote-directory directory
                    :remote-environment environment
                    :sentinel #'internal-default-process-sentinel)))
           (setq terminal
@@ -444,6 +570,7 @@ terminal buffer."
                    :shell shell
                    :arguments arguments
                    :environment environment
+                   :directory directory
                    :display display))))
           (when display
             (pop-to-buffer buffer))
@@ -512,11 +639,13 @@ exists, so a restart that fails can be repeated."
 
 (defun remote-terminal-send-string (terminal string)
   "Send STRING to TERMINAL."
-  (let ((process (remote-terminal-process terminal)))
-    (unless (and (processp process)
-                 (process-live-p process))
+  (let ((process (remote-terminal-process terminal))
+        (function (plist-get (remote-terminal-metadata terminal) :send-function)))
+    (unless (remote-terminal-live-p terminal)
       (error "Remote terminal is not live: %S" terminal))
-    (process-send-string process string)))
+    (if function
+        (with-current-buffer (remote-terminal-buffer terminal) (funcall function terminal string))
+      (process-send-string process string))))
 
 (defun remote-terminal-close (terminal)
   "Close TERMINAL and its buffer."
@@ -527,6 +656,7 @@ exists, so a restart that fails can be repeated."
       (when (and (processp process)
                  (process-live-p process))
         (delete-process process))
+      (remote-terminal--close-frontend terminal)
       (setf (remote-terminal-state terminal) 'closed)
       (remote-terminal--detach terminal)
       (when (buffer-live-p buffer)

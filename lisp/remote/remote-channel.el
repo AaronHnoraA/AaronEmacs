@@ -27,6 +27,20 @@
                   "remote-workspace" (workspace kind key))
 (declare-function remote-workspace-forget-resource
                   "remote-workspace" (workspace resource))
+(declare-function remote-workspace-open "remote-workspace" (&optional context &rest keys))
+(declare-function remote-workspace-for-path "remote-workspace" (path))
+(declare-function remote-workspace-live-p "remote-workspace" (workspace))
+(declare-function remote-workspace-id "remote-workspace" (workspace))
+(declare-function remote-workspace-context "remote-workspace" (workspace))
+(declare-function remote-workspace-target-id "remote-workspace" (workspace))
+(declare-function remote-workspace-close-resource "remote-workspace" (workspace resource &optional reason))
+(declare-function remote-workspace-resource-live-p "remote-workspace" (workspace resource))
+(declare-function remote-workspace-track-live-route "remote-workspace" (workspace route))
+(declare-function remote-workspace-handle-channel-failure "remote-workspace" (channel error))
+(declare-function remote-workspace-resource-recovering-p "remote-workspace" (workspace resource))
+(declare-function url-generic-parse-url "url-parse" (url))
+(declare-function url-host "url-parse" (url))
+(declare-function url-port "url-parse" (url))
 
 (cl-defstruct (remote-channel
                (:constructor remote-channel-create))
@@ -179,7 +193,8 @@ owned recoverable resource as well."
           (and recover
                (lambda (_resource _owner)
                  (funcall recover)))
-          :metadata metadata)))
+          :metadata metadata)
+         (remote-workspace-track-live-route owner route)))
      channel)))
 
 (defun remote-channel-of (value)
@@ -364,15 +379,28 @@ process uses the original `process-contact' implementation unchanged."
     (setq remote-channel--process-contact-advice-installed nil)))
 
 (defun remote-channel--report-transport-failure (channel)
-  "Feed failed transport-backed CHANNEL into route recovery."
+  "Recover a local CHANNEL handle, or escalate an actual transport exit."
   (when-let* ((route (remote-channel-route channel)))
-    (remote-report-route-failure
-     route
-     (list
-      'remote-transport-error
-      (format "Channel %s (%s) terminated"
-              (remote-channel-id channel)
-              (remote-channel-kind channel))))))
+    (let* ((handle (remote-channel-handle channel))
+           (process (and (remote-forward-p handle) (remote-forward-handle handle)))
+           (local (and (processp process)
+                       (or (memq (process-status process) '(signal closed))
+                           (and (eq (process-status process) 'exit)
+                                (zerop (process-exit-status process)))))))
+      (if local
+          (let ((error (list 'error (format "Channel %s (%s) handle terminated"
+                                             (remote-channel-id channel) (remote-channel-kind channel)))))
+            (setf (remote-channel-metadata channel)
+                  (plist-put (remote-channel-metadata channel) :failure-scope 'resource))
+            (unless (and (fboundp 'remote-workspace-handle-channel-failure)
+                         (remote-workspace-handle-channel-failure channel error))
+              (remote-log 'channel-resource-failure :channel (remote-channel-id channel)
+                          :target (remote-route-target-id route) :owned nil)))
+        (remote-report-route-failure
+         route
+         (list 'remote-transport-error
+               (format "Channel %s (%s) terminated"
+                       (remote-channel-id channel) (remote-channel-kind channel))))))))
 
 (defun remote-channel--strip-keys (plist keys)
   "Return PLIST without KEYS."
@@ -581,7 +609,8 @@ PARAMETERS also accepts `:remote-context', `:remote-adapter', and
             :context context :adapter adapter :pipeline pipeline
             :metadata metadata :register nil
             :stable-endpoint stable-endpoint))
-         :metadata metadata)))
+         :metadata metadata)
+        (remote-workspace-track-live-route owner route)))
     forward))
 
 (cl-defun remote-port-forward
@@ -608,6 +637,105 @@ port.  Use `remote-channel-endpoint' to obtain the allocated target port."
    :context context :adapter adapter :pipeline pipeline
    :metadata metadata :workspace workspace :register register
    :stable-endpoint stable-endpoint))
+
+(defun remote-channel--ipv6-loopback-p (host)
+  "Whether literal HOST spells IPv6 loopback, without DNS or socket calls."
+  (when (and (string-match-p "\\`[0:]*1\\'" host)
+             (not (string-search ":::" host)))
+    (let ((groups (split-string host ":" t))
+          (compression (string-search "::" host)))
+      (and (cl-every (lambda (part) (<= (length part) 4)) groups)
+           (if compression
+               (and (< (length groups) 8) (not (string-search "::" host (+ compression 2))))
+             (= (length groups) 8))))))
+
+(defun remote-channel--url-endpoint (url)
+  "Read URL's loopback endpoint and exact spelling, without resolving DNS.
+Return (PREFIX USERINFO SUFFIX ENDPOINT), or nil for other URL destinations."
+  (unless (and (stringp url) (not (string-match-p "[\0-\37\177]" url)))
+    (user-error "URL must be a string without control characters"))
+  (let ((case-fold-search t))
+    (when (string-match "\\`\\(https?://\\)\\([^/?#]*\\)\\(.*\\)\\'" url)
+      (let ((prefix (match-string 1 url))
+            (authority (match-string 2 url))
+            (suffix (match-string 3 url)))
+        (unless (string-match
+                 "\\`\\(.*@\\)?\\(\\[[[:xdigit:]:.]+\\]\\|[^:@]+\\)\\(?::[0-9]+\\)?\\'" authority)
+          (user-error "Invalid HTTP URL authority"))
+        (let ((userinfo (or (match-string 1 authority) "")))
+          (remote-require-on-client 'url-parse)
+          (let* ((parsed (url-generic-parse-url url))
+                 (host (downcase (or (url-host parsed) "")))
+                 (host (if (string-prefix-p "[" host) (substring host 1 -1) host))
+                 (port (url-port parsed)))
+            (unless (and (integerp port) (<= 1 port 65535))
+              (user-error "URL port must be 1..65535"))
+            (when (or (member host '("localhost" "localhost." "0.0.0.0" "::"))
+                      (remote-channel--ipv6-loopback-p host)
+                      (and (string-match-p "\\`127\\.[0-9]+\\.[0-9]+\\.[0-9]+\\'" host)
+                           (cl-every (lambda (part) (<= (string-to-number part) 255))
+                                     (split-string host "\\."))))
+              (list prefix userinfo suffix
+                    (list :host (pcase host ("0.0.0.0" "127.0.0.1") ("::" "::1") (_ host))
+                          :port port)))))))))
+
+(cl-defun remote-url-for-client
+    (url &key workspace context (adapter "network") pipeline)
+  "Resolve source URL for a client browser, retaining its exact path and query.
+Loopback HTTP(S) URLs require an explicit WORKSPACE or CONTEXT.  Client network
+placement is a no-op; other placements share a workspace-owned forward per
+endpoint and route intent.  Other URLs are unchanged.  Callers must resolve
+again instead of caching an address across channel close or recovery."
+  (let ((parts (remote-channel--url-endpoint url)))
+    (unless parts (cl-return-from remote-url-for-client url))
+    (unless (or workspace context)
+      (user-error "URL mapping requires an explicit source workspace or context"))
+    (remote-require-on-client 'remote-workspace)
+    (let* ((owner (and workspace (or (remote-get-workspace workspace)
+                                     (user-error "URL source workspace is unavailable"))))
+           (source (remote-channel--context (or context (remote-workspace-context owner))))
+           (owner (or owner (remote-workspace-for-path (remote-context-workspace-root source))))
+           (endpoint (nth 3 parts))
+           (key (list 'external-url (plist-get endpoint :host) (plist-get endpoint :port) adapter pipeline))
+           resource group)
+      (when owner
+        (unless (and (remote-workspace-live-p owner)
+                     (eq owner (remote-get-workspace (remote-workspace-id owner))))
+          (user-error "URL source workspace is closed or disconnected"))
+        (unless (equal (remote-workspace-target-id owner) (remote-context-target-id source))
+          (user-error "URL source context belongs to another workspace target"))
+        (setq resource (remote-workspace-find-resource owner 'channel-group key)
+              group (and resource (remote-workspace-resource-value resource)))
+        (when (and resource (remote-workspace-resource-recovering-p owner resource))
+          (signal 'remote-connection-busy '("URL channel is being recovered"))))
+      (unless (and resource (remote-workspace-resource-live-p owner resource)
+                   group (remote-channel-group-live-p group))
+        (let ((route (remote-channel--route adapter 'port-forward source pipeline)))
+          (when (eq (plist-get (remote-backend-describe (remote-route-backend route)) :network-location) 'client)
+            (cl-return-from remote-url-for-client url)))
+        (setq owner (or owner (remote-workspace-open source :connect nil :load-environment nil)))
+        (when resource (remote-workspace-close-resource owner resource 'external-url-reopen))
+        (setq group (remote-channel-group-open
+                     (list (cons 'http endpoint)) :context source :workspace owner :key key
+                     :local-endpoints '((http . (:host "127.0.0.1" :port 0)))
+                     :adapter adapter :pipeline pipeline)))
+      (condition-case error-data
+          (let* ((local (alist-get 'http (remote-channel-group-endpoints group 'local)))
+                 (host (plist-get local :host))
+                 (port (plist-get local :port)))
+            (unless (and (remote-workspace-live-p owner)
+                         (eq owner (remote-get-workspace (remote-workspace-id owner))))
+              (user-error "URL source workspace closed while opening its forward"))
+            (unless (and (stringp host) (integerp port) (<= 1 port 65535))
+              (error "URL forward has no usable client endpoint"))
+            (concat (nth 0 parts) (nth 1 parts)
+                    (if (string-match-p ":" host) (concat "[" host "]") host)
+                    ":" (number-to-string port) (nth 2 parts)))
+        ((error quit)
+         (when-let* ((registered (remote-workspace-find-resource owner 'channel-group key)))
+           (remote-workspace-close-resource owner registered 'external-url-failed))
+         (remote-channel-group-close group)
+         (signal (car error-data) (cdr error-data)))))))
 
 (cl-defun remote-channel-group-open
     (endpoints &key local-endpoints context (adapter "network") pipeline
@@ -640,6 +768,10 @@ generation and returns a replacement group."
                   (remote-context-target-id context)
                   (cl-incf remote-channel-group--counter)))
          opened group)
+    (when (and register workspace
+               (when-let* ((existing (remote-workspace-find-resource workspace 'channel-group key)))
+                 (remote-workspace-resource-recovering-p workspace existing)))
+      (signal 'remote-connection-busy '("Channel group is being recovered")))
     (condition-case error
         (progn
           (dolist (entry endpoints)
@@ -689,16 +821,29 @@ generation and returns a replacement group."
                         :register nil
                         :generation
                         (1+ (remote-channel-group-generation old)))))
-                 (when-let* ((callback
-                              (plist-get metadata :on-recovered)))
-                   (funcall callback old replacement))
-                 replacement))
+                 (condition-case failure
+                     (progn
+                       (when-let* ((callback (plist-get metadata :on-recovered)))
+                         (funcall callback old replacement))
+                       replacement)
+                   ((error quit)
+                    (remote-channel-group-close replacement)
+                    (signal (car failure) (cdr failure))))))
              :metadata
              (append
               (list :key key :names (mapcar #'car endpoints))
               metadata)))
+          ;; Recovery belongs to the route actually used by each member.
+          ;; A workspace created without a terminal/process has no other
+          ;; route to match a channel failure against.  Recovery also opens
+          ;; with REGISTER nil and must record a changed backend route.
+          (when workspace
+            (dolist (entry opened)
+              (when-let* ((channel (remote-channel-of (cdr entry)))
+                          (route (remote-channel-route channel)))
+                (remote-workspace-track-live-route workspace route))))
           group)
-      (error
+      ((error quit)
        (when group
          (when (and workspace
                     (fboundp 'remote-workspace-find-resource)

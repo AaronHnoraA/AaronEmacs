@@ -35,8 +35,12 @@
 (declare-function remote-project-file-name "remote-core"
                   (file-name &optional route-or-link capability adapter-id))
 (declare-function remote-target-id "remote-core" (target))
+(declare-function magit-toplevel@+tramp-memoize "remote/framework/tramp" (fn &optional directory))
+(declare-function project-current@+tramp-memoize "remote/framework/tramp" (fn &optional maybe-prompt directory))
+(declare-function vc-git-root@+tramp-memoize "remote/framework/tramp" (fn file))
 (defvar remote-targets)
 (defvar remote-config-after-load-hook)
+(defvar magit-tramp-pipe-stty-settings)
 
 (config-defvar remote-client-ssh-program
   (and (eq system-type 'darwin)
@@ -271,7 +275,7 @@ non-login shell startup."
 
   ;; SSH ControlMaster: multiplex all sessions over one TCP connection.
   ;; This is the single biggest speedup for remote file access.
-  (setq tramp-use-ssh-controlmaster-options +tramp-use-ssh-controlmaster)
+  (setq tramp-use-connection-share +tramp-use-ssh-controlmaster)
 
   ;; Keep backups in the Emacs client's normal backup directory.  A non-nil
   ;; `tramp-backup-directory-alist' deliberately prepends the remote prefix to
@@ -527,7 +531,7 @@ DIRECTORY, and a lookup that finds nothing still has to prompt."
   "Call ORIG-FN for OPERATION, dispatching through file handlers when safe.
 Unlike the upstream tramp-rpc advice, this only treats the first arg as a path
 when it is actually a string, avoiding `stringp' errors for calls such as
-`(projectile-get-ext-command 'git)'."
+`projectile-get-ext-command' with a symbol argument."
   (let* ((path-arg (car args))
          (handler-path (cond
                         ((and (stringp path-arg)

@@ -77,6 +77,144 @@
 ;;   paths     ACP carries target-native paths.  The resolver below maps
 ;;             Emacs names to them and back into the session's target.
 
+(require 'remote-process)
+
+(remote-register-adapter
+ "agent-shell"
+ :capabilities '(process-sync process-async)
+ :preferences '((default . ("native" "tramp-rpc" "tramp")))
+ :placement 'target
+ :process-class 'interactive)
+
+(defun +agent-shell-start-client-on-target-a (function &rest arguments)
+  "Start ACP FUNCTION on its own session target with ARGUMENTS.
+Only the process-start boundary uses a logical directory, including for local
+agents.  UI caches keep the session buffer's native client environment."
+  (let* ((client (plist-get arguments :client))
+         (buffer (map-elt client :context-buffer)))
+    (if (not (and (buffer-live-p buffer)
+                  (with-current-buffer buffer
+                    (derived-mode-p 'agent-shell-mode))))
+        (apply function arguments)
+      (with-current-buffer buffer
+        (let* ((default-directory
+                (remote-canonicalize-emacs-file-name default-directory))
+               (remote-current-adapter-id "agent-shell")
+               (make-process-function (symbol-function 'make-process))
+               (name (format "acp-client(%s)-%s" (map-elt client :command)
+                             (map-elt client :instance-count)))
+               routed)
+          ;; ACP offers no process factory, and its `file-remote-p' test
+          ;; intentionally answers nil for /fs:local:.  Intercept only this
+          ;; client's one spawn.  Nested backend spawns and timer callbacks
+          ;; use the original primitive, even while a connection is opening.
+          (cl-letf (((symbol-function 'make-process)
+                     (lambda (&rest plist)
+                       (if (or routed (not (eq (current-buffer) buffer))
+                               (not (equal (plist-get plist :name) name)))
+                           (apply make-process-function plist)
+                         (setq routed t)
+                         (let* ((context (remote-context default-directory))
+                                (process
+                                 (apply #'remote-make-process
+                                        (append plist
+                                                (list :remote-adapter "agent-shell"
+                                                      :remote-context context
+                                                      :remote-directory default-directory
+                                                      :remote-environment
+                                                      (+agent-shell-client-environment client))))))
+                           ;; ACP keeps stdout bufferless.  Its context
+                           ;; buffer still belongs to this process target,
+                           ;; including a local session with native cwd.
+                           (when (and (processp process) (buffer-live-p buffer))
+                             (with-current-buffer buffer
+                               (setq-local remote-buffer-target-id
+                                           (remote-context-target-id context))))
+                           process)))))
+            (apply function arguments)))))))
+
+(defun +agent-shell-client-environment (client)
+  "Return CLIENT's explicit environment as Remote invocation overrides.
+Preserve ACP's first-entry precedence and values containing equals signs."
+  (mapcar (lambda (entry)
+            (let ((separator (string-search "=" entry)))
+              (if separator
+                  (cons (substring entry 0 separator) (substring entry (1+ separator)))
+                (cons entry nil))))
+          (reverse (map-elt client :environment-variables))))
+
+(with-eval-after-load 'acp
+  (advice-add 'acp--start-client :around #'+agent-shell-start-client-on-target-a))
+
+(defvar +agent-shell--startup-lookups nil
+  "Positive CLI lookups scoped to one synchronous agent-shell start.")
+
+(defun +agent-shell-startup-lookups-a (function &rest arguments)
+  "Give FUNCTION a fresh CLI lookup scope for one start with ARGUMENTS."
+  (let ((+agent-shell--startup-lookups (make-hash-table :test #'equal)))
+    (apply function arguments)))
+
+(defun +agent-shell-workspace-executable (program)
+  "Find PROGRAM, reusing a positive answer only within this exact startup.
+The key includes buffer, cwd, environment and PATH: a nested start or a timer
+in another session cannot inherit an executable from the wrong workspace."
+  (let* ((cache +agent-shell--startup-lookups)
+         (key (and cache (list (current-buffer) default-directory
+                               process-environment exec-path program))))
+    (or (and cache (gethash key cache))
+        (when-let* ((path (executable-find program t)))
+          (when cache
+            ;; Keep the key stable if a provider later edits an env/PATH list.
+            (puthash (copy-tree key) path cache))
+          path))))
+
+(with-eval-after-load 'agent-shell
+  (advice-add 'agent-shell--start :around #'+agent-shell-startup-lookups-a))
+
+(defun +agent-shell--capture-on-client (function arguments)
+  "Call image capture FUNCTION with ARGUMENTS on the Emacs client."
+  (let ((default-directory temporary-file-directory)
+        (process-environment (remote-client-process-environment))
+        (exec-path (remote-client-exec-path))
+        (remote-current-adapter-id nil)
+        (remote-current-route nil))
+    (apply function arguments)))
+
+(defun +agent-shell-capture-on-client-a (function &rest arguments)
+  "Run image capture FUNCTION on the client, then publish its target file.
+ARGUMENTS are the screenshot/clipboard keywords.  Native tools only receive
+native client paths; the returned name still belongs to the agent workspace."
+  (let* ((destination (plist-get arguments :destination-dir))
+         (logical (and (stringp destination)
+                       (remote-canonicalize-emacs-file-name destination)))
+         (client (and logical (remote-client-file-name logical))))
+    (cond
+     ((not logical) (apply function arguments))
+     (client
+      (+agent-shell--capture-on-client
+       function (plist-put (copy-sequence arguments) :destination-dir client)))
+     (t
+      (let ((temporary (let ((default-directory temporary-file-directory))
+                         (make-temp-file "agent-capture-" t))))
+        (unwind-protect
+            (condition-case err
+                (when-let* ((source
+                             (+agent-shell--capture-on-client
+                              function (plist-put (copy-sequence arguments)
+                                                  :destination-dir temporary))))
+                  (let ((target (concat (file-name-as-directory logical)
+                                        (file-name-nondirectory source))))
+                    (copy-file source target t)
+                    target))
+              (error (unless (plist-get arguments :no-error)
+                       (signal (car err) (cdr err)))))
+          (let ((default-directory temporary-file-directory))
+            (delete-directory temporary t))))))))
+
+(with-eval-after-load 'agent-shell
+  (dolist (function '(agent-shell--save-clipboard-image agent-shell--capture-screenshot))
+    (advice-add function :around #'+agent-shell-capture-on-client-a)))
+
 (declare-function remote-canonicalize-file-name "remote-fs" (file-name &optional directory))
 (declare-function remote-canonicalize-emacs-file-name "remote-fs" (file-name &optional directory))
 (declare-function remote-client-file-name "remote-fs" (file-name &optional adapter))
@@ -182,10 +320,14 @@ the source.  Resolution failures are reported, not fatal."
   "Run agent-shell's ACP request handler ORIG with ARGS in its own session.
 acp.el dispatches from a timer, so the current buffer is arbitrary; paths the
 agent sends must resolve against the session's target."
-  (let ((buffer (map-elt (plist-get args :state) :buffer)))
-    (if (buffer-live-p buffer)
-        (with-current-buffer buffer (apply orig args))
-      (apply orig args))))
+  (let* ((state (plist-get args :state))
+         (buffer (map-elt state :buffer)))
+    (cond
+     ((null buffer) (apply orig args))
+     ((buffer-live-p buffer)
+      (with-current-buffer buffer
+        (when (and (not remote-buffer-disconnected-p) (eq state agent-shell--state))
+          (apply orig args)))))))
 
 (defvar agent-shell--transcript-file)
 (defvar agent-shell--state)
@@ -350,15 +492,20 @@ ARGS are those of `agent-shell-markdown-render-function'."
   "Prevent an old session request from silently starting a new ACP process.
 The new process has no handshake or session yet.  In that state acp.el's
 implicit process restart cannot preserve agent-shell's session identity."
-  (let ((state (plist-get args :state)))
+  (let* ((state (plist-get args :state))
+         (buffer (or (map-elt state :buffer) (plist-get args :buffer)))
+         (disconnected (and (buffer-live-p buffer)
+                            (buffer-local-value 'remote-buffer-disconnected-p buffer))))
     (if (and state
-             (+agent-shell--dead-client-p state)
-             (not (equal (map-elt (plist-get args :request) :method)
-                         "initialize")))
+             (or disconnected
+                 (and (+agent-shell--dead-client-p state)
+                      (not (equal (map-elt (plist-get args :request) :method) "initialize")))))
         (let* ((failure (plist-get args :on-failure))
                (error-object
-                '((code . -32603)
-                  (message . "ACP process exited; reconnect this agent session before sending"))))
+                `((code . -32603)
+                  (message . ,(if disconnected
+                                  "Remote target disconnected; reconnect this agent session before sending"
+                                "ACP process exited; reconnect this agent session before sending")))))
           (when failure (funcall failure error-object nil))
           nil)
       (apply original args))))
@@ -836,7 +983,8 @@ In the input RET only writes: `S-RET' sends (steering a running turn) and
   (locate-user-emacs-file "var/noema/tools/opencode/1.18.30-official/opencode")
   "Validated official OpenCode executable used instead of the Homebrew build.
 An explicitly customized `agent-shell-opencode-acp-command' takes precedence.
-See docs/noema/records/incidents/opencode-acp-recovery-2026-09.md for provenance and the offline smoke test."
+For provenance and the offline smoke test, see
+docs/noema/records/incidents/opencode-acp-recovery-2026-09.md."
   :type 'file
   :group 'ai)
 
@@ -889,7 +1037,7 @@ target-native path.  A CLI that cannot be found is an error."
         (plist-put (copy-sequence arguments) :environment-variables
                    (cons (format "%s=%s" variable
                                  (remote-file-local-name
-                                  (or (executable-find cli t)
+                                  (or (+agent-shell-workspace-executable cli)
                                       (user-error "%s: no `%s' on the PATH of target `%s'; install it there or add it to that environment"
                                                   command cli
                                                   (or +agent-shell--lookup-target "local")))))

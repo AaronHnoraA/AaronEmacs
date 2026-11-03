@@ -13,26 +13,38 @@
 (require 'package)
 (require 'seq)
 
-(defun remote-strict-byte-compile ()
-  "Byte compile remote libraries with warnings promoted to errors."
+(defconst remote-strict--consumer-files
+  '("lisp/term/shell/eshell.el" "lisp/tools/agent/queue.el"
+    "lisp/tools/agent/config.el" "lisp/tools/agent/acp.el")
+  "Placement consumers compiled in the full configuration lane.")
+
+(defun remote-strict--configuration-p (file)
+  "Whether FILE is a configuration entry requiring the full init context."
+  (string-match-p "/\\(?:init-remote\\|framework/\\(?:config\\|tramp\\)\\)\\.el\\'" file))
+
+(defun remote-strict-byte-compile (&optional configuration)
+  "Compile Remote libraries strictly, or CONFIGURATION after a full init.
+The library lane stays independent of the user's package bootstrap.  The
+configuration lane checks the remaining entry points with their real deps."
   (let* ((root (expand-file-name "lisp/remote" user-emacs-directory))
          (destination (make-temp-file "remote-byte-compile-" t))
-         ;; `remote/framework/config.el' is a user-config entry point whose `config!'
-         ;; macro intentionally executes package bootstrap at compile time.
-         ;; The compatibility boundary is the reusable framework beneath it.
          (files
-          (seq-remove
-           (lambda (file) (string-suffix-p "/init-remote.el" file))
-           (directory-files-recursively root "\\.el\\'")))
+          (append (funcall (if configuration #'seq-filter #'seq-remove)
+                           #'remote-strict--configuration-p
+                           (directory-files-recursively root "\\.el\\'"))
+                  (when configuration
+                    (mapcar (lambda (file) (expand-file-name file user-emacs-directory))
+                            remote-strict--consumer-files))))
          (byte-compile-error-on-warn t)
          (byte-compile-warnings t)
          (load-prefer-newer t))
     (add-to-list 'load-path
                  (expand-file-name "lisp/core" user-emacs-directory))
-    (setq package-user-dir
-          (file-name-as-directory
-           (expand-file-name "elpa" user-emacs-directory)))
-    (package-initialize)
+    (unless configuration
+      (setq package-user-dir
+            (file-name-as-directory
+             (expand-file-name "elpa" user-emacs-directory)))
+      (package-initialize))
     (unwind-protect
         (cl-letf
             (((symbol-function 'byte-compile-dest-file)

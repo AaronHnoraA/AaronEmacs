@@ -589,6 +589,18 @@
       (should (command-shell-tests--wait (lambda () result) 5))
       (should (equal (string-trim (plist-get result :output)) "second")))))
 
+(ert-deftest command-shell-c3-idle-completion-does-not-schedule-empty-dispatch ()
+  (command-shell-tests--with-dir dir
+    (let ((schedule (symbol-function 'run-at-time)) (dispatches 0) result)
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (time repeat function &rest args)
+                   (when (eq function #'+eshell--dispatch) (cl-incf dispatches))
+                   (apply schedule time repeat function args))))
+        (+eshell-run "*echo done" :directory dir :callback (lambda (value) (setq result value)))
+        (should (command-shell-tests--wait (lambda () result)))
+        (should (= dispatches 1))
+        (should-not (buffer-local-value '+eshell--dispatch-timer (+eshell-buffer dir)))))))
+
 (ert-deftest command-shell-c5-start-error-resolves-and-continues ()
   (command-shell-tests--with-dir dir
     (let* ((bad (file-name-as-directory (expand-file-name "bad" dir)))

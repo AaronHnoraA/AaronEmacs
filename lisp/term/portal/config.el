@@ -22,6 +22,8 @@
 (declare-function portal-terminal-focus "portal-terminal" ())
 (declare-function portal-terminal-start "portal-terminal"
                   (directory program arguments &optional name))
+(declare-function portal-terminal--new "portal-terminal"
+                  (&optional quick-root command name elsewhere argv label))
 (declare-function portal--terminal-paste "portal-terminal" (target text &optional enter))
 (declare-function portal--terminal-text "portal-terminal" (target))
 (declare-function portal--inspect "portal-view" (target))
@@ -62,7 +64,29 @@
  'portal `(:url ,+portal-package-url :rev ,+portal-package-revision))
 
 (defvar-local +portal-target-directory nil
-  "Remote directory reached by SSH inside a local Portal terminal.")
+  "Logical directory belonging to this routed Portal terminal.")
+(defvar portal-terminal-auto-close-on-exit)
+(defvar portal-terminal--directory)
+(defvar portal-terminal--exited)
+(defvar portal-terminal--project)
+(defvar portal-view--target)
+(declare-function portal-view-close "portal-view" ())
+(declare-function portal-input-mode "portal-input" (&optional arg))
+(declare-function aaron/open-portal-url "aaron-open" (url &optional reuse-selected workspace))
+
+(defconst +portal--client-environment-script
+  (concat
+   (mapconcat
+    (lambda (name)
+      (format "if [ \"${%s+x}\" = x ]; then set -- \"$@\" \"%s=$%s\"; fi" name name name))
+    '("GHOSTTY_RESOURCES_DIR" "GHOSTTY_SHELL_FEATURES" "TERM_PROGRAM" "TERM_PROGRAM_VERSION" "INSIDE_EMACS")
+    "; ")
+   "; if [ -n \"${GHOSTTY_RESOURCES_DIR-}\" ] && "
+   "[ -r \"$GHOSTTY_RESOURCES_DIR/shell-integration/zsh/.zshenv\" ]; then "
+   "if [ \"${ZDOTDIR+x}\" = x ]; then set -- \"$@\" \"GHOSTTY_ZSH_ZDOTDIR=$ZDOTDIR\"; fi; "
+   "set -- \"$@\" \"ZDOTDIR=$GHOSTTY_RESOURCES_DIR/shell-integration/zsh\"; fi")
+  "Client-native Ghostty facts unavailable in Emacs's environment snapshot.
+These remain client process defaults; the backend owns target projection.")
 
 (defvar +portal--last-raycast-frame nil
   "Newest terminal frame launched by Raycast.")
@@ -241,9 +265,15 @@ and back gives it to the view again."
                (version<= "31.1" emacs-version)
                (display-graphic-p))
     (user-error "Portal needs graphical macOS Emacs 31.1 or newer"))
-  (aaron-package-ensure-vc 'portal +portal-package-url
-                        +portal-package-revision)
-  (require 'portal-terminal))
+  (let ((default-directory temporary-file-directory)
+        (process-environment (remote-client-process-environment))
+        (exec-path (remote-client-exec-path))
+        (remote-current-adapter-id nil)
+        (remote-current-route nil)
+        (remote-current-workspace nil))
+    (aaron-package-ensure-vc 'portal +portal-package-url
+                          +portal-package-revision)
+    (remote-require-on-client 'portal-terminal)))
 
 (defun +portal-workspace-context (&optional directory)
   "Return the Remote workspace context for DIRECTORY."
@@ -251,7 +281,8 @@ and back gives it to the view again."
                      (or (and directory
                               (aaron-terminal-normalize-directory directory))
                          default-directory)))
-         (context (remote-context directory)))
+         (owner (remote-workspace-for-path directory))
+         (context (if owner (remote-workspace-context owner) (remote-context directory))))
     (if (or (remote-context-workspace-id context)
             (not (eq (remote-file-operation-cost directory) 'batched)))
         context
@@ -265,84 +296,136 @@ and back gives it to the view again."
   "Return the workspace ID for DIRECTORY."
   (remote-workspace-context-id (+portal-workspace-context directory)))
 
-(defun +portal--ssh-arguments (directory &optional command)
-  "Return SSH arguments to open DIRECTORY and optional COMMAND."
-  (let* ((method (file-remote-p directory 'method))
-         (host (file-remote-p directory 'host))
-         (user (file-remote-p directory 'user))
-         (port (file-remote-p directory 'port))
-         (path (file-remote-p directory 'localname))
-         (destination (if user (format "%s@%s" user host) host))
-         (script (concat
-                  (when (and path (not (string-empty-p path)))
-                    (format "cd %s && " (shell-quote-argument path)))
-                  (if command
-                      (format "exec %s" command)
-                    "exec \"${SHELL:-/bin/sh}\" -l"))))
-    (unless (and (member method '("ssh" "scp")) host)
-      (user-error "This target has no SSH address for Portal"))
-    (append (when port (list "-p" port))
-            (list "-t" destination script))))
+(defun +portal--native-terminal-live-p (_terminal)
+  "Whether the current buffer still owns its native terminal view."
+  (and portal-view--target t))
 
-(cl-defun +portal-create (&key directory name command (display t))
+(defun +portal--native-terminal-send (_terminal string)
+  "Send STRING through the current native terminal's input boundary."
+  (portal--terminal-paste portal-view--target string))
+
+(defun +portal--native-terminal-close (_terminal)
+  "Release the current buffer's native terminal handle."
+  (setq portal-terminal--exited t)
+  (when portal-view--target (portal-view-close)))
+
+(defun +portal--native-terminal-disconnect (_terminal _reason)
+  "Keep bounded scrollback while releasing a disconnected native terminal."
+  (when portal-view--target
+    (let ((text (ignore-errors (portal--terminal-text portal-view--target))))
+      (setq portal-terminal--exited t)
+      (portal-view-close)
+      (portal-input-mode -1)
+      (when (stringp text)
+        (let ((inhibit-read-only t))
+          (goto-char (point-max))
+          (insert (substring text (max 0 (- (length text) 262144)))))))))
+
+(defun +portal--native-terminal-restart (terminal _workspace)
+  "Replace TERMINAL using the same logical cwd and command recipe."
+  (let* ((metadata (remote-terminal-metadata terminal))
+         (buffer (+portal-create :directory (plist-get metadata :directory)
+                                 :command (plist-get metadata :command)
+                                 :environment (plist-get metadata :environment)
+                                 :name (remote-terminal-name terminal) :display nil)))
+    (buffer-local-value 'remote-terminal-instance buffer)))
+
+(defun +portal--native-terminal-changed-a (&rest _)
+  "Keep target identity separate from the native engine's client-side cwd."
+  (when (and +portal-target-directory (remote-terminal-p remote-terminal-instance))
+    ;; Portal currently exposes only client-host OSC 7 directories.  Use
+    ;; those reports only when this target has a client file projection.
+    (let ((client (remote-client-file-name +portal-target-directory)))
+      (when (and client (stringp portal-terminal--directory)
+                 (equal (file-name-as-directory client)
+                        (file-name-as-directory (remote-file-local-name +portal-target-directory))))
+        (setq +portal-target-directory
+              (remote-make-file-name
+               (remote-file-name-target +portal-target-directory)
+               (remote-file-local-name
+                (remote-canonicalize-emacs-file-name portal-terminal--directory))))))
+    (setq default-directory +portal-target-directory
+          portal-terminal--directory +portal-target-directory
+          list-buffers-directory +portal-target-directory)
+    (when portal-terminal--exited
+      ;; The native engine has no exit code contract yet.  Unknown is a
+      ;; disconnected terminal with history and an explicit restart recipe.
+      (remote-terminal-frontend-exited remote-terminal-instance))))
+
+(cl-defun +portal-create (&key directory name command environment (display t))
   "Create a Portal terminal in DIRECTORY with NAME and optional COMMAND.
 COMMAND is a shell string or a list of program and argument strings.
 When DISPLAY is nil, restore the previous window layout after creation.
-SSH directories run SSH inside Portal; other remote targets use the routed
-terminal frontend."
+The native UI stays on the client; every target uses a framework PTY plan."
   (let* ((directory (file-name-as-directory
                      (or (and directory
                               (aaron-terminal-normalize-directory directory))
                          default-directory)))
-         (physical (if (fboundp 'remote-client-file-name)
-                       (or (remote-client-file-name directory) directory)
-                     directory))
-         (method (file-remote-p physical 'method))
          (configuration (unless display (current-window-configuration)))
          buffer)
     (unwind-protect
-        (setq buffer
-              (cond
-               ((and method (not (member method '("ssh" "scp"))))
-                (remote-terminal-buffer
-                 (remote-terminal-open (+portal-workspace-context directory)
-                                       :name name :display display)))
-               (t
-                (+portal--ensure)
-                (let ((default-directory (if method
-                                             (expand-file-name "~/")
-                                           physical)))
-                  (cond
-                   (method
-                    (let ((result
-                           (portal-terminal-start
-                            default-directory "ssh"
-                            (+portal--ssh-arguments
-                             physical
-                             (cond ((stringp command) command)
-                                   ((consp command)
-                                    (mapconcat #'shell-quote-argument command " "))))
-                            name)))
-                      (with-current-buffer result
-                        (setq-local +portal-target-directory directory))
-                      result))
-                   (command
-                    (let ((argv (if (stringp command)
-                                    (list "/bin/zsh" "-lc" command)
-                                  command)))
-                      (portal-terminal-start default-directory
-                                             (car argv) (cdr argv) name)))
-                   (t
-                    (let ((result (portal-terminal-new)))
-                      (when name
-                        (with-current-buffer result (rename-buffer name t)))
-                      result)))))))
+        (progn
+          (+portal--ensure)
+          (let* ((launch (remote-terminal-prepare-client-launch
+                          (+portal-workspace-context directory) :directory directory :command command
+                          :client-environment-script +portal--client-environment-script
+                          :environment (append '(("TERM" . "xterm-256color")) environment)))
+                 (workspace (plist-get launch :workspace))
+                 (argv (plist-get launch :command))
+                 (default-directory (plist-get launch :client-directory))
+                 (process-environment (remote-client-process-environment))
+                 (exec-path (remote-client-exec-path))
+                 (remote-current-route nil)
+                 (remote-current-adapter-id nil)
+                 (portal-terminal-auto-close-on-exit nil))
+            ;; The framework already resolved argv, cwd and environment.
+            ;; Portal's argv entry would run another interactive login shell
+            ;; solely to resolve the program.  Its command entry skips that.
+            (setq buffer
+                  (portal-terminal--new
+                   nil (mapconcat #'shell-quote-argument argv " ")
+                   (or name (format "*portal:%s:%s*" (remote-workspace-target-id workspace)
+                                    (file-name-nondirectory (directory-file-name directory))))
+                   t nil "terminal"))
+            (condition-case error-data
+                (with-current-buffer buffer
+                  (setq-local +portal-target-directory (remote-canonicalize-emacs-file-name directory)
+                              portal-terminal-auto-close-on-exit nil
+                              portal-terminal--project (remote-workspace-root workspace)
+                              default-directory +portal-target-directory
+                              portal-terminal--directory +portal-target-directory)
+                  (remote-terminal-adopt
+                   workspace buffer :name (buffer-name buffer)
+                   :metadata (list :frontend 'portal :route (plist-get launch :route)
+                                   :directory directory :command command
+                                   :environment environment
+                                   :live-function #'+portal--native-terminal-live-p
+                                   :send-function #'+portal--native-terminal-send
+                                   :close-function #'+portal--native-terminal-close
+                                   :disconnect-function #'+portal--native-terminal-disconnect
+                                   :restart-function #'+portal--native-terminal-restart))
+                  (+portal--native-terminal-changed-a))
+              ((error quit)
+               (when (buffer-live-p buffer)
+                 (with-current-buffer buffer
+                   (let ((kill-buffer-query-functions nil)) (kill-buffer buffer))))
+               (signal (car error-data) (cdr error-data))))))
       (when configuration
         (set-window-configuration configuration)))
     (when (and display (buffer-live-p buffer)
                (not (eq (current-buffer) buffer)))
       (pop-to-buffer buffer))
     buffer))
+
+(defun +portal/open-terminal-url (url &optional terminal)
+  "Open URL from TERMINAL's owning workspace in a client Portal web view."
+  (interactive (browse-url-interactive-arg "Terminal URL: "))
+  (let* ((terminal (or terminal remote-terminal-instance))
+         (workspace (and (remote-terminal-p terminal)
+                         (remote-get-workspace (remote-terminal-workspace-id terminal)))))
+    (unless workspace (user-error "Terminal has no owning Remote workspace"))
+    (remote-require-on-client 'aaron-open)
+    (aaron/open-portal-url url nil workspace)))
 
 (defun +portal/terminal ()
   "Open a native Ghostty terminal in the selected Emacs window.
@@ -472,20 +555,28 @@ one on a hidden or iconified frame stays reachable from here."
       (funcall original buffer))))
 
 (defun +portal-close-terminal-buffer-a (original &rest args)
-  "Remove an empty terminal BUFFER after ORIGINAL closes its native view."
+  "Remove an empty terminal after ORIGINAL closes its view, retaining history."
   (let ((buffer (current-buffer))
         (terminal (derived-mode-p 'portal-terminal-mode)))
     (prog1 (apply original args)
       ;; `portal-view-close' also runs inside `kill-buffer-hook'.  Defer the
       ;; cleanup so that an already running buffer kill can finish first.
-      (when terminal
+      (when (and terminal
+                 (not (and (remote-terminal-p remote-terminal-instance)
+                           (eq (remote-terminal-state remote-terminal-instance) 'disconnected))))
         (run-at-time
          0 nil
          (lambda (candidate)
            (when (and (buffer-live-p candidate)
                       (with-current-buffer candidate
                         (and (derived-mode-p 'portal-terminal-mode)
-                             (not (bound-and-true-p portal-view--target)))))
+                             (not (bound-and-true-p portal-view--target))
+                             ;; A native exit can arrive between scheduling
+                             ;; this cleanup and its dispatch.  The workspace
+                             ;; still owns disconnected history and restart.
+                             (not (and (remote-terminal-p remote-terminal-instance)
+                                       (eq (remote-terminal-state remote-terminal-instance)
+                                           'disconnected))))))
              (kill-buffer candidate)))
          buffer)))))
 
@@ -705,7 +796,7 @@ FRAME is what the global `window-buffer-change-functions' passes."
 ;; Portal already hides a native view when its frame is deleted.  Removing
 ;; this older hook also fixes a running Emacs after reloading the config:
 ;; closing a frame must leave its terminal session in the buffer list.
-(remove-hook 'delete-frame-functions #'+portal--delete-frame-terminal)
+(remove-hook 'delete-frame-functions '+portal--delete-frame-terminal)
 
 (defun +portal/open-new ()
   "Open a fresh Portal terminal in its own frame.
@@ -845,6 +936,7 @@ The window manager places the frame; this only opens it."
   (add-hook 'portal-input-mode-hook #'+portal--quiet-buffer 95))
 
 (with-eval-after-load 'portal-terminal
+  (advice-add 'portal-terminal--changed :after #'+portal--native-terminal-changed-a)
   (setq portal-terminal-auto-close-on-exit t)
   (add-hook 'portal-terminal-mode-hook
             (lambda () (add-hook 'kill-buffer-hook

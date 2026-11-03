@@ -48,11 +48,18 @@ macOS `open', Linux `xdg-open', Windows shell open, or `browse-url' fallback."
 (declare-function +portal--ensure "term/portal/config" ())
 (declare-function portal-open-url "portal-web" (url))
 (declare-function portal-input-focus "portal-input" ())
+(declare-function w32-shell-execute "w32fns.c" (operation document &optional parameters show-flag))
 (declare-function remote-canonicalize-file-name "remote-fs"
                   (file-name &optional directory))
 (declare-function remote-fs-file-name-p "remote-fs" (file-name))
 (declare-function remote-require-on-client "remote-core"
                   (feature &optional filename noerror))
+(declare-function remote-url-for-client "remote-channel" (url &rest keys))
+(declare-function remote-client-process-environment "remote-core" ())
+(declare-function remote-client-exec-path "remote-core" ())
+(defvar remote-current-adapter-id)
+(defvar remote-current-route)
+(defvar remote-current-workspace)
 
 (defvar eww-browse-url-new-window-is-tab)
 (defvar +noema--inhibit-redirect)
@@ -249,18 +256,30 @@ browser opens do not leave empty splits behind."
     (require 'app/browser/config))
   (+xwidget/open-url url :display 'side :reuse-selected reuse-selected))
 
-(defun aaron/open-portal-url (url &optional reuse-selected)
-  "Open URL in a Portal web view in a browser window."
+(defun aaron/open-portal-url (url &optional reuse-selected workspace)
+  "Open URL in a client Portal view, optionally from source WORKSPACE.
+Explicit WORKSPACE URLs use the Remote browser URL boundary."
   (interactive (browse-url-interactive-arg "Portal URL: "))
-  (require 'term/portal/config)
-  (+portal--ensure)
-  (require 'portal-web)
-  (aaron-open--with-browser-window
-   'portal-web-mode reuse-selected
-   (lambda ()
-     (portal-open-url (aaron-open-normalize-url url))
-     (portal-input-focus)
-     (current-buffer))))
+  (require 'remote-core)
+  (let ((default-directory temporary-file-directory)
+        (process-environment (remote-client-process-environment))
+        (exec-path (remote-client-exec-path))
+        (remote-current-adapter-id nil)
+        (remote-current-route nil)
+        (remote-current-workspace nil))
+    (remote-require-on-client 'term/portal/config)
+    (+portal--ensure)
+    (remote-require-on-client 'portal-web)
+    (let ((url (aaron-open-normalize-url url)))
+      (when workspace
+        (remote-require-on-client 'remote-channel)
+        (setq url (remote-url-for-client url :workspace workspace)))
+      (aaron-open--with-browser-window
+       'portal-web-mode reuse-selected
+       (lambda ()
+         (portal-open-url url)
+         (portal-input-focus)
+         (current-buffer))))))
 
 (defun aaron/open-system-target (target)
   "Open TARGET with the operating system."

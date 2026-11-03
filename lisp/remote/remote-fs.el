@@ -43,6 +43,8 @@
                   "remote-workspace" (path))
 (declare-function remote-workspace-id
                   "remote-workspace" (workspace))
+(declare-function remote-workspace-routes "remote-workspace" (workspace))
+(declare-function remote-workspace-track-live-route "remote-workspace" (workspace route))
 (declare-function remote-workspace-register-recoverable-resource
                   "remote-workspace" (workspace kind value &rest keys))
 (declare-function remote-workspace-ensure-recoverable-resource
@@ -1887,6 +1889,51 @@ their place after it."
        (remote-file-name-target default-directory) answer)
       answer))))
 
+(defvar tramp-remote-process-environment)
+(defvar tramp-remote-path)
+(declare-function remote--merge-environment-overrides "remote-process" (base overrides))
+
+(defun remote-fs--environment-delta (environment baseline &optional removals)
+  "Return ENVIRONMENT changes from BASELINE, with first-entry precedence.
+REMOVALS includes baseline variables absent from the complete environment.
+An entry without `=' explicitly unsets its variable; values retain newlines."
+  (let ((base (make-hash-table :test #'equal))
+        (seen (make-hash-table :test #'equal)) names changes)
+    (dolist (entry baseline)
+      (let* ((separator (string-search "=" entry))
+             (name (if separator (substring entry 0 separator) entry)))
+        (unless (gethash name base)
+          (puthash name (list (and separator (substring entry (1+ separator)))) base)
+          (push name names))))
+    (dolist (entry environment)
+      (let* ((separator (string-search "=" entry))
+             (name (if separator (substring entry 0 separator) entry))
+             (value (and separator (substring entry (1+ separator)))))
+        (unless (gethash name seen)
+          (puthash name t seen)
+          (unless (equal (gethash name base) (list value))
+            (push (cons name value) changes)))))
+    (when removals
+      (dolist (name (nreverse names))
+        (unless (gethash name seen) (push (cons name nil) changes))))
+    (nreverse changes)))
+
+(defun remote-fs--process-environment-overrides ()
+  "Capture official process callers' dynamic environment without target IO."
+  (append
+   (remote-fs--environment-delta process-environment
+                                 (default-toplevel-value 'process-environment) t)
+   (when (boundp 'tramp-remote-process-environment)
+     (remote-fs--environment-delta tramp-remote-process-environment
+                                   (and (default-boundp 'tramp-remote-process-environment)
+                                        (default-toplevel-value 'tramp-remote-process-environment))))
+   (when (and (boundp 'tramp-remote-path)
+              (not (equal tramp-remote-path
+                          (and (default-boundp 'tramp-remote-path)
+                               (default-toplevel-value 'tramp-remote-path))))
+              (listp tramp-remote-path) (cl-every #'stringp tramp-remote-path))
+     (list (cons "PATH" (mapconcat #'identity tramp-remote-path path-separator))))))
+
 (defun remote-fs-handle-make-process (&rest plist)
   "Route official `make-process' PLIST through the remote process API.
 This is the compatibility boundary used by third-party packages.
@@ -1905,7 +1952,10 @@ the request to TRAMP or tramp-rpc."
     (apply
      #'remote-make-process
      (append
-      plist
+      (plist-put (copy-sequence plist) :remote-environment
+                 (remote--merge-environment-overrides
+                  (remote-fs--process-environment-overrides)
+                  (plist-get plist :remote-environment)))
       (list :remote-adapter
             (or remote-current-adapter-id "process")
             :remote-context (remote-context default-directory)
@@ -1923,6 +1973,7 @@ the request to TRAMP or tramp-rpc."
      :buffer buffer
      :command (cons program program-args)
      :remote-adapter (or remote-current-adapter-id "process")
+     :remote-environment (remote-fs--process-environment-overrides)
      :remote-context (remote-context default-directory)
      :remote-directory default-directory)))
 
@@ -2167,6 +2218,19 @@ returning functions on the full contract path."
           (let ((default-directory temporary-file-directory))
             (funcall operation (remote-fs-localname (car args)))))))
 
+(defun remote-fs--track-workspace-route (logical route)
+  "Remember successful file ROUTE for LOGICAL's existing workspace only.
+This reads in-memory ownership; it never creates a workspace or a session."
+  (when (and (fboundp 'remote-workspace-for-path)
+             (fboundp 'remote-workspace-track-live-route))
+    (when-let* ((workspace (remote-workspace-for-path logical)))
+      (unless (seq-some (lambda (known)
+                          (and (equal (remote-route-target-id known) (remote-route-target-id route))
+                               (equal (remote-route-pipeline-id known) (remote-route-pipeline-id route))
+                               (equal (remote-route-backend-id known) (remote-route-backend-id route))))
+                        (remote-workspace-routes workspace))
+        (remote-workspace-track-live-route workspace route)))))
+
 (defun remote-fs--call-routed-1 (operation args)
   "Route OPERATION with ARGS after the client environment has been pinned."
   (let* ((known (gethash operation remote-file-operations))
@@ -2201,6 +2265,7 @@ returning functions on the full contract path."
                    operation args (car routes))))
         (when fast
           (remote-report-route-success (car routes))
+          (remote-fs--track-workspace-route logical (car routes))
           (when (or remote-log-read-query-successes
                     (not retry-safe-query))
             (remote-log
@@ -2289,6 +2354,7 @@ returning functions on the full contract path."
                        "Unknown operation returned a physical remote path")))
               (setq done t)
               (remote-report-route-success route)
+              (remote-fs--track-workspace-route logical route)
               (when (or remote-log-read-query-successes
                         (not retry-safe-query))
                 (remote-log

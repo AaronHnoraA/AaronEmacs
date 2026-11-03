@@ -14,10 +14,15 @@
                      :turn-state 'idle :queued 0 :queue-held 0
                      :last-prompt "private prompt"))
           (identity `((buffer . ,(buffer-name buffer)) (nativeSessionId . "native-one"))))
+     (with-current-buffer buffer
+       (setq-local major-mode 'agent-shell-mode default-directory "/tmp/"
+                   +agent-acp-session-root "/tmp/" +agent-acp-session-origin 'manual))
      (unwind-protect
-         (cl-letf (((symbol-function '+agent-pool-sessions) (lambda (&rest _) (list row)))
+         (let ((+agent-session-private-buffer-functions nil)
+               (+agent-session-private-functions nil))
+           (cl-letf (((symbol-function '+agent-acp-agent-buffer-p) (lambda (candidate) (eq candidate buffer)))
                    ((symbol-function '+agent-session-snapshot) (lambda (_) row)))
-           ,@body)
+             ,@body))
        (kill-buffer buffer))))
 
 (ert-deftest agent-api-c45-list-is-bounded-metadata-and-does-not-start-or-show ()

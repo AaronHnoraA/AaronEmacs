@@ -16,6 +16,12 @@ without starting another adapter. A dead process never matches. Noema's session
 and Run entry points use the same live-process check. This is an in-memory
 lookup, so an Emacs crash leaves no registry file or stale ownership claim.
 
+Private LaTeX export sessions stay out of ordinary project pools and the Agent
+Manager. The Noema adapter registers a buffer predicate with
+`+agent-session-private-buffer-functions`, using only the registered origin and
+root, so project tab redisplay does not build full session snapshots. Older
+`side` turns under a `latex-export--` root retain the same private treatment.
+
 On `TASK_BUSY`, Codex's structured error code is used if supplied. ACP has no
 standard busy code, so the exact provider message is the fallback. The failed
 ACP client is shut down; the buffer shows the target, workspace, session ID,

@@ -45,6 +45,8 @@
 
 (defun +agent-queue--ready (buffer)
   "Signal unless BUFFER's client can accept a prompt now."
+  (when (buffer-local-value 'remote-buffer-disconnected-p buffer)
+    (user-error "Remote target is disconnected; reconnect the session first"))
   (when (+agent-acp-client-exited-p buffer)
     (user-error "The agent process has ended; reconnect the session first"))
   (unless (eq (+agent-acp-state-value buffer '(:init-finished)) t)

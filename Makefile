@@ -90,6 +90,10 @@ help:
 	  '  make health-byte          Run byte-compile smoke check' \
 	  '  make health-native        Run native-compile smoke check' \
 	  '  make remote-test          Run isolated remote framework ERT suites' \
+	  '  make remote-url-test      Check source URL placement, reuse, recovery and cleanup' \
+	  '  make terminal-remote-test Check terminal ownership, client boundaries and environment handoff' \
+	  '  make terminal-remote-live Verify comint/Eshell on TERMINAL_REMOTE_TARGET (native by default)' \
+	  '  make terminal-remote-gui-live Verify real Portal/Ghostty and Web through the Portal GUI runner' \
 	  '  make remote-source-test   Run source helper and workspace lifecycle checks' \
 	  '  make remote-transfer-test Run temporary machine, and bulk transfer checks' \
 	  '  make remote-contract-test Run remote upgrade/provider contract tests' \
@@ -312,6 +316,7 @@ remote-conformance-test:
 
 remote-byte-check:
 	$(REMOTE_TEST_BATCH) -l test/remote-strict-compile.el --eval '(remote-strict-byte-compile)'
+	$(BATCH) -l test/remote-strict-compile.el --eval '(remote-strict-byte-compile t)'
 
 remote-check: remote-byte-check remote-test
 
@@ -322,7 +327,7 @@ remote-source-test:
 remote-transfer-test:
 	$(BATCH) -l test/remote-transfer-tests.el -f ert-run-tests-batch-and-exit
 
-remote-test: remote-contract-test remote-conformance-test remote-source-test remote-transfer-test
+remote-test: remote-contract-test remote-conformance-test remote-source-test remote-transfer-test agent-remote-test terminal-remote-test remote-url-test
 	$(REMOTE_TEST_BATCH) -l test/remote-tests.el -f ert-run-tests-batch-and-exit
 	$(REMOTE_TEST_BATCH) -l test/remote-framework-tests.el -f ert-run-tests-batch-and-exit
 	$(REMOTE_TEST_BATCH) -l test/remote-task-tests.el -f ert-run-tests-batch-and-exit
@@ -404,6 +409,27 @@ remote-task-live-smoke:
 
 remote-task-disconnect-smoke:
 	$(BATCH) -l test/remote-task-disconnect-smoke.el
+
+.PHONY: agent-remote-test agent-remote-live terminal-remote-test terminal-remote-live terminal-remote-gui-live
+.PHONY: remote-url-test
+remote-url-test:
+	$(REMOTE_TEST_BATCH) -l test/remote-url-tests.el --eval '(ert-run-tests-batch-and-exit "^remote-url-")'
+	python3 -B -m unittest discover -s test -p 'test_remote_url_http_fixture.py'
+
+terminal-remote-test:
+	$(BATCH) -l test/terminal-remote-tests.el --eval '(ert-run-tests-batch-and-exit "^terminal-remote-")'
+
+terminal-remote-live:
+	$(BATCH) -l test/terminal-remote-live.el --eval '(ert-run-tests-batch-and-exit "^terminal-remote-live-")'
+
+terminal-remote-gui-live:
+	sh site-lisp/portal/test/gui-ert.sh --init-directory=$(CURDIR) -l $(CURDIR)/early-init.el -l $(CURDIR)/init.el -l $(CURDIR)/test/terminal-remote-live.el --eval '(portal-gui-ert-start "^terminal-remote-live-native-")'
+
+agent-remote-test:
+	$(BATCH) -l test/agent-remote-performance-tests.el -f ert-run-tests-batch-and-exit
+
+agent-remote-live:
+	$(BATCH) -l test/agent-lifecycle-remote-live.el --eval '(ert-run-tests-batch-and-exit "agent-remote-live-")'
 
 remote-cleanup-live-smoke:
 	REMOTE_E2E=1 $(BATCH) -l test/remote-cleanup-live-tests.el --eval '(ert-run-tests-batch-and-exit "remote-cleanup-live-")'

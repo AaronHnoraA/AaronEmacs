@@ -75,7 +75,9 @@ as zero."
                   (+agent-pool-key
                    (list :root (+agent-api--string body "root")
                          :target (or (+agent-api--string body "target")
-                                     (remote-file-name-target (+agent-api--string body "root")))))))
+                                     (remote-file-name-target
+                                      (remote-canonicalize-emacs-file-name
+                                       (+agent-api--string body "root"))))))))
        (or (not (+agent-api--string body "target"))
            (equal (plist-get snapshot :target) (+agent-api--string body "target")))))
 
@@ -86,12 +88,15 @@ as zero."
   "Return the page of public sessions BODY's fences select."
   (unless (and (integerp offset) (>= offset 0) (integerp limit) (<= 1 limit 100))
     (user-error "offset must be >= 0 and limit must be 1..100"))
-  (let* ((rows (seq-filter (lambda (row) (+agent-api--matches-p row body))
-                           (+agent-pool-sessions nil nil 'all)))
-         (total (length rows)))
+  (let* ((root (+agent-api--string body "root"))
+         (target (or (+agent-api--string body "target")
+                     (and root (remote-file-name-target (remote-canonicalize-emacs-file-name root)))))
+         (buffers (+agent-pool-buffers root target 'all))
+         (total (length buffers)))
     `((ok . t) (total . ,total)
-      (sessions . ,(vconcat (mapcar #'+agent-api--describe
-                                    (seq-subseq rows (min offset total) (min total (+ offset limit))))))
+      (sessions . ,(vconcat
+                    (mapcar (lambda (buffer) (+agent-api--describe (+agent-session-snapshot buffer)))
+                            (seq-subseq buffers (min offset total) (min total (+ offset limit))))))
       (nextOffset . ,(when (< (+ offset limit) total) (+ offset limit))))))
 
 (defun +agent-api--create-in-worktree (root agent body)
@@ -135,9 +140,11 @@ as zero."
   "Return BODY's session row, proven by its buffer and native ID."
   (let* ((name (+agent-api--string body "buffer"))
          (native (+agent-api--string body "nativeSessionId"))
-         (snapshot (seq-find (lambda (row) (equal name (buffer-name (plist-get row :buffer))))
-                             (+agent-pool-sessions nil nil 'all))))
+         (buffer (and name (get-buffer name)))
+         (snapshot (and native (+agent-acp-agent-buffer-p buffer)
+                        (+agent-session-snapshot buffer))))
     (unless (and snapshot native (equal native (plist-get snapshot :native-session-id))
+                 (not (+agent-session-private-p snapshot))
                  (+agent-api--matches-p snapshot body))
       (user-error "Session identity no longer matches; list sessions again"))
     snapshot))
@@ -164,9 +171,10 @@ as zero."
                    (append files nil))))
       (+agent-context--deliver buffer (+agent-context-content-blocks prompt references) nil t))))
 
-(defun +agent-api--acknowledge (buffer action)
-  "Return the reply to ACTION on BUFFER, with the state it left."
-  (let ((snapshot (+agent-session-snapshot buffer)))
+(defun +agent-api--acknowledge (buffer action &optional snapshot)
+  "Return ACTION's reply with BUFFER's resulting state.
+Read-only status may reuse its already validated SNAPSHOT."
+  (let ((snapshot (or snapshot (+agent-session-snapshot buffer))))
     `((ok . t) (accepted . ,(if (equal action "status") :json-false t))
       (session . ,(append (+agent-api--describe snapshot)
                           (and (equal action "status") (+agent-api--facts snapshot)))))))
@@ -194,7 +202,7 @@ Sending is asynchronous; status and bounded read report actual progress."
                 ("send" (+agent-api--send snapshot body))
                 ("stop" (+agent-acp-stop buffer))
                 ("show" (+agent-acp-show-buffer buffer)))
-              (+agent-api--acknowledge buffer action)))))
+              (+agent-api--acknowledge buffer action (and (equal action "status") snapshot))))))
       (_ (user-error "Unknown Agent operation: %s" action)))))
 
 (provide 'tools/agent/api)

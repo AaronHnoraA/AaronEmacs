@@ -138,6 +138,12 @@ adapter 表示调用者及其偏好，例如 `emacs-file`、`process`、`exec`�
 `language-server` 和 `network`。`eglot` / `lsp-mode` ID 保留为兼容入口，但两种
 客户端的实际启动都绑定到 `language-server` adapter。
 
+原生 `make-process` / `start-file-process` 的 `/fs:` 兼容入口保留调用方动态环境：
+相对于客户端顶层环境发生变化的变量与 unset 作为 invocation overrides 传入同一
+process API，不把未改变的整份客户端环境复制到目标。动态 TRAMP 环境覆盖和具体
+PATH 列表也经同一边界传递；显式 `:remote-environment` 优先。native、TRAMP、RPC
+不能依赖各自上游恰好读取了哪些 Lisp 动态变量而得到不同答案。
+
 ```text
 logical request
       |
@@ -1113,8 +1119,13 @@ ACP agent（agent-shell 的所有入口：Noema Run、popup、`C-c A n`、裸
 `M-x agent-shell`）是 target-placement consumer，且不自带任何 remote 分支。
 `tools/agent/config.el` 把 `agent-shell-cwd` 规范成 `/fs:TARGET:/path`，再经
 `remote-client-file-name` 取本机可直接访问的写法：`local` 得到原生目录，远端 target
-保持逻辑名。acp.el 以 `:file-handler` 调用官方 `make-process`，远端时进入 `/fs:` 句柄
-和 `remote-make-process`，agent 可执行文件、cwd、环境都由 target 投影；agent-shell 的
+保持逻辑名。`tools/agent/config.el` 的 ACP 启动边界在 client 的 context buffer 中执行，
+把它的一次 `make-process` 交给 `remote-make-process`：local 与远端共用
+`agent-shell` adapter、target placement 和 interactive 接收策略。ACP 的
+`file-remote-p` 条件不会让 `/fs:local:` 绕开路由。临时 process factory 仅匹配当前
+buffer、client 的确切进程名与首次创建；连接时的 helper、嵌套 backend spawn 与
+其他 timer 保留原生行为。显式 ACP 环境作为 invocation override，优先于 workspace
+capsule，重复变量保持原来的首条优先语义。agent 可执行文件、cwd、环境都由 target 投影；agent-shell 的
 `executable-find … t` 同样按 target PATH 解析，所以“target 上有对应二进制”就是唯一
 前提。ACP 协议里的路径经 `agent-shell-path-resolver-function` 双向映射：Emacs 名
 → target-native localname，agent 发来的 native 路径 → 会话 target 的 Emacs 名；
@@ -1193,7 +1204,43 @@ Emacs 的 `make-network-process` 与 `open-network-stream` 没有 file-name hand
 (remote-channel-group-close group)
 (remote-close-channel channel)
 (remote-channel-clear)
+
+(remote-url-for-client "http://localhost:3000/path?q=value#part"
+                       :workspace workspace)
 ```
+
+`remote-url-for-client` 是来源明确的浏览器 URL 边界：HTTP(S) 的 localhost、IPv4
+loopback 与 IPv6 loopback 地址按显式 workspace/context 的网络位置解释；服务输出的
+`0.0.0.0` 与 `[::]` 则连接同族 loopback。普通外部 URL 和其他 scheme 原样返回，
+不按当前 buffer 猜测来源。网络位置由 backend 的 `:network-location client` 描述，
+客户端网络中的 URL 不创建代理；其他位置通过 workspace-owned channel group
+暴露到客户端回环监听。消费者使用同一个 API，不区分 local target 或 SSH backend。
+
+同一 workspace、目标端点与路由约束复用一个转发，不按 URL 路径或 query 另建；
+不同 workspace 分别拥有资源。URL 保留原有路径、query、fragment 和 userinfo。
+单独拥有 channel、forward 或 channel group 的 workspace 也登记其实际 route，
+不依赖终端或 LSP 碰巧提供路由。恢复后的新通道同样更新路由身份，失败匹配才能
+触发所属 workspace 的恢复。
+经过文件路由边界的成功操作也为已存在的 owning workspace 记录实际 backend；
+不新建 owner 或 session，也不为已记录的 attachment 重复更新。混合 backend
+恢复先清理所有旧 attachment，再打开新一代，避免后一个 backend 的清理取消
+前一个刚恢复的会话。
+转发进程正常退出、被客户端信号终止或本机 listener 关闭，只证明该资源失效：所属 workspace
+按稳定资源 key 异步恢复该 forward/group，合并重复事件，不取消其他项目、终端或
+同 target 的后台任务。原始 process 非零退出、或资源重建返回真实 transport 错误，
+仍交给 pipeline 恢复。判断只读退出事实，不另发探活请求。未登记 owner 的本地
+句柄失效保留失败状态，由调用者显式恢复，不借此重置整个 target。
+资源恢复沿用框架的有界 background 调度；显式关闭资源/workspace 会取消它，
+全 pipeline 恢复开始前也会取消局部任务。恢复中再次打开同 key 返回 busy，不并发
+建第二组通道；过期回调关闭新句柄，不把已关闭的 owner 或后来替换的资源复活。
+每次调用重新读取资源当前句柄，失效或恢复后重新解析；调用方不可把返回 URL 当成
+永久地址缓存。workspace 关闭释放转发；来源 workspace 关闭、断开或与 context
+target 不符时明确失败，不改去客户端 localhost。这个接口不自动拦截 native
+terminal 的 URL 点击；Portal 仍须通过携带 owning buffer 的原生事件接入。
+`+portal/open-terminal-url` 已按 terminal 对象找到 workspace，交给
+`aaron/open-portal-url` 的显式 workspace 参数；普通浏览器入口不自动改写来源不明的
+localhost。HTTPS 保持端到端 TLS 字节，浏览器按返回 URL 的主机验证证书；它不继承
+`remote-open-network-stream` 对原目标 SNI 的保留能力。
 
 网络 API 继续返回 Emacs 原生 process 或既有 forward 对象，第三方软件无需认识
 新的包装类型；框架把统一的 `remote-channel` 描述附在返回值上。native backend
@@ -1251,9 +1298,36 @@ channel，并在关闭时按生命周期释放资源：
 (remote-terminal-open workspace)
 (remote-terminal-command workspace "default")
 (remote-terminal-adopt workspace frontend-buffer
-                       :metadata '(:frontend ghostel))
+                       :process frontend-process
+                       :metadata '(:frontend custom))
 (remote-terminal-restart disconnected-terminal)
 ```
+
+终端的 workspace 归属与启动目录分别维护。`remote-terminal-open` 的 `:directory`
+指定同一 target 上的逻辑启动目录，默认使用 workspace 根；创建进程时显式传给
+process API，重启保留该目录。调用方从项目子目录打开终端时，不因已有 workspace
+根更高而改去根目录。其他 target 的目录在启动前拒绝。
+显式 `:arguments nil` 表示零参数，不回填 profile 的 login 参数。终端启动只复用
+已有 workspace 环境并叠加 profile／调用覆盖，不为打开 PTY 构建环境 capsule。
+
+`remote-terminal-prepare-client-launch` 为自有 PTY 的客户端原生 frontend 生成启动
+配方；它与 `remote-make-process` 复用 backend 的 PTY process plan，返回客户端可执行
+argv、所属 route/workspace 与逻辑 cwd，frontend 不解析 TRAMP method 或拼 SSH。
+配方把客户端 cwd 和完整环境显式封装进 argv，不依赖长期运行的 native host 继承
+Emacs 后来的环境变更。无法提供客户端可执行 plan 的 backend 明确报 unsupported。
+可选 `:client-environment-script` 是受信任 frontend 的客户端 POSIX 初始化代码，
+用于把 native host 生成的 UI 变量加入启动默认值；显式 process plan 环境仍优先。
+Portal 用它保留 Ghostty 集成资源和客户端 shell 的目录事件，再通过 `:command`
+入口直接执行已准备的 argv，不额外启动一个只为查找程序的交互 login shell。
+没有 Emacs process 的 frontend 可用 `remote-terminal-adopt` 的只读 `:live-function`、
+`:send-function` 与幂等 `:close-function` 接入同一 workspace 生命周期；关闭 buffer
+和 workspace 都释放 native handle。它通过 `remote-terminal-frontend-exited` 报告
+退出；无法提供退出码时保留为 disconnected，不把未知退出当作成功。
+
+Portal Web 的网页与 native module 属于客户端。其统一 URL 打开入口与 Portal
+首次加载使用客户端 cwd、环境和 PATH，不继承发起操作的远端 buffer；普通 URL 的
+`localhost` 和 `file:///` 仍指客户端。远端服务地址须经 workspace channel 暴露后
+打开，不能仅因当前 buffer 在远端就改写所有 URL。
 
 service 是可选的 target-side tool 生命周期契约，支持 probe、trust-gated
 provision、目录型工具的统一版本化安装、start/live/stop；它不是强制常驻的 VS Code Server。Eglot、direnv
@@ -1262,8 +1336,9 @@ target-scoped service 在强制恢复时原位替换 handle 并保留 instance i
 引用计数；多个 workspace 不会各自留下一个已停止的旧 instance。
 
 `remote-terminal-open` 提供内建 comint frontend；`remote-terminal-adopt` 让
-Ghostel 保留自己的 module、filter、sentinel 与 UI，同时把
-process/buffer teardown 登记到 workspace。配置层的 popup Ghostel 已走这条边界：
+Emacs process frontend 保留 filter、sentinel 与 UI，让原生 frontend 保留 native
+handle，同时把 teardown 登记到 workspace。配置层的 popup Portal 使用原生 Ghostty
+UI，所有 target 共用 PTY process plan；不因 `/fs:` method 退成 comint，也不自己拼 SSH：
 在任意 `/fs:TARGET:/path` buffer 中按 `C-c e`，会打开或复用全局 popup 窗口；
 tab 可跨项目和 target 切换。新建 terminal/agent 使用最近聚焦的工作 buffer 的
 目录与 target，每个已有 buffer 的进程和生命周期仍属于原 workspace。本地也是
@@ -1279,14 +1354,15 @@ workspace task 仍优先复用所属 workspace 的进程路线。可运行
 配合 `REMOTE_TERMINAL_E2E_FAULT=rpc` 会仅终止测试 Emacs 的 RPC 传输，验证
 disconnected 状态、工作区重连和手动重启后的终端输入输出；
 `REMOTE_TERMINAL_E2E_FAULT=pty` 则测试 PTY 进程异常退出。
-`REMOTE_GHOSTEL_E2E_TARGET=host make remote-ghostel-live-smoke` 会用真实 Ghostel
-frontend 验证所选路线、workspace 跟踪与目标目录中的 shell 输入输出。
+`TERMINAL_REMOTE_TARGET=host make terminal-remote-live` 验证 comint 与 Eshell；
+`TERMINAL_REMOTE_TARGET=host make terminal-remote-gui-live` 经 Portal 的 GUI runner
+验证真实 Ghostty、Web、目标 cwd/环境、双向输入与 handle 释放。GUI 依赖 Portal
+已有 native build；批处理跳过原生 GUI 项，不能据此宣称 GUI 通过。
 
 远端 shell 由 `remote-terminal-command` 按目标环境选择。已有 workspace 环境
-会直接复用；Ghostel 创建进程后由 `remote-terminal-adopt` 登记到对应 workspace。
-可用 `REMOTE_GHOSTEL_E2E_TARGET=host REMOTE_GHOSTEL_E2E_PREOPEN=1
-REMOTE_GHOSTEL_E2E_PRELOAD=1 make remote-ghostel-live-smoke` 分开测量预热后终端
-启动及首条命令响应。
+会直接复用；Portal 创建 native view 后由 `remote-terminal-adopt` 登记到对应 workspace。
+其 argv 显式传递客户端启动环境，target 环境由 backend plan 投影；Portal native
+host 早于本次 invocation 启动也不会丢失覆盖值。
 工作区关闭后，连接池会暂存会话以供快速重开；Emacs 退出时会显式关闭连接池及
 由它拥有的 SSH ControlMaster，不依赖 OpenSSH 的持久期自然到期。退出路径
 （`remote-framework-shutdown`）先取消后台任务，再逐步关闭 session 与 pipeline
@@ -1294,52 +1370,43 @@ runtime，每一步各自容错：一个关不掉的 session 不能让其余 Con
 后台，`kill-emacs-hook` 中的错误还会让 Emacs 询问是否退出。同理，
 `remote-connection-closed-hook` 的观察者逐个隔离，单个失败不会中断正在关闭多个
 session 的调用方。
-transport 断线时不会重放 shell 历史；Ghostel 保留为 disconnected buffer，显式
-执行 `remote-terminal-restart` 会按原目录和 frontend 新建一个 Ghostel buffer。
+transport 断线时不会重放 shell 历史；Portal 保存最多 256 KiB 可读滚动文本后释放
+native handle，buffer 保留为 disconnected。显式 `remote-terminal-restart` 按原目录、
+环境覆盖与 command 新建同一 frontend。
+关闭 native view 时的空 buffer 清理也遵守这个状态；延迟清理在执行时重新检查，
+不删除仍由 workspace 拥有的 disconnected 历史与重启配方。
+当前 Portal native API 只报告退出布尔值，不提供退出码；未知退出保留历史与重启入口。
+它也只上报客户端主机的 OSC 7 目录：非 client-accessible target 的 shell 运行中 `cd`
+尚不能回写 Emacs cwd，buffer 保留已确认的 target 与启动目录。这两项不算完整验收。
 
 终端断线是 frontend 与框架之间的契约，而不只是一个状态位：
 
 - `remote-terminal-adopt` 的 metadata 可带 `:disconnect-function`。终端首次失去
   transport 时，框架在该终端 buffer 中调用它（参数为终端与原因），时机在进程被
   停止、frontend 自己的 sentinel 看到进程结束**之前**。进程退出即删除 buffer 的
-  frontend 用它保留 buffer：Ghostel 默认 `ghostel-kill-buffer-on-exit` 为 t，没有
-  这一步，断线会连同滚动历史和重启配方一起删掉。重复标记（transport failure 之后
+  frontend 用它保留 buffer，否则断线会连同滚动历史和重启配方一起删掉。
+  Portal 在回调中保存滚动文本、停 native handle。重复标记（transport failure 之后
   的重连会再标记一次）只更新原因，不再调用回调，也不重复写入提示行。
 - 进程自行死亡（丢失的 SSH PTY 以信号或 255 退出）走同一条路径：框架的 sentinel
   包装先判定、先标记，再把事件交给 frontend 的 sentinel。
 - 只有经路由进程边界启动的进程（带 `remote-route`）才可能是 transport 丢失。
-  frontend 自带的句柄（例如本机原生 PTY 的事件管道）结束只表示 shell 结束，终端
-  随之移除。判断依据是进程是否被路由，而不是 target ID 或 frontend 名称。
+  frontend 自带的事件管道结束不能证明 transport 失败。自有 PTY 的 frontend 经
+  `remote-terminal-frontend-exited` 明确报告结果，不伪造 Emacs process 的退出码。
+  判断依据是进程是否被路由或 frontend 的事实报告，而不是 target ID 或 frontend 名称。
 - 用户杀掉终端 buffer 是关闭，不是断线：先进入 `closing` 再删进程，回调不会被
   调用。
 - `remote-terminal-restart` 先创建替代终端，成功后才关闭旧终端；重启失败（目标
   仍不可达）时旧 buffer、原名称与 `disconnected` 状态都保留，可以再次重试。
-  尝试期间旧 buffer 暂时让出名称；Ghostel 按 slot 编号 buffer，其 restart 函数
-  同样让出并在失败时取回 slot，所以替代终端沿用原名。
-
-Ghostel 在所有 target 上走同一条启动流程：终端既不等待也不触发环境 capsule 的
-构建（构建要在 Emacs 内同步跑完用户整套 shell 启动脚本，即使放进后台任务也只是
-把卡顿挪到终端出现之后），已就绪的 capsule 直接使用。shell 由
-`remote-path-login-shell` 回答：已知的 target fact 直接返回，否则只用一次普通
-`sh -c` 询问 `$SHELL` 并记为 target fact，不运行登录 shell 的 PATH 探测。本机
-首次打开终端因此从约 700 ms 降到约 90 ms（批处理 Emacs、zsh 登录配置，各三次），
-后续打开约 9 ms 不变。
+  尝试期间旧 buffer 暂时让出名称；替代终端沿用原名，失败后旧 buffer 取回名称。
 
 终端也绝不为了知道 shell 而新建会话。`remote-path-login-shell` 的 NO-CONNECT
 参数只在“执行这条命令的那条路由自己已有会话”（`remote-connection-route-open-p`；
 同一 target 上别的后端的会话不算，SSH PTY 不等于文件会话）或后端的会话就是 Emacs
 进程本身（`:session-owner emacs`）时才询问；否则 `remote-terminal-command` 返回
 `remote-terminal--target-shell-command`，由 target 在终端自己的 PTY 会话里执行
-`exec "$SHELL" -l`，不需要任何额外往返。同理，Ghostel 及其原生模块是客户端代码，
+`exec "$SHELL" -l`，不需要任何额外往返。同理，Portal 及其原生模块是客户端代码，
 经 `remote-require-on-client` 加载：在远程 `default-directory` 下首次 `require`
 时，`module-load` 询问临时目录就会进入 `/fs:` 句柄并为此建立整条文件会话。
-在往返约 250 ms 的 SSH target 上（QWD-VPS-Wiki，shell TRAMP 后端，真实 Ghostel），
-冷态打开首个终端从约 15.2 s 降到约 0.12 s，直到首条命令输出返回从约 16.0 s 降到
-约 5.9 s，剩余时间是 SSH 建连与登录 shell 本身。`REMOTE_GHOSTEL_E2E_TARGET=local` 在本机运行同一个
-冒烟测试（本机 Ghostel 使用自己的原生 PTY，没有 route 可查，测试用
-`remote-client-file-name` 这一放置查询区分）；`REMOTE_GHOSTEL_E2E_FAULT=transport`
-注入断线，验证 buffer 保留、提示只写一次、重启后原名终端可用。批处理 Emacs
-没有窗口供 Ghostel 渲染，测试直接读取终端文本。
 
 transport failure 会把相关 workspace 标记为 disconnected，并按 1、2、4 秒进行
 自动恢复。任何显式登记了 recovery function 的资源都会在 session 恢复后重建，

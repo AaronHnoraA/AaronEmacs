@@ -17,6 +17,7 @@
 (autoload '+agent-top "tools/agent/top" nil t)
 (declare-function aaron-ui-float-show "aaron-ui-float" (buffer &rest options))
 (declare-function aaron-ui-float-panel-for-buffer "aaron-ui-float" (buffer))
+(declare-function aaron-ui-float-panel-frame "aaron-ui-float" (panel))
 (declare-function aaron-ui-float-visible-p "aaron-ui-float" (panel))
 (declare-function aaron-ui-float-hide "aaron-ui-float" (&optional panel))
 (declare-function aaron-ui-float-preview-buffer "aaron-ui-float" (panel buffer &rest options))
@@ -81,8 +82,7 @@
      (seq-filter
       (lambda (session)
         (and (eq (+agent-session-kind session) 'agent)
-             (not (run-hook-with-args-until-success
-                   '+agent-session-private-functions session))
+             (not (+agent-session-private-p session))
              (pcase scope
                ('project (equal (+agent-pool-key (list :root root :target target))
                                 (+agent-pool-key session)))

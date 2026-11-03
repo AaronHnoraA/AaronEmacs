@@ -22,6 +22,7 @@
 (defvar eshell-last-command-status)
 (defvar eshell-last-input-end)
 (defvar eshell-last-output-end)
+(defvar vertico-sort-override-function)
 (declare-function eshell "eshell" (&optional arg))
 (declare-function eshell-send-input "esh-mode" (&optional use-region queue-p no-newline))
 (declare-function eshell-interrupt-process "esh-proc" ())
@@ -39,6 +40,7 @@
 (declare-function +windows/close-window "ui/windows/config" ())
 (declare-function remote-require-on-client "remote-core"
                   (feature &optional filename noerror))
+(defvar remote-buffer-disconnected-p nil)
 (declare-function aaron-ui-float-show "aaron-ui-float" (buffer &rest options))
 (declare-function aaron-ui-float-hide "aaron-ui-float" (&optional panel))
 (declare-function aaron-ui-float-panel-for-buffer "aaron-ui-float" (buffer))
@@ -81,6 +83,9 @@ prompt input that was set aside for it.")
 (defvar-local +eshell--manual-started-at nil
   "Start time of an interactive command outside the API queue.")
 
+(defvar +eshell--dispatching nil
+  "Non-nil on an API command's startup stack, including directory changes.")
+
 (defun +eshell--activity-snapshot ()
   "Describe queued and running Eshell work for the Activity indicator.
 Read only buffer-local state; never start a shell while polling."
@@ -112,7 +117,9 @@ Read only buffer-local state; never start a shell while polling."
 
 (defun +eshell--activity-pre-command-h ()
   "Count an interactive command from the moment Eshell accepts it."
-  (unless +eshell--current
+  (unless (or +eshell--current +eshell--dispatching)
+    ;; Typing a command is an explicit restart; queued callbacks are not.
+    (setq-local remote-buffer-disconnected-p nil)
     (setq +eshell--manual-started-at (float-time))
     (+activity--refresh)))
 
@@ -191,7 +198,8 @@ TASK-NAME gives an automation task its own named buffer and queue."
                             (derived-mode-p 'eshell-mode)))
                      existing
                    (+eshell--make-buffer name directory))))
-    (unless (+eshell-busy-p buffer)
+    (unless (or (buffer-local-value 'remote-buffer-disconnected-p buffer)
+                (+eshell-busy-p buffer))
       (+eshell--sync-directory buffer directory))
     buffer))
 
@@ -232,9 +240,10 @@ TASK-NAME gives an automation task its own named buffer and queue."
 
 (defun +eshell--output (item)
   "Return ITEM's currently visible output."
-  (let ((from (+eshell--output-start item)))
-    (buffer-substring-no-properties
-     (min from eshell-last-output-end) eshell-last-output-end)))
+  (if (not (plist-get item :start)) ""
+    (let ((from (+eshell--output-start item)))
+      (buffer-substring-no-properties
+       (min from eshell-last-output-end) eshell-last-output-end))))
 
 (defun +eshell--bound-output-h ()
   "Keep the current API command's displayed output within its character cap."
@@ -265,61 +274,71 @@ TASK-NAME gives an automation task its own named buffer and queue."
 
 (defun +eshell--start (item)
   "Run ITEM, a queued command, in the current eshell buffer."
-  (let ((pending (+eshell--input))
-        (cleared nil)
-        start)
-    (condition-case err
-        (progn
-          (delete-region eshell-last-output-end (point-max))
-          (setq cleared t)
-          (+eshell--sync-directory (current-buffer) (plist-get item :directory))
-          ;; `eshell-reset' in the directory change redraws the prompt.
-          (delete-region eshell-last-output-end (point-max))
-          (goto-char (point-max))
-          ;; Set before sending: an internal command finishes inside
-          ;; `eshell-send-input' itself.  The output starts on the line after it.
-          (setq start (copy-marker (point))
-                +eshell--current (append (list :pending pending :start start)
-                                          item)
-                +eshell--command-timer
-                (run-at-time (plist-get item :timeout) nil #'+eshell--timeout
-                             (current-buffer) +eshell--current))
-          (insert (plist-get item :command))
-          (eshell-send-input))
-      ((error quit)
-       (unless (and start (null (marker-buffer start)))
-         (+eshell--cancel-command-timer)
-         (when start (set-marker start nil))
-         (setq +eshell--current nil)
-         (let ((foreground eshell-foreground-command))
-           (when cleared
-             (setq +eshell--pending-restore pending))
-           (when foreground
-             (condition-case stop-error
-                 (eshell-kill-process)
-               (error (message "Eshell process stop failed: %S" stop-error))))
-           (unless foreground
-             (setq +eshell--pending-restore nil)
-             (+eshell--schedule-dispatch (and cleared pending))))
-         (+eshell--result item :status nil :reason 'error
-                          :error (error-message-string err))
-         (+activity--refresh))))))
+  (if remote-buffer-disconnected-p
+      (+eshell--result item :status nil :reason 'disconnected)
+    (let* ((+eshell--dispatching t)
+           (pending (+eshell--input))
+           (cleared nil)
+           (owned (append (list :pending pending :start nil :starting t) item))
+           start)
+      ;; Directory changes can yield.  Disconnect must own this item before
+      ;; then, without treating the reset prompt as this command's completion.
+      (setq +eshell--current owned)
+      (condition-case err
+          (progn
+            (delete-region eshell-last-output-end (point-max))
+            (setq cleared t)
+            (+eshell--sync-directory (current-buffer) (plist-get item :directory))
+            (if (and (eq +eshell--current owned) (not remote-buffer-disconnected-p))
+		(progn
+                  ;; `eshell-reset' in the directory change redraws the prompt.
+                  (delete-region eshell-last-output-end (point-max))
+                  (goto-char (point-max))
+                  (setq start (copy-marker (point))
+			+eshell--current (plist-put +eshell--current :start start)
+			+eshell--command-timer
+			(run-at-time (plist-get item :timeout) nil #'+eshell--timeout
+                                     (current-buffer) +eshell--current))
+                  (setf (plist-get +eshell--current :starting) nil)
+                  (insert (plist-get item :command))
+                  (eshell-send-input))
+              (+eshell--finished-h)))
+	((error quit)
+         (when (or (eq +eshell--current owned)
+                   (and start (eq start (plist-get +eshell--current :start))))
+           (+eshell--cancel-command-timer)
+           (when start (set-marker start nil))
+           (setq +eshell--current nil)
+           (let ((foreground eshell-foreground-command))
+             (when cleared
+               (setq +eshell--pending-restore pending))
+             (when foreground
+               (condition-case stop-error
+                   (eshell-kill-process)
+		 (error (message "Eshell process stop failed: %S" stop-error))))
+             (unless foreground
+               (setq +eshell--pending-restore nil)
+               (+eshell--schedule-dispatch (and cleared pending))))
+           (+eshell--result item :status nil :reason 'error
+                            :error (error-message-string err))
+           (+activity--refresh)))))))
 
 (defun +eshell--finished-h ()
   "Deliver the result of the API command that just finished, if any."
-  (if-let* ((item +eshell--current))
-      (let ((output (+eshell--output item)))
-        (+eshell--cancel-command-timer)
-        (set-marker (plist-get item :start) nil)
-        (setq +eshell--current nil)
-        (+eshell--result item :status eshell-last-command-status :output output)
-        (+activity--refresh)
-        (eshell-truncate-buffer)
-        (+eshell--schedule-dispatch (plist-get item :pending)))
-    (when (or +eshell--pending-restore +eshell--queue)
-      (let ((pending +eshell--pending-restore))
-        (setq +eshell--pending-restore nil)
-        (+eshell--schedule-dispatch pending)))))
+  (unless (plist-get +eshell--current :starting)
+    (if-let* ((item +eshell--current))
+	(let ((output (+eshell--output item)))
+          (+eshell--cancel-command-timer)
+          (set-marker (plist-get item :start) nil)
+          (setq +eshell--current nil)
+          (+eshell--result item :status eshell-last-command-status :output output)
+          (+activity--refresh)
+          (eshell-truncate-buffer)
+          (+eshell--schedule-dispatch (plist-get item :pending)))
+      (when (or +eshell--pending-restore +eshell--queue)
+	(let ((pending +eshell--pending-restore))
+          (setq +eshell--pending-restore nil)
+          (+eshell--schedule-dispatch pending))))))
 
 (defun +eshell--abort-current (reason)
   "Resolve the current API command with REASON and stop its process."
@@ -327,7 +346,7 @@ TASK-NAME gives an automation task its own named buffer and queue."
     (let ((output (+eshell--output item))
           (foreground eshell-foreground-command))
       (+eshell--cancel-command-timer)
-      (set-marker (plist-get item :start) nil)
+      (when-let* ((start (plist-get item :start))) (set-marker start nil))
       (setq +eshell--current nil
             +eshell--pending-restore (plist-get item :pending))
       (if foreground
@@ -353,15 +372,20 @@ TASK-NAME gives an automation task its own named buffer and queue."
   "Restore PENDING input and start the next queued command, after this command."
   (when (timerp +eshell--dispatch-timer)
     (cancel-timer +eshell--dispatch-timer))
-  (setq +eshell--dispatch-timer
-        (run-at-time 0 nil #'+eshell--dispatch (current-buffer) pending)))
+  (setq +eshell--dispatch-timer nil)
+  (when (and (not +eshell--tearing-down)
+             (or +eshell--queue (and pending (not (string-empty-p pending)))))
+    (setq +eshell--dispatch-timer
+          (run-at-time 0 nil #'+eshell--dispatch (current-buffer) pending))))
 
 (defun +eshell--dispatch (buffer &optional pending)
   "In BUFFER, put PENDING input back and start the next queued command."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (setq +eshell--dispatch-timer nil)
+      (when remote-buffer-disconnected-p (+eshell--disconnect-h))
       (cond
+       (+eshell--tearing-down)
        ((+eshell--running-p))
        (+eshell--queue
         (let ((item (pop +eshell--queue)))
@@ -396,6 +420,8 @@ buffer queues the command.  This function returns before dispatching it."
                      :added-at (float-time)
                      :timeout timeout)))
     (with-current-buffer buffer
+      (when remote-buffer-disconnected-p
+        (user-error "Eshell target is disconnected; enter a command to restart it explicitly"))
       (when +eshell--tearing-down
         (user-error "Eshell buffer is closing"))
       (when (>= (length +eshell--queue)
@@ -418,18 +444,17 @@ The path digest prevents projects with the same basename from sharing a queue."
             (if (string-empty-p label) "root" label)
             (substring (secure-hash 'sha1 root) 0 8))))
 
-(defun +eshell-build-root (source-directory markers)
+(defun +eshell-build-root (directory markers)
   "Find the nearest directory with one of MARKERS inside the source project.
-When there is no marker, use SOURCE-DIRECTORY, so a single-file build writes
+When there is no marker, use DIRECTORY, so a single-file build writes
 its output beside the source without searching unrelated ancestors."
   (require 'project)
-  (let* ((source-directory (file-name-as-directory
-                            (expand-file-name source-directory)))
-         (project (project-current nil source-directory))
+  (let* ((directory (file-name-as-directory (expand-file-name directory)))
+         (project (project-current nil directory))
          (project-root (if project
                            (file-name-as-directory (project-root project))
-                         source-directory))
-         (cursor source-directory)
+                         directory))
+         (cursor directory)
          found)
     (while (and cursor (not found)
                 (string-prefix-p project-root cursor))
@@ -440,7 +465,7 @@ its output beside the source without searching unrelated ancestors."
       (unless found
         (setq cursor (unless (equal cursor project-root)
                        (file-name-directory (directory-file-name cursor))))))
-    (or found source-directory)))
+    (or found directory)))
 
 (defun +eshell-build-output-file (source)
   "Return SOURCE's simple, local executable name ending in .out."
@@ -529,24 +554,34 @@ Each dropped command's callback gets :reason `cancelled'."
         (+eshell--result item :status nil :reason 'cancelled)))
     (+eshell--abort-current 'cancelled)))
 
-(defun +eshell--kill-buffer-h ()
-  "Resolve every outstanding command of a buffer being killed."
-  (setq +eshell--tearing-down t)
+(defun +eshell--drain (reason &optional keep-input)
+  "Resolve outstanding commands with REASON, preserving input if KEEP-INPUT."
   (when (timerp +eshell--dispatch-timer)
     (cancel-timer +eshell--dispatch-timer)
     (setq +eshell--dispatch-timer nil))
   (+eshell--cancel-command-timer)
   (let ((items (append (and +eshell--current (list +eshell--current))
-                       +eshell--queue)))
+                       +eshell--queue))
+        (pending (and keep-input (or (plist-get +eshell--current :pending)
+                                     +eshell--pending-restore))))
     (setq +eshell--current nil
           +eshell--queue nil
-          +eshell--pending-restore nil
+          +eshell--pending-restore pending
           +eshell--manual-started-at nil)
     (+activity--refresh)
     (dolist (item items)
       (when-let* ((start (plist-get item :start)))
         (set-marker start nil))
-      (+eshell--result item :status nil :reason 'killed))))
+      (+eshell--result item :status nil :reason reason))))
+
+(defun +eshell--disconnect-h ()
+  "Stop automatic Eshell work before Remote closes target resources."
+  (+eshell--drain 'disconnected t))
+
+(defun +eshell--kill-buffer-h ()
+  "Resolve every outstanding command of a buffer being killed."
+  (setq +eshell--tearing-down t)
+  (+eshell--drain 'killed))
 
 (defun +eshell--disable-undo-h ()
   "Keep a command's output, and the scrollback it trims, out of undo.
@@ -572,6 +607,7 @@ the undo history of a buffer that lives for weeks."
   ;; After the final trim above, which would otherwise be recorded.
   (add-hook 'eshell-post-command-hook #'+eshell--enable-undo-h -80 t)
   (add-hook 'kill-buffer-hook #'+eshell--kill-buffer-h nil t)
+  (add-hook 'remote-buffer-disconnect-hook #'+eshell--disconnect-h nil t)
   ;; Perspective protects a workspace's last buffer.  An Eshell float can be
   ;; that buffer, which silently makes `exit' and the red close button no-ops.
   ;; Keep the process and other kill queries, but let Eshell sessions end.

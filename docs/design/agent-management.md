@@ -244,6 +244,18 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
   共用执行会话池。Pi 按全局／项目作用域独立管理，不进入执行池的 tab、选择器、
   管理器与批量停止。物理注册表仍包含全部会话；显式 API 可查询全部公共对象。
   池切换不创建进程，停止逐个调用执行 owner；私有导出会话不进入日常池。
+  会话保留各自的 ACP client 与原生 session ID，共享的 backend attachment 由
+  Remote 管理。项目拥有的单个 forward/group 丢失时，仅恢复该资源，不借此
+  取消同 transport 的 ACP 回合；真实 transport 故障按 Remote 的 pipeline 契约处理。
+  项目池查询先按 target、规范根和管理类型筛选物理 buffer，再构造成员快照；
+  一个项目的 tab/选择器不读取其他项目会话的完整 prompt、usage 和待决请求。
+  本机绝对根从其他 target 的 buffer 中查询也保持本机身份。暖会话回收按同一
+  规范 pool key 分组，仅从 buffer 已登记字段取身份，不为分组构造完整快照。
+  `+agent-pool-buffers` 与 `+agent-pool-sessions` 查询同一批物理成员；tab 和批量
+  关闭只取 buffer，不读完整快照。插件可在 `+agent-session-private-buffer-functions`
+  中根据 buffer 已登记字段声明私有会话，不查磁盘或网络；旧的
+  `+agent-session-private-functions` 仍收到完整快照，配置它时按需构造候选快照。
+  两类过滤经 `+agent-session-private-p` 统一应用于池与管理器，不维持额外成员缓存。
 - **C24 显示只改目标视图。** 从 agent A 切换 B 时复用当前聊天窗格，默认不由
   B 曾经的 popup/here 回调重新决定位置。其他手工分屏的会话和编辑窗格保持原样。
   编辑器发起显示时复用本 frame 的已有 agent 视图，未有时才增加右侧 dock。
@@ -279,6 +291,12 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
   提醒，不等下一次提交或卡死检查。已退出 client 的请求不再是待处理或忙碌，
   `:turn-state` 为 `interrupted` 表示结果未知，不重放；停止与审批入口明确拒绝。
   自身 `shutdown`、结束会话和 Remote 的显式断开不是故障。测试：`agent-process-c38-*`。
+  Remote 在关闭资源前挂起待发 prompt，作废标题查询并取消停止/idle 调度；保留 buffer 的
+  `:process-state` 为 `disconnected`，中断回合为未知结果。旧 client 的请求与队列
+  恢复入口均拒绝继续发送，原生 session ID、草稿与挂起区保留，等待明确重连。
+  已关闭、明确断开或 state 被替换的入站请求不执行文件/终端操作；晚到的审批
+  回调也不再回复。关闭后的原生回调仍可结清原请求，并释放 client-ended 观察者，
+  不因此发出失败提醒或重启 provider。
 - **C39 队列可以管理。** `C-c A q`、会话菜单 `q`、管理器 `Q` 打开同一队列面板，
   能查看、编辑、删除、排序、挂起、恢复和立即发送；面板只改变待发文本，关闭不
   影响队列。立即发送在忙碌时走 steering，适配器不支持则拒绝，不擅自打断当前回合。
@@ -305,11 +323,24 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
   除 list/create 外，调用者必须给出 buffer 和匹配的 nativeSessionId；可额外限制
   root/target。创建只初始化 client，发送复用原生队列且不自动清空挂起任务，读取
   只分页返回 transcript 并排除输入草稿。后台操作不选择窗口，不代理权限决策。
+  精确 buffer/ID 查询直接校验该物理会话，不遍历其他会话的快照；status 复用这份
+  只读快照，变更操作后重新读取。列表先按项目、target 和隐私过滤 buffer，再分页
+  构造返回项；旧 snapshot 隐私谓词仍按兼容契约读取候选完整快照。
+  无 root 的显式 target 查询覆盖该 target 的所有项目；二者都省略时才跨 target。
 - **C46 空闲路径有界。** 不相关会话的状态变化不扫描暖会话候选；已调度的活跃
   候选复用现有单次计时器。Pi 的所有管理来源始终排除自动回收。恢复能力查询
   只读 ACP 能力字段，不为两个布尔值构造完整会话快照。API 和原生回合完成均
   通知公共订阅者，按确切回合去重；草稿检查不复制整段输入。
   原生历史查询不代表模型忙碌，不扣住新输入；自动回收仍保护所有在途 RPC。
+  Activity 的事件更新只读取变更会话的忙碌事实与显示字段；定期核对不构造完整
+  session snapshot。相同显示状态不重复发布活动变更。
+  同一次同步启动中，相同 buffer、cwd、环境与 PATH 的 adapter CLI 查找只执行一次；
+  不跨启动复用，也不缓存失败。ACP client 从自己的 context buffer 启动，使用
+  `agent-shell` 的 target placement 与 interactive process class，local 同样经路由。
+  标题的后台 `session/list` 只在所属 client 进程存活时发送；同一会话同一回合的
+  并发刷新合为一条请求。请求期间有更新的回合时，完成后最多补一次最新刷新。
+  回包须仍属于同一 state、client、进程、session ID 与 cwd；查询期间已经收到的新
+  标题不被旧查询覆盖。失败不缓存、不循环重试，也不为标题启动或重启 client。
 - **C47 动作只有一张表。** `tools/agent/actions` 是所有 agent 动作的唯一列表，
   `C-c A`、会话菜单（`?`、`C-c C-z`、管理器 `.`、鼠标右键）和本地斜杠命令都由它生成；
   同一字母处处是同一动作。管理器的 `j`、`k`、`q` 是导航，队列因此是 `Q`。新增动作
@@ -374,7 +405,9 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
 - **C56 输入区回车只写字。** 输入区内 `RET` 换行（Markdown 列表照常续写），`S-RET`
   发送，生成中 steer（不能 steer 的 provider 与 Run 改为排队），`M-RET` 发送，生成中
   排队；空闲时两者都直接发送。输入区外 `RET` 保留原生动作，表单、按钮和补全菜单的
-  `RET` 不受影响。`M-V` 粘贴剪贴板图片。提示行写出同样的键。测试：`agent-c56-*`。
+  `RET` 不受影响。`M-V` 粘贴剪贴板图片；图片与截图始终从客户端采集，保存到
+  会话 target 的 `.agent-shell/screenshots/` 时经过 Remote 文件 API，本机工具不接收
+  逻辑远端路径。提示行写出同样的键。测试：`agent-c56-*`、`agent-remote-c56-*`。
 - **C57 回复作为页面阅读。** 聊天 buffer 不渲染公式；`o`（`/page`）取上一条回复的
   Markdown 原文，写入 `var/agent/replies/`，在另一个窗口作为 Noema 页面打开，聊天保持
   可见。同一回复复用同一文件；目录只保留最近 20 份，正被访问的不删。没有回复时报告
@@ -433,9 +466,10 @@ G4–G9 与 G11 的项目池、显示归属、返回、预览及物理替换问�
   结构化事件的提供商仍不能通过解析聊天正文推断等待回答。
 - **G2 外部执行附着。** 已在另一客户端执行的任务依旧只能显示真实的忙碌事实，
   不能把历史恢复伪装成附着或复制一份执行。
-- **G13 真实 SSH 实测。** C37–C44 已在客户端无法直接访问的 Remote target 上经 `/fs:`
-  路由验证（`agent-remote-routed-*`），但没有真实网络与断线。
-  `test/agent-lifecycle-remote-live.el` 覆盖真实目标，需要允许写入目标的 `/tmp`，尚未运行。
+- **G13 真实 SSH 长期与故障实测。** C37–C44 的确定性 ACP fixture 已在 Aaron-PC 上
+  分别通过 shell TRAMP 与 tramp-rpc：目标 cwd/显式环境、暂停队列、进程退出、改动路径与
+  保存会话恢复。`test/agent-lifecycle-remote-live.el` 可按 backend 复验；真实提供商长会话、
+  传输半开和物理断网恢复仍未验证，不能把 fixture 的进程退出当作网络故障覆盖。
 - **G14 Remote 上的项目入口。** Noema host 与 Hy Memory 在客户端，运行在其他 target 的
   Agent 既够不到 API 命令，也没有记忆。C51、C52 在这里不生效：会话不收入口，不是报错。
   要支持需要经 `remote-channel` 转发 host，尚未实现。
