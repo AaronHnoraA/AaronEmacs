@@ -1233,6 +1233,12 @@ This samples once and does not mutate or display the performance board."
                          +performance--activity-state)
               (when-let* ((runtime (etaf-runtime-for-buffer buffer)))
                 (etaf-unmount runtime))
+              ;; The page's keys are minor-mode maps, which Evil's normal
+              ;; state would shadow (`j' moving a line instead of a row).
+              ;; The board's own major mode starts Evil in Emacs state.
+              ;; Enter it before mounting: a major mode resets locals.
+              (unless (derived-mode-p '+performance-watch-mode)
+                (+performance-watch-mode))
               (let ((view-state (etaf-ref nil))
                     (tab-state (etaf-ref 'overview))
                     (activity-state (etaf-ref nil)))
