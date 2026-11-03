@@ -220,6 +220,29 @@ ACP 的对应窗口也已复现并修复；详情见 Agent 检查记录的“显
 `--keep-listing-attributes-a` 和 `--keep-completions-a`；没有 Eshell/ACP 的全局 hook、
 按键、设置或 timer 差异。未改写 baseline，也未把共享树的结果称为零差异。
 
+## 恢复原有退出与窗口交互
+
+用户实测指出本轮适配越过了后端边界：输入 `exit` 被当成 transport disconnected，
+Raycast 和 Cmd-T 也不再沿用入口选择的窗口。两处原因均来自适配本身：强制把
+`portal-terminal-auto-close-on-exit` 设为 nil，并把未知退出码当断线；创建 native view
+时又传入 elsewhere，让 `pop-to-buffer` 重新选窗，覆盖调用入口已决定的 frame/分屏。
+前面的“未知退出保留为 disconnected”是错误策略，已撤回。
+
+修复恢复 Portal 原有自动关闭设置，程序结束只结束 Remote 资源登记、保留未知
+退出码，不生成 transport 错误。只有 workspace 确认断线时才局部禁用自动关闭、
+保存历史并保留重启入口。创建 view 使用选中窗口，后端只提供 argv/cwd/env。
+Raycast、Cmd-T 的选窗代码和原有焦点策略保持原样。
+
+真实 GUI 的两条回归已通过：Cmd-T 的当前、右、下、新 frame 四种放置逐一使用
+真实 PTY，并实际输入 `exit`；Raycast 的入口创建一个只含终端的新 frame，不改变
+原有两个编辑窗格，退出后只关闭该终端 frame。测试加入一条强制其他显示策略的
+规则，确认后端创建不会重新进入通用显示路由。选择器输入在测试里受控，未将其
+计作物理 Cmd-T 按键事件验收。入口为 `make terminal-ui-regression-live`。
+
+终端专项 18 项通过；启动器/选择器 batch 回归 9 通过、1 个 GUI 条件跳过；严格编译
+通过。此次修改前后的全启动 state-check 为 0 行差异。正常关闭与 transport 历史
+保留走各自既有流程，没有修改 Portal native 源码。
+
 ## 尚未证明
 
 - Aaron-PC 当前 SSH 配置指向 `10.31.1.109:22`；本轮实测返回 `No route to host`。

@@ -313,6 +313,7 @@ and back gives it to the view again."
   "Keep bounded scrollback while releasing a disconnected native terminal."
   (when portal-view--target
     (let ((text (ignore-errors (portal--terminal-text portal-view--target))))
+      (setq-local portal-terminal-auto-close-on-exit nil)
       (setq portal-terminal--exited t)
       (portal-view-close)
       (portal-input-mode -1)
@@ -348,9 +349,10 @@ and back gives it to the view again."
           portal-terminal--directory +portal-target-directory
           list-buffers-directory +portal-target-directory)
     (when portal-terminal--exited
-      ;; The native engine has no exit code contract yet.  Unknown is a
-      ;; disconnected terminal with history and an explicit restart recipe.
-      (remote-terminal-frontend-exited remote-terminal-instance))))
+      ;; Portal owns its existing exit/close policy.  No exit code does not
+      ;; prove transport loss, and Remote must not schedule a second close.
+      (let ((remote-terminal-auto-close-on-exit nil))
+        (remote-terminal-frontend-exited remote-terminal-instance)))))
 
 (cl-defun +portal-create (&key directory name command environment (display t))
   "Create a Portal terminal in DIRECTORY with NAME and optional COMMAND.
@@ -376,8 +378,7 @@ The native UI stays on the client; every target uses a framework PTY plan."
                  (process-environment (remote-client-process-environment))
                  (exec-path (remote-client-exec-path))
                  (remote-current-route nil)
-                 (remote-current-adapter-id nil)
-                 (portal-terminal-auto-close-on-exit nil))
+                 (remote-current-adapter-id nil))
             ;; The framework already resolved argv, cwd and environment.
             ;; Portal's argv entry would run another interactive login shell
             ;; solely to resolve the program.  Its command entry skips that.
@@ -386,11 +387,10 @@ The native UI stays on the client; every target uses a framework PTY plan."
                    nil (mapconcat #'shell-quote-argument argv " ")
                    (or name (format "*portal:%s:%s*" (remote-workspace-target-id workspace)
                                     (file-name-nondirectory (directory-file-name directory))))
-                   t nil "terminal"))
+                   nil nil "terminal"))
             (condition-case error-data
                 (with-current-buffer buffer
                   (setq-local +portal-target-directory (remote-canonicalize-emacs-file-name directory)
-                              portal-terminal-auto-close-on-exit nil
                               portal-terminal--project (remote-workspace-root workspace)
                               default-directory +portal-target-directory
                               portal-terminal--directory +portal-target-directory)

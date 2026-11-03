@@ -259,9 +259,10 @@
         (when (buffer-live-p buffer) (kill-buffer buffer))
         (remote-workspace-close workspace)))))
 
-(ert-deftest terminal-remote-native-unknown-exit-keeps-restartable-history ()
+(ert-deftest terminal-remote-native-program-exit-does-not-invent-transport-loss ()
   (terminal-remote-test-with-registry
-    (let* ((workspace (remote-workspace-open "/fs:local:/tmp/" :connect nil))
+    (let* ((remote-terminal-auto-close-on-exit nil)
+           (workspace (remote-workspace-open "/fs:local:/tmp/" :connect nil))
            (buffer (generate-new-buffer " *terminal-native-unknown-exit*"))
            (disconnected 0) terminal)
       (unwind-protect
@@ -273,11 +274,14 @@
                                    :disconnect-function (lambda (_ _reason) (cl-incf disconnected)))))
             (remote-terminal-frontend-exited terminal)
             (remote-terminal-frontend-exited terminal)
-            (should (= disconnected 1))
+            (should (= disconnected 0))
             (should (buffer-live-p buffer))
-            (should (eq (remote-terminal-state terminal) 'disconnected))
-            (should (memq terminal (remote-terminal-list workspace)))
+            (should (eq (remote-terminal-state terminal) 'closed))
+            (should (plist-member (remote-terminal-metadata terminal) :exit-status))
+            (should-not (plist-get (remote-terminal-metadata terminal) :exit-status))
+            (should-not (remote-terminal-list workspace))
             (should-not (remote-terminal-live-p terminal)))
+        (when (buffer-live-p buffer) (kill-buffer buffer))
         (remote-workspace-close workspace)))))
 
 (ert-deftest terminal-remote-rejects-cwd-on-a-different-target-before-spawning ()

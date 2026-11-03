@@ -481,6 +481,7 @@
   "A local Remote workspace path reaches Ghostty as a real directory."
   (require 'term/portal/config)
   (let ((terminal (generate-new-buffer " *portal-directory-test*"))
+        (portal-terminal-auto-close-on-exit t)
         (logical "/fs:local:/tmp/portal-project/")
         (physical "/tmp/portal-project/")
         started-in)
@@ -497,7 +498,9 @@
                                        :id "portal-local-test" :target-id "local" :root logical))))
                   ((symbol-function 'remote-terminal-adopt) #'ignore)
                   ((symbol-function 'portal-terminal--new)
-                   (lambda (&rest _)
+                   (lambda (_quick _command _name elsewhere &rest _)
+                     (should-not elsewhere)
+                     (should portal-terminal-auto-close-on-exit)
                      (setq started-in default-directory)
                      terminal)))
           (should (eq (+portal-create :directory logical :display nil)

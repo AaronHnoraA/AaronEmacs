@@ -59,6 +59,8 @@ SSH 用例，`TERMINAL_REMOTE_BACKEND=tramp` 或 `tramp-rpc` 限定 Eshell 的�
 URL 恢复用例让临时 HTTP 服务脱离测试客户端独立运行，仅终止测试转发，核对自动
 恢复后的文件写入与新响应；GUI runner 额外验证重开页面。服务结束前会核对 UID、
 脚本与临时目录，避免 PID 复用时误杀其他进程。普通 batch 跳过的 GUI 项不算通过。
+`make terminal-ui-regression-live` 在独立 GUI Emacs 验证 Raycast 的独立单窗格终端、
+Cmd-T 四种放置及真实 shell `exit` 的原有关闭流程。
 `TERMINAL_REMOTE_GUI=1 python3 test/terminal-remote-loopback.py` 使用临时本机 SSH
 服务、独立 key/config 和与已安装 package 同版本的缓存 Darwin RPC server，测试后
 释放；它不覆盖首次 server 部署或物理远端网络。

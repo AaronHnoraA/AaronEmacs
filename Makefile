@@ -411,6 +411,7 @@ remote-task-disconnect-smoke:
 	$(BATCH) -l test/remote-task-disconnect-smoke.el
 
 .PHONY: agent-remote-test agent-remote-live terminal-remote-test terminal-remote-live terminal-remote-gui-live
+.PHONY: terminal-ui-regression-live
 .PHONY: remote-url-test
 remote-url-test:
 	$(REMOTE_TEST_BATCH) -l test/remote-url-tests.el --eval '(ert-run-tests-batch-and-exit "^remote-url-")'
@@ -424,6 +425,9 @@ terminal-remote-live:
 
 terminal-remote-gui-live:
 	sh site-lisp/portal/test/gui-ert.sh --init-directory=$(CURDIR) -l $(CURDIR)/early-init.el -l $(CURDIR)/init.el -l $(CURDIR)/test/terminal-remote-live.el --eval '(portal-gui-ert-start "^terminal-remote-live-native-")'
+
+terminal-ui-regression-live:
+	sh site-lisp/portal/test/gui-ert.sh --init-directory=$(CURDIR) -l $(CURDIR)/early-init.el -l $(CURDIR)/init.el -l $(CURDIR)/test/terminal-ui-regression-live.el --eval '(portal-gui-ert-start "^terminal-ui-regression-")'
 
 agent-remote-test:
 	$(BATCH) -l test/agent-remote-performance-tests.el -f ert-run-tests-batch-and-exit

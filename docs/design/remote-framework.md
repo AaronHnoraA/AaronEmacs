@@ -1322,7 +1322,8 @@ Portal 用它保留 Ghostty 集成资源和客户端 shell 的目录事件，再
 没有 Emacs process 的 frontend 可用 `remote-terminal-adopt` 的只读 `:live-function`、
 `:send-function` 与幂等 `:close-function` 接入同一 workspace 生命周期；关闭 buffer
 和 workspace 都释放 native handle。它通过 `remote-terminal-frontend-exited` 报告
-退出；无法提供退出码时保留为 disconnected，不把未知退出当作成功。
+程序退出；未知退出码仍保留为未知，不据此认定 transport 断开。
+Portal 沿用原有退出关闭设置，Remote 只结束其资源登记，不改变窗口和焦点策略。
 
 Portal Web 的网页与 native module 属于客户端。其统一 URL 打开入口与 Portal
 首次加载使用客户端 cwd、环境和 PATH，不继承发起操作的远端 buffer；普通 URL 的
@@ -1375,7 +1376,10 @@ native handle，buffer 保留为 disconnected。显式 `remote-terminal-restart`
 环境覆盖与 command 新建同一 frontend。
 关闭 native view 时的空 buffer 清理也遵守这个状态；延迟清理在执行时重新检查，
 不删除仍由 workspace 拥有的 disconnected 历史与重启配方。
-当前 Portal native API 只报告退出布尔值，不提供退出码；未知退出保留历史与重启入口。
+当前 Portal native API 只报告退出布尔值，不提供退出码；该事件结束程序生命周期，
+沿用 Portal 原有的自动关闭设置，不生成 transport disconnected 提示。只有已确认的
+传输丢失才保留断开历史与重启入口。创建 view 使用调用入口已选择的窗口，Raycast
+和 Cmd-T 决定 frame/分屏，后端适配不再次调用通用显示路由。
 它也只上报客户端主机的 OSC 7 目录：非 client-accessible target 的 shell 运行中 `cd`
 尚不能回写 Emacs cwd，buffer 保留已确认的 target 与启动目录。这两项不算完整验收。
 

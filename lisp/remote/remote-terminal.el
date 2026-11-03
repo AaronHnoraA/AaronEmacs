@@ -336,11 +336,12 @@ removed with its process."
                          :error (error-message-string error-data))))))
 
 (defun remote-terminal-frontend-exited (terminal &optional status)
-  "Report native TERMINAL's exit STATUS; nil means its result is unknown."
+  "Report native TERMINAL's program exit STATUS, or nil if unknown.
+Program exit ends the terminal; it does not establish transport failure.
+Actual transport loss is reported by `remote-terminal-mark-disconnected'."
   (when (and (remote-terminal-p terminal) (eq (remote-terminal-state terminal) 'open))
-    (if (and (integerp status) (zerop status))
-        (remote-terminal--process-finished terminal nil)
-      (remote-terminal-mark-disconnected terminal (list 'frontend-exit status)))))
+    (remote-terminal-put-metadata terminal :exit-status status)
+    (remote-terminal--process-finished terminal nil)))
 
 (cl-defun remote-terminal-adopt
     (workspace buffer
