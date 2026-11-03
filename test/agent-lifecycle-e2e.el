@@ -278,6 +278,78 @@
     (should (equal (+agent-acp-state-value buffer '(:pending-prompts)) nil))
     (should (= (+agent-acp-held-prompt-count buffer) 1))))
 
+(defmacro agent-lifecycle-e2e--with-steering-session (spec &rest body)
+  "Like `agent-lifecycle-e2e--with-session', with a fixture that can steer."
+  (declare (indent 1))
+  `(let ((process-environment (cons "AGENT_FLOW_STEERING=1" process-environment)))
+     (agent-lifecycle-e2e--with-session ,spec ,@body)))
+
+(ert-deftest agent-queue-c37-a-declined-steer-keeps-its-prompt ()
+  "A steer the agent refuses interrupts the turn; its text is held, not lost."
+  (agent-lifecycle-e2e--with-steering-session (buffer store directory)
+    (should (with-current-buffer buffer (agent-shell-steering-supported-p)))
+    (agent-flow-e2e--send buffer "hold")
+    (agent-flow-e2e--wait (lambda () (+agent-acp-busy-p buffer)))
+    (agent-flow-e2e--send buffer "queued after")
+    (let ((agent-shell-busy-submit-default-function #'+agent-shell-busy-submit-steer-or-queue))
+      (agent-flow-e2e--send buffer "steered fine")
+      (agent-flow-e2e--wait (lambda () (string-match-p "Steered: steered fine"
+                                                       (agent-flow-e2e--text buffer))))
+      (agent-flow-e2e--send buffer "decline this"))
+    (agent-flow-e2e--idle buffer)
+    (agent-flow-e2e--wait (lambda () (member "decline this" (+agent-queue-items buffer))))
+    ;; The refused steer was meant for now, so it comes before the queue.
+    (should (equal (+agent-queue-items buffer) '("decline this" "queued after")))
+    (should (= (+agent-acp-held-prompt-count buffer) 2))))
+
+(ert-deftest agent-queue-c37-a-steer-protocol-error-keeps-its-prompt ()
+  "An ACP error response holds the steer even after its callback runs later."
+  (agent-lifecycle-e2e--with-steering-session (buffer store directory)
+    (agent-flow-e2e--send buffer "hold")
+    (agent-flow-e2e--wait (lambda () (+agent-acp-busy-p buffer)))
+    (let ((agent-shell-busy-submit-default-function #'+agent-shell-busy-submit-steer-or-queue))
+      (agent-flow-e2e--send buffer "error this"))
+    (agent-flow-e2e--idle buffer)
+    (agent-flow-e2e--wait (lambda () (member "error this" (+agent-queue-items buffer))))
+    (should (equal (+agent-queue-items buffer) '("error this")))
+    (should (= (+agent-acp-held-prompt-count buffer) 1))))
+
+(ert-deftest agent-queue-c39-send-now-keeps-the-prompt-when-steering-is-called-off ()
+  "Send now removes a prompt only once it has gone; a refused steer leaves it in place."
+  (agent-lifecycle-e2e--with-steering-session (buffer store directory)
+    (agent-flow-e2e--send buffer "permission")
+    (agent-flow-e2e--wait (lambda () (eq (with-current-buffer buffer (agent-shell-status)) 'blocked)))
+    (with-current-buffer buffer (agent-shell--prompt-queue-enqueue :prompt "first"))
+    (with-current-buffer buffer (agent-shell--prompt-queue-enqueue :prompt "second"))
+    ;; The upstream "Steer anyway?" question is answered no by the harness.
+    (should-error (+agent-queue-send-now buffer 1) :type 'user-error)
+    (should (equal (+agent-queue-items buffer) '("first" "second")))))
+
+(ert-deftest agent-side-c59-a-side-question-forks-the-conversation ()
+  "/side forks the session it stands beside and leaves that session's turn alone."
+  (agent-lifecycle-e2e--with-session (buffer store directory)
+    (agent-flow-e2e--send buffer "context")
+    (agent-flow-e2e--idle buffer)
+    (agent-flow-e2e--send buffer "hold")
+    (agent-flow-e2e--wait (lambda () (+agent-acp-busy-p buffer)))
+    (let* ((main-id (+agent-acp-state-value buffer '(:session :id)))
+           (side (+agent-session-side-chat buffer)))
+      (unwind-protect
+          (progn
+            (should (buffer-live-p side))
+            (should (eq (buffer-local-value '+agent-acp-session-origin side) 'side))
+            (agent-flow-e2e--wait (lambda () (+agent-acp-state-value side '(:init-finished))))
+            (should (cl-some (lambda (line)
+                               (and (string-match-p "\"session/fork\"" line)
+                                    (string-match-p (regexp-quote main-id) line)))
+                             (agent-lifecycle-e2e--events store)))
+            (should-not (equal (+agent-acp-state-value side '(:session :id)) main-id))
+            ;; The main turn still runs; the side question did not steer or stop it.
+            (should (+agent-acp-busy-p buffer))
+            (should-not (cl-some (lambda (line) (string-match-p "session/cancel" line))
+                                 (agent-lifecycle-e2e--events store))))
+        (agent-lifecycle-e2e--dispose side)))))
+
 (ert-deftest agent-queue-c39-resume-refuses-an-exited-client ()
   (agent-lifecycle-e2e--with-session (buffer store directory)
     (agent-flow-e2e--send buffer "hold")

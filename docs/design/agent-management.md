@@ -270,7 +270,9 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
   prompt 移到 Emacs 持有的挂起区，事件回调不提问。Run 期间在输入区提交的内容
   只进队列，不 steering 也不并发第二个 prompt，以保持 Run 的冻结输入；此后的普通回合不带走它们，由人在队列
   面板恢复。计数同时包含挂起区，结束确认和恢复记录也保护它。异常结束不算完成：
-  `:stop-reason` 记录事实，并按 failed 提醒。测试：`agent-queue-c37-*`。
+  `:stop-reason` 记录事实，并按 failed 提醒。steering 已清空输入但被 provider 以
+  结果或协议错误拒绝时，原文本进挂起区最前面，供人检查或恢复；它不随随后普通回合
+  自动发送。测试：`agent-queue-c37-*`。
 - **C38 client 退出是即时事实。** 进程结束的当下更新视图、挂起队列并按 failed
   提醒，不等下一次提交或卡死检查。已退出 client 的请求不再是待处理或忙碌，
   `:turn-state` 为 `interrupted` 表示结果未知，不重放；停止与审批入口明确拒绝。
@@ -278,6 +280,7 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
 - **C39 队列可以管理。** `C-c A q`、会话菜单 `q`、管理器 `Q` 打开同一队列面板，
   能查看、编辑、删除、排序、挂起、恢复和立即发送；面板只改变待发文本，关闭不
   影响队列。立即发送在忙碌时走 steering，适配器不支持则拒绝，不擅自打断当前回合。
+  steering 在等待审批或问答时需要确认；确认被取消或同步提交失败，原条目与顺序保留。
   测试：`agent-queue-c39-*`。
 - **C40 注意导航直达请求。** `C-c A j` 按审批、问答、失败、断开、未读的顺序跨项目
   循环，Pi 也在其中，带前缀只看当前项目；Inbox 同序。待审批和问答直接落在原生控件上。点击
@@ -380,6 +383,11 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   runtime 建页，正文接在模板之后。通用层只公开 `+agent-last-reply`，建页留在
   `noema/roam`，不进入 `tools/agent`（C10）。没有回复时报告而不打开工作台。
   测试：`agent-c58-*`。
+- **C59 旁路提问继承原生上下文。** `/side` 在提供方报告 fork 且原会话已有原生
+  Session ID 时，fork 这个 Session，另开临时聊天；它知道原会话之前的对话，
+  但有自己的后续历史。原会话的当前回合、队列和输入不动。不支持 fork 或原会话
+  尚未初始化时另开空白临时聊天。旁路会话不进入项目的持久会话登记。
+  测试：`agent-side-c59-*`。
 
 ## 实现位置
 

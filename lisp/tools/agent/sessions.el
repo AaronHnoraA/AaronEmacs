@@ -123,13 +123,20 @@ agent until the user explicitly chooses creation."
       (with-current-buffer buffer (call-interactively #'agent-shell-fork)))))
 
 (defun +agent-session-side-chat (&optional buffer)
-  "Start a temporary independent conversation beside BUFFER."
+  "Start a temporary conversation beside BUFFER that knows what BUFFER said.
+Where the agent reports native fork, the side conversation forks BUFFER's
+session, so a question about its last answer has that answer to go on;
+BUFFER's turn, queue and history are untouched.  Otherwise it starts
+empty.  See C59."
   (interactive)
   (let ((buffer (+agent-acp-command-buffer buffer)))
     (unless (+agent-session--dispatch 'side-chat buffer)
       (let* ((config (+agent-acp-state-value buffer '(:agent-config)))
              (directory (buffer-local-value 'default-directory buffer))
-             (side (+agent-acp-start :config config :directory directory :origin 'side :focus t)))
+             (fork (and (+agent-session-capability-p buffer :fork)
+                        (+agent-acp-state-value buffer '(:session :id))))
+             (side (+agent-acp-start :config config :directory directory :origin 'side
+                                     :fork-session-id fork :focus t)))
         (+agent-acp-adopt side :origin 'side
                           :root (buffer-local-value '+agent-acp-session-root buffer))))))
 

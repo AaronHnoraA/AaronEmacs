@@ -23,7 +23,7 @@ createInterface({input:process.stdin}).on('line', line => {
     if (!msg.method) {const cb=pending.get(msg.id);pending.delete(msg.id);cb?.(msg.result);return;}
     const p=msg.params || {}, sid=p.sessionId;
     switch(msg.method) {
-      case 'initialize':reply(msg.id,{protocolVersion:1,agentInfo:{name:'agent-flow-fixture',version:'1'},authMethods:[],agentCapabilities:{loadSession:true,promptCapabilities:{embeddedContext:true}},sessionCapabilities:{list:{},resume:{},fork:{}}});break;
+      case 'initialize':reply(msg.id,{protocolVersion:1,agentInfo:{name:'agent-flow-fixture',version:'1'},authMethods:[],agentCapabilities:{loadSession:true,promptCapabilities:{embeddedContext:true}},sessionCapabilities:{list:{},resume:{},fork:{}},...(process.env.AGENT_FLOW_STEERING?{_meta:{steering:{supported:true}}}:{})});break;
       case 'authenticate':reply(msg.id);break;
       case 'session/new': {const id=`fixture-${Object.keys(sessions).length+1}`;sessions[id]={cwd:p.cwd,turns:[]};persist();reply(msg.id,session(id));break;}
       case 'session/load':case 'session/resume':
@@ -33,6 +33,14 @@ createInterface({input:process.stdin}).on('line', line => {
       case 'session/list':reply(msg.id,{sessions:Object.entries(sessions).map(([id,s])=>({sessionId:id,cwd:s.cwd,title:s.title??id,updatedAt:new Date().toISOString()}))});break;
       case 'session/fork': {const id=`fixture-${Object.keys(sessions).length+1}`;sessions[id]=structuredClone(sessions[sid]);persist();reply(msg.id,session(id));break;}
       case 'session/set_model':case 'session/set_mode':reply(msg.id);break;
+      case '_session/steering': {
+        // Opt-in through AGENT_FLOW_STEERING.  A steer whose text starts with
+        // "decline" is refused the way Codex answers; any other joins the turn.
+        const steer=p.prompt.map(x=>x.text||'').join('');
+        if(steer.startsWith('error')){send({id:msg.id,error:{code:-32000,message:'Steer rejected'}});break;}
+        if(steer.startsWith('decline')){reply(msg.id,{outcome:'failed'});break;}
+        text(sid,`Steered: ${steer}\n`);reply(msg.id,{outcome:'injected'});break;
+      }
       case 'session/cancel':text(sid,'Turn cancelled.\n');finish(sid,'cancelled');break;
       case 'session/prompt': {
         active.set(sid,msg.id);

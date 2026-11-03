@@ -2057,7 +2057,7 @@ tab-line/tab-bar，但会出现在 Ibuffer 的 Agent 分组和日常 buffer 选�
 | `?`（输入区外） / `C-c C-z` | 全部动作的菜单；鼠标右键 tab 相同 |
 | `/queue` `/next` `/changes` `/resume` | 输入区本地命令：队列、下一个等待的会话、改过的文件、已保存对话 |
 | `/cache` `/inbox` `/usage` `/pi` `/doctor` `/watch` | 同上，不走模型：Agent cache、Inbox、Usage、项目 Pi、Pi doctor、倒计时后告诉 Pi，见[用 Pi 协作](pi-collaboration.md) |
-| `/fork` `/rename` `/restart` `/new` `/side` `/agents` | 输入区本地命令，生成中也可用；提供方的同名命令优先 |
+| `/fork` `/rename` `/restart` `/new` `/side` `/agents` | 输入区本地命令，生成中也可用；提供方的同名命令优先。`/side` 在支持原生 fork 时另开带原对话上下文的临时聊天，不打断当前回合；否则另开空白聊天 |
 | `C-c C-c` | 停止当前 Run 或回合，排队的 prompt 挂起 |
 | `C-c C-e` | 聚焦输入提示符 |
 | `C-c C-o` / `C-c C-l` | 隐藏并返回来源 / 打开当前会话的管理入口（Agent Manager 或 Pi Sessions） |

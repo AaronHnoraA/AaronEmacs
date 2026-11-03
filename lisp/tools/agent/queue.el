@@ -108,17 +108,27 @@ interrupting its work is a separate, explicit decision."
   (+agent-queue--require-index buffer index)
   (+agent-queue--ready buffer)
   (let ((busy (+agent-acp-busy-p buffer))
-        (prompt (nth index (+agent-queue-items buffer))))
+        (items (+agent-queue-items buffer))
+        (held (+agent-acp-held-prompt-count buffer))
+        (sent nil))
     (when (and busy (not (with-current-buffer buffer (agent-shell-steering-supported-p))))
       (user-error "This agent cannot take input during a turn; stop it first"))
-    (+agent-queue-remove buffer index)
-    (with-current-buffer buffer
-      (if busy
-          (agent-shell-prompt-steer prompt)
-        (map-put! agent-shell--state :pending-prompts
-                  (cons prompt (map-elt agent-shell--state :pending-prompts)))
-        (let ((agent-shell-prompt-queue-merge nil))
-          (agent-shell--prompt-queue-process-next))))))
+    ;; The prompt leaves the queue only once it has gone: agent-shell may ask
+    ;; first ("Steer anyway?" while a request waits on you), and a no there
+    ;; must leave it where it was.  A steer declined later is held (C37).
+    (unwind-protect
+        (let ((prompt (nth index items)))
+          (+agent-queue-remove buffer index)
+          (with-current-buffer buffer
+            (if busy
+                (agent-shell-prompt-steer prompt)
+              (map-put! agent-shell--state :pending-prompts
+                        (cons prompt (map-elt agent-shell--state :pending-prompts)))
+              (let ((agent-shell-prompt-queue-merge nil))
+                (agent-shell--prompt-queue-process-next))))
+          (setq sent t))
+      (unless sent
+        (+agent-queue--store buffer items held)))))
 
 ;;;; Panel
 

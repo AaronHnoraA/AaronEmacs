@@ -964,6 +964,74 @@ just before that question, keeps every prompt and asks nothing."
       (error nil))
     t))
 
+;;;; A declined steer keeps its prompt (C37)
+
+(defvar +agent-acp--steer-prompt nil
+  "The text of the steer being sent, while its request is built.")
+
+(defvar +agent-acp--steer-interrupted nil
+  "A cons while a steering answer runs; its car turns t if that answer interrupts.")
+
+(defun +agent-acp--steer-prompt-a (original &rest args)
+  "Remember the text ORIGINAL steers, for its request to keep."
+  (let ((+agent-acp--steer-prompt (plist-get args :prompt)))
+    (apply original args)))
+
+(defun +agent-acp--note-steer-interrupt-a (&rest _)
+  "Note that a steering answer interrupted its turn."
+  (when (consp +agent-acp--steer-interrupted)
+    (setcar +agent-acp--steer-interrupted t)))
+
+(defun +agent-acp--hold-declined-steer (buffer prompt)
+  "Put PROMPT, a steer BUFFER's agent declined, first in the held queue.
+The input was cleared when it was sent and agent-shell keeps no copy, so
+without this the text is gone.  It was meant for now, so it goes before
+whatever was queued; the person resumes or edits it (C37, C39)."
+  (when (and (buffer-live-p buffer) (stringp prompt)
+             (not (string-empty-p (string-trim prompt))))
+    (with-current-buffer buffer
+      (push prompt +agent-acp--held-prompts)
+      (condition-case nil
+          (agent-shell--update-fragment
+           :state agent-shell--state
+           :block-id (format "%s-steer-held" (map-elt agent-shell--state :request-count))
+           :label-left "Steer held"
+           :body "The declined prompt is held. Review, edit or resume it with C-c A q."
+           :create-new t :navigation 'never
+           :above-last-prompt (not (shell-maker-busy)))
+        (error nil))
+      (+agent-acp--changed))))
+
+(defun +agent-acp--keep-declined-steer-a (original &rest args)
+  "Send ORIGINAL's request; when it is a steer that gets declined, hold its text.
+agent-shell answers a declined steer, by error or by outcome, by
+interrupting the turn from the response callback, and never otherwise; so
+an interrupt during the callback is the decline, without repeating
+agent-shell's reading of each agent's outcomes."
+  (let ((prompt +agent-acp--steer-prompt)
+        (request (plist-get args :request)))
+    (when (and prompt (equal (map-elt request :method) "_session/steering"))
+      (let ((buffer (or (plist-get args :buffer)
+                        (map-elt (plist-get args :state) :buffer))))
+        (dolist (key '(:on-success :on-failure))
+          (when-let* ((callback (plist-get args key)))
+            ;; `dolist' reuses KEY's binding; each asynchronous callback must
+            ;; remember whether it is the failure path after the loop ends.
+            (let ((failure-p (eq key :on-failure)))
+              (setq args
+                    (plist-put args key
+                               (lambda (&rest callback-args)
+                                 (let ((+agent-acp--steer-interrupted (list nil)))
+                                   (apply callback callback-args)
+                                   (when (or failure-p
+                                             (car +agent-acp--steer-interrupted))
+                                     (+agent-acp--hold-declined-steer buffer prompt)))))))))))
+    (apply original args)))
+
+(advice-add 'agent-shell-experimental--send-steering :around #'+agent-acp--steer-prompt-a)
+(advice-add 'agent-shell--send-request :around #'+agent-acp--keep-declined-steer-a)
+(advice-add 'agent-shell-interrupt :before #'+agent-acp--note-steer-interrupt-a)
+
 (declare-function agent-shell-get-model-name "agent-shell" (state))
 
 (defvar-local +agent-acp--context-last 0
