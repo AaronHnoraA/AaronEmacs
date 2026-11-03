@@ -14,6 +14,10 @@ initial. The visual direction draws on
 scientific pages; Noema's CSS is its own implementation. Saved `claude` and
 `mediki` selections resolve to Day, and `midnight` to Night. Their CSS remains
 bundled for previously exported standalone pages.
+The [visual reference library](aesthetic-reference-library.md) records the
+specific examples and constraints for future refinements. Table top and
+bottom rules, tabular numerals, restrained caption lines and the metadata
+strip use the existing theme tokens and font families.
 
 ## Layouts
 

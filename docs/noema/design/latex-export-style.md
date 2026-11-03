@@ -148,6 +148,11 @@ lines are spaced and wrapped for reading. The template borrows layout ideas
 from the local COMP9444 whitepaper and the period-inspired typography of
 [vintage-latex](https://github.com/Foadsf/vintage-latex); it contains original
 LaTeX code and no paper-color background.
+The [visual reference library](aesthetic-reference-library.md) names the
+upstream examples and the intended use of each motif. Figure captions use a
+compact small-cap label when the optional caption package is available;
+statement and definition heads use small capitals with distinct italic and
+upright bodies. The body remains one column so long equations and figures fit.
 
 For Overleaf, select XeLaTeX and upload the generated `.tex` together with
 `noema-macros.sty` and any exported figure files. If the local Markdown CJK
