@@ -315,6 +315,8 @@
 ;; tramp-rpc 0.16.0 keeps each connection generation in a
 ;; `tramp-rpc-connection' record.  These tests run without tramp-rpc on the
 ;; load path, so they define the same slots the adapter reads.
+(defvar tramp-rpc-protocol-error-file-not-found)
+
 (unless (featurep 'tramp-rpc-connection)
   ;; Ask for the feature: expanding `cl-defstruct' at load time already
   ;; defines its predicate before this test runs.
@@ -886,6 +888,80 @@ filesystem event says otherwise; other access questions always go out."
     (let ((remote-backend-tramp-rpc--ancestor-prefetch nil))
       (should-not (remote-backend-tramp-rpc-prefetch-ancestor-markers
                    route "/fs:box:/w/" '(".git"))))))
+
+(ert-deftest remote-fs-records-the-search-path-each-target-hands-out ()
+  "`exec-path' answers accumulate per target and go with the session."
+  (let ((remote-fs--target-search-paths (make-hash-table :test #'equal)))
+    (remote-fs--remember-search-path "box" '("/usr/bin" "/opt/p/bin"))
+    (remote-fs--remember-search-path "box" '("/usr/bin" "/home/u/.local/bin"))
+    (remote-fs--remember-search-path "other" '("/bin"))
+    (should (equal (remote-fs-target-search-path "box")
+                   '("/usr/bin" "/opt/p/bin" "/home/u/.local/bin")))
+    (remote-fs-clear-target-cache "box")
+    (should-not (remote-fs-target-search-path "box"))
+    (should (remote-fs-target-search-path "other"))))
+
+(ert-deftest remote-tramp-rpc-path-index-answers-absent-programs ()
+  "One batch lists the session PATH; only absence is answered locally."
+  (require 'tramp)
+  (remote-tramp-rpc-test--readable
+    (let* ((remote-backend-tramp-rpc--path-index (make-hash-table :test #'equal))
+           (remote-backend-tramp-rpc--path-index-hits 0)
+           (remote-backend-tramp-rpc-path-index-ttl 30)
+           (tramp-rpc-protocol-error-file-not-found -32001)
+           (first (make-pipe-process :name "remote-path-index-1" :noquery t))
+           (second (make-pipe-process :name "remote-path-index-2" :noquery t))
+           (current (remote-tramp-rpc-test--generation :process first))
+           (batches 0)
+           (checks nil)
+           (check (lambda (filename mode) (push (cons filename mode) checks) t)))
+      (unwind-protect
+          (cl-letf (((symbol-function 'tramp-rpc--get-connection)
+                     (lambda (_vec) current))
+                    ((symbol-function 'tramp-rpc--cache-entry-valid-p)
+                     (lambda (_timestamp) t))
+                    ((symbol-function 'remote-backend-tramp-rpc--session-path)
+                     (lambda (_vec) '("/usr/bin/" "/opt/missing/bin/")))
+                    ((symbol-function 'tramp-rpc--encode-path)
+                     (lambda (path) `((path . ,path))))
+                    ((symbol-function 'tramp-rpc--decode-filename)
+                     (lambda (entry) (alist-get 'name entry)))
+                    ((symbol-function 'tramp-rpc--batch-error-p)
+                     (lambda (result) (eq (car-safe result) :error)))
+                    ((symbol-function 'tramp-rpc--call-batch)
+                     (lambda (_vec requests)
+                       (cl-incf batches)
+                       (should (equal (mapcar (lambda (r) (alist-get 'path (cdr r)))
+                                              requests)
+                                      '("/usr/bin/" "/opt/missing/bin/")))
+                       (list '(((name . "git")) ((name . "ls")))
+                             '(:error -32001 :message "missing")))))
+            (cl-flet ((x (file) (remote-backend-tramp-rpc--path-index-a
+                                 check file "x")))
+              ;; Absent from a listed directory, or from one that is missing.
+              (should-not (x "/ssh:box:/usr/bin/rg"))
+              (should-not (x "/ssh:box:/opt/missing/bin/git"))
+              ;; Present: the kernel decides.
+              (should (x "/ssh:box:/usr/bin/git"))
+              ;; Off the PATH, and other access modes, are never judged.
+              (should (x "/ssh:box:/w/node_modules/.bin/tsc"))
+              (should (remote-backend-tramp-rpc--path-index-a
+                       check "/ssh:box:/usr/bin/rg" "r"))
+              (should (= batches 1))
+              (should (= remote-backend-tramp-rpc--path-index-hits 2))
+              (should (equal (mapcar #'car (reverse checks))
+                             '("/ssh:box:/usr/bin/git"
+                               "/ssh:box:/w/node_modules/.bin/tsc"
+                               "/ssh:box:/usr/bin/rg")))
+              ;; A replacement transport lists again.
+              (setq current (remote-tramp-rpc-test--generation :process second))
+              (should-not (x "/ssh:box:/usr/bin/rg"))
+              (should (= batches 2))
+              ;; Disabled, every check is the kernel's.
+              (let ((remote-backend-tramp-rpc-path-index-ttl 0))
+                (should (x "/ssh:box:/usr/bin/rg")))))
+        (delete-process first)
+        (delete-process second)))))
 
 (ert-deftest remote-tramp-rpc-read-timeout-retires-only-current-generation ()
   "A timed-out request must never close a replacement SSH process."

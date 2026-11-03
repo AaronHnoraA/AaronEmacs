@@ -781,20 +781,50 @@ Magit/VC、项目文件列表、搜索、Dired 与 PTY 都走它。实测在 Aar
   和服务端推送的文件事件。目录能否进入就是这样一条：TRAMP 的文件属性在每次
   `process-file` 后都会被清掉，于是 Magit 每次刷新都要多问七次。
 
-已测到、尚未处理的重复请求（按单次操作的往返计）：
+已按这两条规则处理的重复请求：
 
-- 同一 target 的登录 PATH 问了两次：框架的 path facts（交互式登录 shell）和
-  tramp-rpc 自己的 `tramp-own-remote-path`（非交互登录 shell）。合并之前要先决定
-  采用哪一种 PATH 语义。
-- lsp-mode 启动时逐个查找解释器、服务器和 booster，五个程序就是五次往返。可以由
-  批量的 `remote-executable-find` 一次回答。
+- 每个 target 的登录 PATH 只来自一处：框架 path facts 里交互式登录 shell 的 PATH，
+  与 VS Code Remote 解析远端环境的方式相同。tramp-rpc 自己的
+  `tramp-own-remote-path` 在 facts 已知时直接用它，不再另起一个登录 shell。
+- `exec-path` 的回答由 `/fs:` 层按 target 记下（`remote-fs-target-search-path`），
+  每个项目的 capsule PATH 都在其中，随 session 关闭清空。tramp-rpc 把这些目录连同
+  自己的 PATH 用一个 `batch` 列出来，构成 session PATH 索引：某个名字不在已列出的
+  目录里（或目录本身不存在），`file-executable-p` 直接回答 nil；名字存在时仍由内核
+  判断。任何包的 `executable-find`（VC、Magit、LSP、citre……）因此都不必逐目录
+  往返，也无需各自适配。没有 watcher 看着 PATH 目录，所以列表只用
+  `remote-backend-tramp-rpc-path-index-ttl` 秒（默认 30），新装的工具最迟这么久之后
+  就能找到。冷打开一个文件的往返从 28 次降到 16 次。
+- 祖先标记在 tramp-rpc 上也走 `remote-prefetch-ancestor-markers`。backend 以
+  `:ancestor-prefetch t` 声明自己有 provider，一个 `batch` 列出全部祖先目录，不存在
+  的标记写进 tramp-rpc 自己的 stat 缓存。一次 Dired 读取（`dired-internal-noselect`、
+  `dired-revert`）内，`directory-files` 直接用同一次完整列目录的结果回答。
 
-已处理：祖先标记在 tramp-rpc 上也走 `remote-prefetch-ancestor-markers`。backend 以
-`:ancestor-prefetch t` 声明自己有 provider，一个 `batch` 列出全部祖先目录，不存在
-的标记写进 tramp-rpc 自己的 stat 缓存。tramp-rpc 在每次 `process-file` 后会清空这份
-缓存，所以此后的查询仍会再走网络；改为以 session/project 为单位的知识层后，这一点
-才算真正解决。一次 Dired 读取（`dired-internal-noselect`、`dired-revert`）内，
-`directory-files` 直接用同一次完整列目录的结果回答，所以只列一次。
+### 以 session 与 project 为单位的知识层
+
+目标是插件不做 Remote 适配：它们照常调用 Emacs 的文件、进程和查找 API，由底层
+按 session 与 project 回答。知识按归属分两类：
+
+- session 知识：一条 transport generation 内不变，或只在服务端推送事件时才变的
+  事实。例如 target 的系统与 shell、登录 PATH、PATH 目录索引、目录能否进入、属性
+  探测（ACL/SELinux）。重连、显式断开或事件到达时失效。
+- project 知识：取决于 workspace 环境 capsule 与项目根的事实。例如 capsule PATH
+  及按它解析出的程序、祖先标记、VC 根、忽略规则与文件列表。capsule 重建、项目根
+  变化，或服务端在项目根下推送事件时失效。
+
+已有的部分：path facts、环境 capsule、session 关闭时整体失效
+（`remote-connection-closed-hook`）、按 target 记录的搜索路径、session PATH 索引、
+目录访问答案、元数据作用域与祖先预取。
+
+还缺的部分：
+
+- tramp-rpc 每次 `process-file` 后都会清空自己的 stat 缓存，所以预取的标记、写入
+  之外的元数据在下一个命令后就失效。要改为：project 根有服务端 watcher 时，以事件
+  而不是“跑过一个进程”作为失效依据。
+- `remote-executable-find` 每查一个程序都要一次 `process.run`，lsp-mode 启动时会
+  连查五个。应由 backend 提供 `:executable-find` 能力，用 session PATH 索引加上
+  一次内核确认来回答。
+- 这些知识目前分散在 backend 与 remote-fs 里，应有统一的登记与失效入口，并在
+  Remote Doctor 中显示。
 
 `remote-copy-file-to-target` 是 provisioning 的批量传输边界。native backend 使用
 本地复制，TRAMP/tramp-rpc SSH backend 使用 SCP；consumer 只提交客户端绝对源文件、
@@ -1502,7 +1532,7 @@ devcontainer、Dape/tasks 编排、动态 SOCKS forward 与托管 tunnel 不在�
 | TRAMP/RPC network client、remote listener 与 SSH 双向 port forward | 已通过 native 回环、命令测试、SSH `-R` 真机数据往返，以及 `-L` 真机强制重连后原端口数据往返；突发断线与 `-R` 恢复故障注入待补 |
 | pipeline stage 的实际逐段建连 | executor/runtime 已建立；内建 overlay/hop 主要负责 endpoint 变换 |
 | workspace/service/channel/terminal 生命周期 | 基础已建立；service/forward、逻辑 watch 与 lsp-mode resource 已登记恢复，仍缺长期真机故障注入；terminal 手动重启 |
-| 单连接与目标事实缓存 | 常用操作共用一条 SSH/RPC 连接；程序解析、目录访问、祖先标记与 Dired 列目录已按 target 回答；登录 PATH 与 LSP 批量查找待补 |
+| 单连接与 session/project 知识层 | 常用操作共用一条 SSH/RPC 连接；登录 PATH 单一来源，session PATH 索引、目录访问、祖先标记与 Dired 列目录已由底层回答；跨 `process-file` 的缓存保持与 backend 程序解析待补 |
 | Remote Doctor | 已建立结构化报告与可选 target probe |
 | SSH 真机回归 | `make remote-e2e`，只使用随机临时目录 |
 | WSL2 direnv + C clangd + Python pylsp | 已真实验证走远程环境与 tramp-rpc |

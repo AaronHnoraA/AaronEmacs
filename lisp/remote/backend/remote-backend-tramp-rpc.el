@@ -49,6 +49,12 @@
                   (directory names))
 (declare-function remote-backend-project-file-name "remote-backend"
                   (route file-name))
+(declare-function remote-path-facts-path "remote-path" (facts))
+(declare-function tramp-rpc--cached-remote-path "tramp-rpc-transport" (vec))
+(declare-function tramp-rpc-handle-exec-path "tramp-rpc" ())
+(declare-function remote-fs-target-search-path "remote-fs" (target-id))
+(defvar remote-path-facts-cache)
+(defvar tramp-rpc-protocol-error-file-not-found)
 (declare-function tramp-rpc--selinux-enabled-p "tramp-rpc" (vec))
 (declare-function remote-connection-cached-p "remote-connection" (route))
 (declare-function remote-connection-handle "remote-connection" (connection))
@@ -98,7 +104,10 @@
     (tramp-rpc--encode-path . (1 . 1))
     (tramp-rpc--decode-filename . (1 . 1))
     (tramp-rpc--batch-error-p . (1 . 1))
-    (tramp-rpc--cache-file-stat-result . (3 . 4)))
+    (tramp-rpc--cache-file-stat-result . (3 . 4))
+    (tramp-rpc--fetch-remote-exec-path . (1 . 1))
+    (tramp-rpc--cached-remote-path . (1 . 1))
+    (tramp-rpc-handle-exec-path . (0 . 0)))
   "Private upstream seams isolated by this backend adapter.
 A connection generation is a `tramp-rpc-connection' record; it is read only
 through `remote-backend-tramp-rpc--connection-slot'.")
@@ -869,6 +878,163 @@ every answer below it."
         (dolist (key stale)
           (remhash key remote-backend-tramp-rpc--directory-access))))))
 
+;;;; One login PATH per target
+
+(defun remote-backend-tramp-rpc--target-facts-path (vec)
+  "Return the login PATH Remote already knows for VEC's target, or nil.
+Only facts already learned are used: probing from here would run a remote
+shell through the very connection that is computing its PATH."
+  (when-let* (((boundp 'remote-path-facts-cache))
+              ((hash-table-p remote-path-facts-cache))
+              (canonical (ignore-errors
+                           (remote-canonicalize-file-name
+                            (tramp-make-tramp-file-name vec "/"))))
+              (target-id (ignore-errors (remote-file-name-target canonical)))
+              (facts (gethash target-id remote-path-facts-cache))
+              (path (remote-path-facts-path facts))
+              ((consp path))
+              ((cl-every #'stringp path)))
+    (copy-sequence path)))
+
+(defun remote-backend-tramp-rpc--fetch-exec-path-a (function vec)
+  "Answer FUNCTION's login PATH for VEC from Remote's target facts.
+tramp-rpc starts its own login shell to learn `tramp-own-remote-path',
+while Remote's path facts already hold the target's PATH from an
+interactive login shell -- the environment VS Code Remote resolves too.
+Asking twice cost a remote shell start and could give two answers; the
+facts are the one answer.  Without them FUNCTION still asks."
+  (or (remote-backend-tramp-rpc--target-facts-path vec)
+      (funcall function vec)))
+
+;;;; Session PATH index
+
+(defcustom remote-backend-tramp-rpc-path-index-ttl 30
+  "Seconds one listing of a session's PATH directories answers absences.
+Nothing watches PATH directories, so a tool installed meanwhile is found
+again after at most this long.  Zero disables the index."
+  :type 'number
+  :group 'remote)
+
+(defvar remote-backend-tramp-rpc--path-index (make-hash-table :test #'equal)
+  "PATH directory names: DIRECTORY -> (TIMESTAMP PROCESS . NAME-TABLE).")
+
+(defvar remote-backend-tramp-rpc--path-index-hits 0
+  "Executable checks answered by the PATH index without a round trip.")
+
+(defconst remote-backend-tramp-rpc--path-index-limit 60
+  "PATH directories listed by one batch, inside the server's batch limit.")
+
+(defun remote-backend-tramp-rpc--path-index-entry (key process)
+  "Return KEY's name table when it belongs to PROCESS and is fresh, or nil."
+  (when-let* ((entry (gethash key remote-backend-tramp-rpc--path-index))
+              ((eq (cadr entry) process))
+              ((< (- (float-time) (car entry))
+                  remote-backend-tramp-rpc-path-index-ttl))
+              ((tramp-rpc--cache-entry-valid-p (car entry))))
+    (cddr entry)))
+
+(defun remote-backend-tramp-rpc--path-index-build (vec process directories)
+  "List DIRECTORIES of VEC's session PATH in one batch for PROCESS."
+  (let* ((directories (seq-take directories
+                                remote-backend-tramp-rpc--path-index-limit))
+         (results (tramp-rpc--call-batch
+                   vec (mapcar (lambda (directory)
+                                 (cons "dir.list"
+                                       (tramp-rpc--encode-path directory)))
+                               directories)))
+         (now (float-time)))
+    (when (= (length results) (length directories))
+      (cl-loop
+       for directory in directories
+       for listing in results
+       ;; A directory that does not exist holds no program; any other
+       ;; failure leaves its names to the real check.
+       for missing = (and (tramp-rpc--batch-error-p listing)
+                          (boundp 'tramp-rpc-protocol-error-file-not-found)
+                          (eql (plist-get listing :error)
+                               tramp-rpc-protocol-error-file-not-found))
+       when (or missing
+                (and (listp listing)
+                     (not (tramp-rpc--batch-error-p listing))))
+       do (let ((names (make-hash-table :test #'equal)))
+            (unless missing
+              (dolist (entry listing)
+                (puthash (tramp-rpc--decode-filename entry) t names)))
+            (puthash (tramp-make-tramp-file-name vec directory)
+                     (cons now (cons process names))
+                     remote-backend-tramp-rpc--path-index))))))
+
+(defun remote-backend-tramp-rpc--session-path (vec)
+  "Return the PATH directories a lookup on VEC searches, as directory names.
+That is the remote `exec-path' tramp-rpc hands `executable-find', which
+it caches per connection.  The caller's own `exec-path' and environment
+belong to this client and are not consulted."
+  (seq-uniq
+   (mapcar #'file-name-as-directory
+           (seq-filter
+            (lambda (directory)
+              (and (stringp directory) (file-name-absolute-p directory)))
+            (append
+             (remote-backend-tramp-rpc--target-search-path vec)
+             (ignore-errors
+               (let ((default-directory (tramp-make-tramp-file-name vec "/")))
+                 (mapcar #'file-local-name (tramp-rpc-handle-exec-path))))
+             (ignore-errors (tramp-rpc--cached-remote-path vec)))))))
+
+(defun remote-backend-tramp-rpc--target-search-path (vec)
+  "Return the PATH directories Remote has handed out for VEC's target.
+A lookup from a project buffer walks that project's environment capsule
+PATH, which the logical `/fs:' layer answers; it records them per target
+in `remote-fs-target-search-path'."
+  (ignore-errors
+    (when-let* ((target (remote-file-name-target
+                         (remote-canonicalize-file-name
+                          (tramp-make-tramp-file-name vec "/")))))
+      (remote-fs-target-search-path target))))
+
+(defun remote-backend-tramp-rpc--path-index-absent-p (filename)
+  "Return non-nil when the session PATH index proves FILENAME is absent.
+Only a name in one of the session's PATH directories is judged; anything
+else, or any failure, returns nil so the real check runs."
+  (when-let* (((and (numberp remote-backend-tramp-rpc-path-index-ttl)
+                    (> remote-backend-tramp-rpc-path-index-ttl 0)))
+              (vec (ignore-errors
+                     (tramp-dissect-file-name (expand-file-name filename))))
+              (local (tramp-file-name-localname vec))
+              (base (file-name-nondirectory local))
+              ((not (string-empty-p base)))
+              (directory (file-name-directory local))
+              (key (tramp-make-tramp-file-name vec directory))
+              (process (remote-backend-tramp-rpc--vec-connection-slot
+                        vec :process))
+              (names
+               (or (remote-backend-tramp-rpc--path-index-entry key process)
+                   (let ((path (remote-backend-tramp-rpc--session-path vec)))
+                     (when (member directory path)
+                       (ignore-errors
+                         (remote-backend-tramp-rpc--path-index-build
+                          vec process path))
+                       (remote-backend-tramp-rpc--path-index-entry
+                        key process))))))
+    (not (gethash base names))))
+
+(defun remote-backend-tramp-rpc--path-index-a (function filename mode)
+  "Answer FUNCTION's executable check of FILENAME from the session PATH.
+MODE \"x\" is `file-executable-p'.  A lookup such as `executable-find'
+tries the name in every PATH directory with its own check, one round trip
+each, for every package that looks a program up.  The session's PATH
+directories are listed once, in one batch; a name absent from its
+directory is not executable there, with no round trip.  A name present
+still gets the kernel's own answer.  The listing belongs to its transport
+generation and lasts `remote-backend-tramp-rpc-path-index-ttl' seconds
+within tramp-rpc's TTL policy."
+  (if (and (equal mode "x")
+           (remote-backend-tramp-rpc--path-index-absent-p filename))
+      (progn
+        (cl-incf remote-backend-tramp-rpc--path-index-hits)
+        nil)
+    (funcall function filename mode)))
+
 ;;;; Ancestor marker prefetch
 
 (defvar remote-backend-tramp-rpc--ancestor-prefetch nil
@@ -981,6 +1147,16 @@ lookups.  Return non-nil when the batch answered."
     (watch-descriptor-buffer
      tramp-rpc--make-file-notify-descriptor :filter-return
      remote-backend-tramp-rpc--detach-descriptor-buffer-a)
+    (path-from-target-facts
+     tramp-rpc--fetch-remote-exec-path :around
+     remote-backend-tramp-rpc--fetch-exec-path-a)
+    (path-index
+     tramp-rpc--file-access-p :around
+     remote-backend-tramp-rpc--path-index-a
+     tramp-rpc--cached-remote-path tramp-rpc-handle-exec-path
+     tramp-rpc--call-batch
+     tramp-rpc--encode-path tramp-rpc--decode-filename
+     tramp-rpc--batch-error-p tramp-rpc--get-connection)
     (directory-access-cache
      tramp-rpc--file-access-p :around
      remote-backend-tramp-rpc--directory-access-a
@@ -1017,7 +1193,7 @@ these by name, so a live upgrade cannot keep an old shim on new code.")
                   'file-extended-attributes)
                  '(1 . 1))))
     ((or 'adapter-timeout 'attribute-probe-cache 'transport-death-notice
-         'stderr-relay-release 'directory-access-cache)
+         'stderr-relay-release 'directory-access-cache 'path-index)
      (remote-backend-tramp-rpc--connection-readable-p))
     (_ t)))
 

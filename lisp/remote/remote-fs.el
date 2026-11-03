@@ -88,8 +88,32 @@ its supported operation contract visible to Tramp and extension packages.")
 (defvar remote-fs-preferred-route-cache (make-hash-table :test #'equal)
   "Guarded two-backend file routes keyed by target, adapter, and capability.")
 
+(defvar remote-fs--target-search-paths (make-hash-table :test #'equal)
+  "TARGET-ID -> directories `exec-path' has handed out for that target.")
+
+(defun remote-fs-target-search-path (target-id)
+  "Return every PATH directory a lookup on TARGET-ID has been given.
+Each project on a target can have its own environment capsule; this is
+the union of what their `exec-path' answers listed in this session, so a
+backend can prepare for the lookups that will follow.  Cleared with the
+target's session."
+  (gethash target-id remote-fs--target-search-paths))
+
+(defun remote-fs--remember-search-path (target-id directories)
+  "Add DIRECTORIES to what TARGET-ID's lookups have been given."
+  (when (and target-id (consp directories))
+    (let ((known (gethash target-id remote-fs--target-search-paths)))
+      (when (< (length known) 256)
+        (puthash target-id
+                 (seq-uniq (append known
+                                   (seq-filter #'stringp directories)))
+                 remote-fs--target-search-paths)))))
+
 (defun remote-fs-clear-target-cache (&optional target-id)
   "Clear path expansion state, optionally only for TARGET-ID."
+  (if target-id
+      (remhash target-id remote-fs--target-search-paths)
+    (clrhash remote-fs--target-search-paths))
   (let (keys)
     (maphash
      (lambda (key _value)
@@ -1808,16 +1832,21 @@ their place after it."
                               (remote-environment-resolve
                                (remote-context default-directory))))))))
          (capsule (and (stringp path) (split-string path ":" t))))
-    (if (null capsule)
-        backend
-      (let* ((normalize (lambda (directory)
-                          (directory-file-name (expand-file-name directory "/"))))
-             (covered (mapcar normalize capsule)))
-        (append capsule
-                (seq-remove
-                 (lambda (directory)
-                   (member (funcall normalize directory) covered))
-                 backend)))))))
+    (let ((answer
+           (if (null capsule)
+               backend
+             (let* ((normalize (lambda (directory)
+                                 (directory-file-name
+                                  (expand-file-name directory "/"))))
+                    (covered (mapcar normalize capsule)))
+               (append capsule
+                       (seq-remove
+                        (lambda (directory)
+                          (member (funcall normalize directory) covered))
+                        backend))))))
+      (remote-fs--remember-search-path
+       (remote-file-name-target default-directory) answer)
+      answer))))
 
 (defun remote-fs-handle-make-process (&rest plist)
   "Route official `make-process' PLIST through the remote process API.
