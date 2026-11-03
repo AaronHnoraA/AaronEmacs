@@ -4,6 +4,17 @@ Noema's default workspace is `~/Documents/Noema` (`NOEMA_ROOT` may override it).
 Configuration lives in `~/.config/noema/config.json`; renderer themes remain
 bundled with the Emacs-hosted Web assets.
 
+The renderer offers two palettes: Noema Day (`daylight`) and Noema Night
+(`noema`). Both keep their original background, text, accent colors, and
+fonts, along with the full b3 component token contract. Centered title
+ornaments, compact two-column section labels, small capitals, and fine rules
+add the period-inspired detail. Published English prose can open with a large
+initial. The visual direction draws on
+[vintage-latex](https://github.com/Foadsf/vintage-latex)'s period-inspired
+scientific pages; Noema's CSS is its own implementation. Saved `claude` and
+`mediki` selections resolve to Day, and `midnight` to Night. Their CSS remains
+bundled for previously exported standalone pages.
+
 ## Layouts
 
 `workspace.layout` is deliberately explicit:

@@ -138,6 +138,32 @@ environment the template does not define.
 
 ## Restrained academic typesetting
 
+The default `noema-article.tex` keeps a white A4 page for printed and
+distributed research notes. It uses Libertinus for English, the Noema Markdown
+Chinese face (FZ Liu Gong Quan Kai Shu) when installed with Fandol as a
+portable fallback, and the original Computer Modern/AMS mathematics. A centered
+title, small-cap section heads, fine printer's rules, one Latin opening initial,
+running title and page number shape the page. Lists, tables, long URLs and code
+lines are spaced and wrapped for reading. The template borrows layout ideas
+from the local COMP9444 whitepaper and the period-inspired typography of
+[vintage-latex](https://github.com/Foadsf/vintage-latex); it contains original
+LaTeX code and no paper-color background.
+
+For Overleaf, select XeLaTeX and upload the generated `.tex` together with
+`noema-macros.sty` and any exported figure files. If the local Markdown CJK
+font is unavailable, the template chooses Fandol. Missing optional packages
+for initials, line-breaking code, URLs, and header truncation degrade to plain
+typesetting rather than preventing compilation.
+
+Figure sizes supplied by Markdown or TikZ are ceilings, not permission to run
+off the page. Generated figures and images stay within the current line width
+and page height. A plain `marmind` tree without a browser-rendered SVG becomes
+a nested outline; a failed draw.io conversion keeps its visible label and a
+warning, so neither case turns a missing picture into a broken PDF. PDF wiki
+links keep their visible label, not the private `roam://` identity. A saved
+template path from the Aaronnote rename resolves to its installed Noema name;
+an unavailable template falls back to the default.
+
 This agent is a **format converter and validator, not an author or copy editor**.
 Academic polish may change LaTeX markup only. It must never change, add, remove,
 translate, summarize, “clarify”, or reorder text, numbers, symbols, formulas, or
@@ -199,6 +225,13 @@ invent a placeholder citation, or emit a bibliography entry from code, math,
 HTML comments, links, hidden source blocks, or private planning commands.
 `prefix`, `locator`/`page`/`pages`, and `suffix` are visible author content and
 must survive in order.
+
+## Process output fidelity
+
+C1. Pandoc stdout and stderr are UTF-8 streams. The host must preserve
+characters split across process-output chunks, including Chinese text and
+multibyte math symbols; decoding must not introduce U+FFFD into valid output
+or diagnostics. Regression coverage: `tests/latex-export-pandoc-stream.test.ts`.
 
 ## Pipeline reminder
 
