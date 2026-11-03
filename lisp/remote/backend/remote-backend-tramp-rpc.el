@@ -56,6 +56,11 @@
 (declare-function remote-fs-forget-ancestor-scans "remote-fs" (&optional target-id))
 (defvar remote-path-facts-cache)
 (defvar tramp-rpc-protocol-error-file-not-found)
+(defvar tramp-rpc--watched-directories)
+(defvar tramp-rpc--file-notify-watch-counts)
+(defvar tramp-rpc--file-exists-cache)
+(defvar tramp-rpc--file-truename-cache)
+(defvar tramp-rpc--file-stat-cache)
 (declare-function tramp-rpc--selinux-enabled-p "tramp-rpc" (vec))
 (declare-function remote-connection-cached-p "remote-connection" (route))
 (declare-function remote-connection-handle "remote-connection" (connection))
@@ -800,6 +805,11 @@ replacement generation is kept."
       (remote-backend-tramp-rpc--release-stderr buffer t)))
   (remote-backend-tramp-rpc--kill-idle-descriptor-buffer))
 
+(defvar remote-backend-tramp-rpc--settle-exempt nil
+  "Non-nil while this adapter's own caches ask for validity.
+They have their own generation, TTL and event rules, which tramp-rpc's
+flush never touched, so the settle window is not theirs.")
+
 ;;;; Directory search answers
 
 (defvar remote-backend-tramp-rpc--directory-access
@@ -843,7 +853,8 @@ filesystem event touches the directory."
                           key))))
       (if (and entry process
                (eq (cadr entry) process)
-               (tramp-rpc--cache-entry-valid-p (car entry)))
+               (let ((remote-backend-tramp-rpc--settle-exempt t))
+                 (tramp-rpc--cache-entry-valid-p (car entry))))
           (progn
             (cl-incf remote-backend-tramp-rpc--directory-access-hits)
             (cddr entry))
@@ -932,7 +943,8 @@ again after at most this long.  Zero disables the index."
               ((eq (cadr entry) process))
               ((< (- (float-time) (car entry))
                   remote-backend-tramp-rpc-path-index-ttl))
-              ((tramp-rpc--cache-entry-valid-p (car entry))))
+              ((let ((remote-backend-tramp-rpc--settle-exempt t))
+                 (tramp-rpc--cache-entry-valid-p (car entry)))))
     (cddr entry)))
 
 (defun remote-backend-tramp-rpc--path-index-build (vec process directories)
@@ -1162,21 +1174,118 @@ scripts are never judged; each pipeline stage must itself be read-only."
             (and argv (remote-backend-tramp-rpc--argv-read-only-p argv))))
         (split-string script "|" t "[ \t]+"))))
 
+(defcustom remote-backend-tramp-rpc-event-settle-time 1.0
+  "Seconds after a writing command before watched answers are trusted again.
+The server reports file changes in batches 200 ms apart; this also covers
+the link.  Raise it on a link slower than a few hundred milliseconds.
+Zero restores tramp-rpc's own flush of every cached answer."
+  :type 'number
+  :group 'remote)
+
+(defvar remote-backend-tramp-rpc--distrust nil
+  "(BEFORE . UNTIL): answers cached before BEFORE are not used until UNTIL.")
+
+(defun remote-backend-tramp-rpc--watches-for (process)
+  "Return (DIRECTORY . RECURSIVE) for each watch on transport PROCESS."
+  (let (watches)
+    (dolist (table (list (and (boundp 'tramp-rpc--watched-directories)
+                              tramp-rpc--watched-directories)
+                         (and (boundp 'tramp-rpc--file-notify-watch-counts)
+                              tramp-rpc--file-notify-watch-counts)))
+      (when (hash-table-p table)
+        (maphash (lambda (_key entry)
+                   (when (and (eq (plist-get entry :connection-process) process)
+                              (stringp (plist-get entry :directory)))
+                     (push (cons (file-name-as-directory
+                                  (expand-file-name
+                                   (plist-get entry :directory)))
+                                 (plist-get entry :recursive))
+                           watches)))
+                 table)))
+    watches))
+
+(defun remote-backend-tramp-rpc--watched-p (name watches)
+  "Return non-nil when a change to NAME reaches us as an event from WATCHES.
+A watch reports its directory's children, a recursive one its subtree; the
+directory's own entry is never counted, its mtime moves with every child."
+  (let ((file (directory-file-name (expand-file-name name))))
+    (cl-some (lambda (watch)
+               (let ((directory (car watch)))
+                 (and (string-prefix-p directory file)
+                      (not (equal (file-name-as-directory file) directory))
+                      (or (cdr watch)
+                          (equal (file-name-directory file) directory)))))
+             watches)))
+
+(defun remote-backend-tramp-rpc--flush-after-command (vec)
+  "Forget what a finished command on VEC may have changed.
+Answers about paths a live watch covers stay: their changes arrive as
+events, and until they have had time to arrive (see
+`remote-backend-tramp-rpc-event-settle-time') no answer cached before the
+command is used.  Everything else goes, as tramp-rpc's own flush does."
+  (let* ((process (remote-backend-tramp-rpc--vec-connection-slot vec :process))
+         (watches (and process (remote-backend-tramp-rpc--watches-for process)))
+         (prefix (tramp-make-tramp-file-name vec "/"))
+         (now (float-time)))
+    (run-hook-with-args 'tramp-rpc-cache-invalidate-functions vec)
+    (tramp-flush-directory-properties vec "/")
+    (dolist (cache (list (and (boundp 'tramp-rpc--file-exists-cache)
+                              tramp-rpc--file-exists-cache)
+                         (and (boundp 'tramp-rpc--file-truename-cache)
+                              tramp-rpc--file-truename-cache)
+                         (and (boundp 'tramp-rpc--file-stat-cache)
+                              tramp-rpc--file-stat-cache)))
+      (when (hash-table-p cache)
+        (let (stale)
+          (maphash (lambda (key _value)
+                     (let ((name (if (consp key) (car key) key)))
+                       (when (and (stringp name)
+                                  (string-prefix-p prefix name)
+                                  (not (remote-backend-tramp-rpc--watched-p
+                                        name watches)))
+                         (push key stale))))
+                   cache)
+          (dolist (key stale) (remhash key cache)))))
+    (setq remote-backend-tramp-rpc--distrust
+          (cons now (+ now remote-backend-tramp-rpc-event-settle-time)))))
+
+(defun remote-backend-tramp-rpc--settled-a (function timestamp)
+  "Call FUNCTION for TIMESTAMP unless it predates an unsettled command.
+FUNCTION is tramp-rpc's cache validity check."
+  (and (not (and remote-backend-tramp-rpc--distrust
+                 (not remote-backend-tramp-rpc--settle-exempt)
+                 (< timestamp (car remote-backend-tramp-rpc--distrust))
+                 (< (float-time) (cdr remote-backend-tramp-rpc--distrust))))
+       (funcall function timestamp)))
+
 (defun remote-backend-tramp-rpc--read-only-command-a
     (function program &rest arguments)
-  "Run FUNCTION's PROGRAM without flushing caches when it only reads.
+  "Run FUNCTION's PROGRAM keeping what a command cannot have changed.
 tramp-rpc forgets every cached stat, truename and existence answer of the
 connection after each `process-file', because a command may write
 anything.  Emacs lets a caller say otherwise by binding
 `process-file-side-effects' to nil; this does so for a command that
 provably writes nothing, whichever package runs it, so `git ls-files' or
-`rg' leave the session's knowledge in place.  ARGUMENTS are FUNCTION's
-INFILE, DESTINATION, DISPLAY and the program's arguments."
-  (let ((process-file-side-effects
-         (and process-file-side-effects
-              (not (remote-backend-tramp-rpc--argv-read-only-p
-                    (cons program (nthcdr 3 arguments)))))))
-    (apply function program arguments)))
+`rg' leave the session's knowledge in place.  Any other command flushes
+only what no watch reports, as `remote-backend-tramp-rpc--flush-after-command'
+explains.  ARGUMENTS are FUNCTION's INFILE, DESTINATION, DISPLAY and the
+program's arguments."
+  (let ((writes (and process-file-side-effects
+                     (not (remote-backend-tramp-rpc--argv-read-only-p
+                           (cons program (nthcdr 3 arguments))))))
+        (settle (and (numberp remote-backend-tramp-rpc-event-settle-time)
+                     (> remote-backend-tramp-rpc-event-settle-time 0)
+                     (advice-member-p #'remote-backend-tramp-rpc--settled-a
+                                      'tramp-rpc--cache-entry-valid-p))))
+    (if (not (and writes settle))
+        (let ((process-file-side-effects writes))
+          (apply function program arguments))
+      (let ((vec (ignore-errors (tramp-dissect-file-name default-directory))))
+        (unwind-protect
+            (let ((process-file-side-effects nil))
+              (apply function program arguments))
+          (when vec
+            (remote-backend-tramp-rpc--flush-after-command vec)))))))
 
 ;;;; Ancestor marker prefetch
 
@@ -1317,6 +1426,9 @@ connection."
     (read-only-commands
      tramp-rpc-handle-process-file :around
      remote-backend-tramp-rpc--read-only-command-a)
+    (read-only-commands
+     tramp-rpc--cache-entry-valid-p :around
+     remote-backend-tramp-rpc--settled-a)
     (directory-access-cache
      tramp-rpc--file-access-p :around
      remote-backend-tramp-rpc--directory-access-a
@@ -1353,7 +1465,8 @@ these by name, so a live upgrade cannot keep an old shim on new code.")
                   'file-extended-attributes)
                  '(1 . 1))))
     ((or 'adapter-timeout 'attribute-probe-cache 'transport-death-notice
-         'stderr-relay-release 'directory-access-cache 'path-index)
+         'stderr-relay-release 'directory-access-cache 'path-index
+         'read-only-commands)
      (remote-backend-tramp-rpc--connection-readable-p))
     (_ t)))
 

@@ -316,6 +316,12 @@
 ;; `tramp-rpc-connection' record.  These tests run without tramp-rpc on the
 ;; load path, so they define the same slots the adapter reads.
 (defvar tramp-rpc-protocol-error-file-not-found)
+(defvar tramp-rpc--watched-directories)
+(defvar tramp-rpc--file-notify-watch-counts)
+(defvar tramp-rpc--file-exists-cache)
+(defvar tramp-rpc--file-truename-cache)
+(defvar tramp-rpc--file-stat-cache)
+(defvar tramp-rpc-cache-invalidate-functions)
 
 (unless (featurep 'tramp-rpc-connection)
   ;; Ask for the feature: expanding `cl-defstruct' at load time already
@@ -1089,6 +1095,80 @@ absence costs nothing, and an unlisted directory leaves it to the probe."
                      '("/fs:other:/w/")))
       (remote-fs-forget-ancestor-scans)
       (should (= (hash-table-count remote-fs--ancestor-prefetched) 0)))))
+
+(ert-deftest remote-tramp-rpc-writing-command-keeps-only-watched-answers ()
+  "After a writing command, answers a watch vouches for stay but are not
+used until its events have had time to arrive; the rest are dropped."
+  (require 'tramp)
+  (remote-tramp-rpc-test--readable
+    (let* ((process (make-pipe-process :name "remote-settle" :noquery t))
+           (generation (remote-tramp-rpc-test--generation :process process))
+           (tramp-rpc--watched-directories (make-hash-table :test #'equal))
+           (tramp-rpc--file-notify-watch-counts (make-hash-table :test #'equal))
+           (tramp-rpc--file-exists-cache (make-hash-table :test #'equal))
+           (tramp-rpc--file-truename-cache (make-hash-table :test #'equal))
+           (tramp-rpc--file-stat-cache (make-hash-table :test #'equal))
+           (tramp-rpc-cache-invalidate-functions nil)
+           (remote-backend-tramp-rpc-event-settle-time 1.0)
+           (remote-backend-tramp-rpc--distrust nil)
+           (vec (tramp-dissect-file-name "/ssh:box:/w/")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'tramp-rpc--get-connection)
+                     (lambda (_vec) generation))
+                    ((symbol-function 'tramp-flush-directory-properties)
+                     #'ignore))
+            (puthash "k1" (list :directory "/ssh:box:/w/src/" :recursive nil
+                                :connection-process process)
+                     tramp-rpc--file-notify-watch-counts)
+            (puthash "k2" (list :directory "/ssh:box:/w/lib/" :recursive t
+                                :connection-process process)
+                     tramp-rpc--watched-directories)
+            (puthash "k3" (list :directory "/ssh:box:/elsewhere/" :recursive t
+                                :connection-process 'old-generation)
+                     tramp-rpc--watched-directories)
+            (dolist (name '("/ssh:box:/w/src/a.c" "/ssh:box:/w/src/deep/b.c"
+                            "/ssh:box:/w/src" "/ssh:box:/w/lib/x/y.c"
+                            "/ssh:box:/elsewhere/z" "/ssh:box:/w/README"
+                            "/ssh:other:/w/src/a.c"))
+              (puthash (cons name nil) (cons 1.0 'stat) tramp-rpc--file-stat-cache)
+              (puthash name (cons 1.0 t) tramp-rpc--file-exists-cache))
+            (remote-backend-tramp-rpc--flush-after-command vec)
+            (should (equal (sort (mapcar #'car (hash-table-keys
+                                                tramp-rpc--file-stat-cache))
+                                 #'string<)
+                           '("/ssh:box:/w/lib/x/y.c" "/ssh:box:/w/src/a.c"
+                             "/ssh:other:/w/src/a.c")))
+            (should (= (hash-table-count tramp-rpc--file-exists-cache) 3))
+            ;; Older answers wait for the events; newer ones are fine.
+            (let ((before (1- (car remote-backend-tramp-rpc--distrust)))
+                  (after (1+ (car remote-backend-tramp-rpc--distrust)))
+                  (valid (lambda (_timestamp) t)))
+              (should-not (remote-backend-tramp-rpc--settled-a valid before))
+              (should (remote-backend-tramp-rpc--settled-a valid after))
+              (setcdr remote-backend-tramp-rpc--distrust (1- (float-time)))
+              (should (remote-backend-tramp-rpc--settled-a valid before))))
+        (delete-process process)))))
+
+(ert-deftest remote-tramp-rpc-command-flush-follows-what-it-may-write ()
+  "Read-only commands skip the flush; writing ones get the watched flush."
+  (let ((remote-backend-tramp-rpc-event-settle-time 1.0)
+        (default-directory "/ssh:box:/w/")
+        flushed seen)
+    (require 'tramp)
+    (cl-letf (((symbol-function 'advice-member-p) (lambda (&rest _) t))
+              ((symbol-function 'remote-backend-tramp-rpc--flush-after-command)
+               (lambda (vec) (push (tramp-file-name-host vec) flushed))))
+      (cl-flet ((run (program &rest arguments)
+                  (apply #'remote-backend-tramp-rpc--read-only-command-a
+                         (lambda (&rest _) (push process-file-side-effects seen))
+                         program arguments)))
+        (let ((process-file-side-effects t))
+          (run "git" nil t nil "log")
+          (run "make" nil t nil)
+          (let ((remote-backend-tramp-rpc-event-settle-time 0))
+            (run "make" nil t nil)))
+        (should (equal (reverse seen) '(nil nil t)))
+        (should (equal flushed '("box")))))))
 
 (ert-deftest remote-tramp-rpc-read-timeout-retires-only-current-generation ()
   "A timed-out request must never close a replacement SSH process."
