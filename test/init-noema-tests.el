@@ -4697,6 +4697,30 @@ selection untouched, so the pane keeps being reported as background."
             (noema-md-bridge--settle (alist-get 'requestId detail))))
       (delete-file file))))
 
+(ert-deftest +noema-portal-wiki-surface-opens-a-note-not-yet-open ()
+  "A note opened from the Portal Wiki surface gets a page of its own.
+Finding no page for the note must not be answered for the Wiki surface
+that is current: that turned every Wiki open button into
+`(wrong-type-argument bufferp nil)'."
+  (let ((file (make-temp-file "noema-portal-wiki-open" nil ".md" "# A\n"))
+        created)
+    (unwind-protect
+        (with-temp-buffer
+          (setq-local major-mode 'portal-web-mode)
+          (setq-local +noema--client-id "noema:surface")
+          (should (+noema-portal-buffer-p (current-buffer)))
+          (should-not (+noema-portal-buffer-p nil))
+          (should-not (+noema-portal--session-buffer "no-such-client"))
+          (cl-letf (((symbol-function '+noema--app-url)
+                     (lambda (file id) (format "http://127.0.0.1:1/?file=%s&client=%s" file id)))
+                    ((symbol-function '+noema-portal--new)
+                     (lambda (url id file) (setq created (list url id file)) 'page)))
+            (should (eq (+noema-portal-open "http://127.0.0.1:1/" file) 'page)))
+          (should (equal (nth 2 created) (+noema--canonical-file file)))
+          (should (equal (nth 1 created)
+                         (+noema--xwidget-session-id (+noema--canonical-file file)))))
+      (delete-file file))))
+
 (ert-deftest +noema-portal-pages-return-from-buffer-list-and-reload-after-source-save ()
   (require 'noema-md-bridge)
   (let* ((file (make-temp-file "noema-portal-reload" nil ".md" "# A\n"))

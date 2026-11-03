@@ -34,19 +34,21 @@
 
 (defun +noema-portal--focus-gained ()
   "Tell the selected Noema page to focus its editor after native focus."
-  (when (and (+noema-portal-buffer-p)
+  (when (and (+noema-portal-buffer-p (current-buffer))
              (fboundp '+noema/command))
     (+noema/command "focus")))
 
 (add-hook '+portal-focus-gained-hook #'+noema-portal--focus-gained)
 
-(defun +noema-portal-buffer-p (&optional buffer)
-  "Return non-nil when BUFFER is a Noema page hosted by Portal."
-  (let ((buffer (or buffer (current-buffer))))
-    (and (buffer-live-p buffer)
-         (with-current-buffer buffer
-           (and (eq major-mode 'portal-web-mode)
-                (or +noema--client-id +noema-buffer-file-name))))))
+(defun +noema-portal-buffer-p (buffer)
+  "Return non-nil when BUFFER is a Noema page hosted by Portal.
+A nil BUFFER is no page: lookups that found nothing pass nil, and must
+not be answered for whatever buffer happens to be current, such as the
+Wiki surface that asked to open a note."
+  (and (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (and (eq major-mode 'portal-web-mode)
+              (or +noema--client-id +noema-buffer-file-name)))))
 
 (defun +noema-portal--session-buffer (client)
   "Return the live Portal page for CLIENT."
@@ -123,18 +125,18 @@
       (+noema-portal--new url id file))))
 
 (defun +noema-portal-focus (&optional buffer)
-  "Give Noema Portal BUFFER's page the keyboard."
-  (when (+noema-portal-buffer-p buffer)
-    (let* ((buffer (or buffer (current-buffer)))
-           (selected (selected-window))
-           (window (if (eq (window-buffer selected) buffer)
-                       selected
-                     (get-buffer-window buffer 'visible))))
-      (when window
-        (select-window window)
-        (with-current-buffer buffer
-          (setq-local +portal--explicitly-unfocused nil))
-        (+portal--focus-selected-window (selected-frame) t)))))
+  "Give Noema Portal BUFFER's page, by default the current one, the keyboard."
+  (let ((buffer (or buffer (current-buffer))))
+    (when (+noema-portal-buffer-p buffer)
+      (let* ((selected (selected-window))
+             (window (if (eq (window-buffer selected) buffer)
+                         selected
+                       (get-buffer-window buffer 'visible))))
+        (when window
+          (select-window window)
+          (with-current-buffer buffer
+            (setq-local +portal--explicitly-unfocused nil))
+          (+portal--focus-selected-window (selected-frame) t))))))
 
 (defun +noema-portal-send (buffer message)
   "Send MESSAGE to the Noema page in Portal BUFFER."
