@@ -129,7 +129,7 @@ Emacs 31 默认开启括号高亮，本配置不重复启用。
 | 接口 | 实现模块 | 用法 |
 | --- | --- | --- |
 | `set-popup-rule!`、`set-popup-rules!` | `ui/popup`（shackle） | 声明本模块 buffer 的弹出方式。规则写法同 shackle（缓冲区名、`:regexp t` 正则或 major mode，加 shackle 的键）。和 Doom 一样，后声明的优先。`ui/popup` 自己只声明内置 buffer 的默认规则 |
-| `set-evil-initial-state!` | `editor/evil` | 声明本模块 mode 的初始 Evil 状态；Evil 尚未加载时会等它加载后再生效。Remote 框架层不依赖编辑器层，所以仍直接调用 `evil-set-initial-state` |
+| `set-evil-initial-state!` | `editor/evil` | 声明本模块 mode 的初始 Evil 状态；Evil 尚未加载时会等它加载后再生效。声明为 normal 或 insert 的 mode 算作编辑 buffer，即使 buffer 名以 `*` 开头，Esc 也回到 normal 状态。Remote 框架层不依赖编辑器层，所以仍直接调用 `evil-set-initial-state` |
 | `set-language-server!`、`set-language-server-feature!` | `tools/lsp` | 注册自定义 lsp-mode client / 声明包自带的 client |
 | `set-language-server-toolchain-provider!`、`set-language-server-runtime-provider!` | `tools/lsp` | 注册项目工具链与运行时 provider |
 

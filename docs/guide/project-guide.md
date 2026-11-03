@@ -237,6 +237,8 @@ workspace 或输出 buffer 会取消仍在运行的任务，输出窗口的 `K` 
 - 左侧打开或关闭 `Treemacs`
 - 如果当前 buffer 在项目内，就用项目根
 - 如果当前 buffer 不在项目内，就用当前目录
+- Agent 聊天没有文件，按它的工作目录找项目和跟随，和 Dired 一样；帮助、消息等
+  其他没有文件的 buffer 不会让 Treemacs 换项目
 - 保持焦点在当前编辑窗口
 - 自动跟随当前文件和光标所在 symbol/tag
 - 文件下的 Outline 不继承深层目录缩进，而从固定浅层开始

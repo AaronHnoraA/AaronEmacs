@@ -14,8 +14,18 @@
 (declare-function evil-set-initial-state "evil-core" (mode state))
 
 ;;;###autoload
+(defvar +evil-editing-modes nil
+  "Modes declared to start in Evil normal or insert state.
+Escape returns them to normal state even when their buffer name is
+special (`*Agent ...*'), since the declaration says they are edited.")
+
+;;;###autoload
 (defun set-evil-initial-state! (modes state)
   "Start MODES, a mode or list of modes, in Evil STATE."
+  (dolist (mode (ensure-list modes))
+    (if (memq state '(normal insert))
+        (add-to-list '+evil-editing-modes mode)
+      (setq +evil-editing-modes (delq mode +evil-editing-modes))))
   (if (featurep 'evil)
       (dolist (mode (ensure-list modes))
         (evil-set-initial-state mode state))

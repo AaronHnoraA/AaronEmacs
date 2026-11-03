@@ -749,6 +749,10 @@ double prefix ARG picks among the pool, new and saved conversations."
   (setq-local agent-shell--transcript-file nil
               shell-maker-prompt-before-killing-buffer nil))
 
+(defun +agent-shell-treemacs-source-h ()
+  "Let Treemacs place this chat in its project, by its working directory."
+  (setq-local +treemacs-directory-source t))
+
 (defun +agent-shell-busy-submit-steer-or-queue (prompt)
   "Steer PROMPT when the adapter supports it, otherwise queue it."
   (if (agent-shell-steering-supported-p)
@@ -767,6 +771,9 @@ In the input RET only writes: `S-RET' sends (steering a running turn) and
     (cond ((not (and start (>= (point) start))) (call-interactively #'agent-shell-submit))
           ((fboundp 'agent-shell-list-edit-newline) (agent-shell-list-edit-newline))
           (t (newline)))))
+
+;; The chat is edited: Escape leaves insert for normal-state Vim movement.
+(set-evil-initial-state! 'agent-shell-mode 'insert)
 
 (after! agent-shell
   (require 'agent-shell-list-edit nil t)
@@ -790,10 +797,12 @@ In the input RET only writes: `S-RET' sends (steering a running turn) and
         #'agent-shell-busy-submit-queue)
   (add-hook 'agent-shell-mode-hook #'+agent-shell-disable-transcripts)
   (add-hook 'agent-shell-mode-hook #'+agent-shell-enable-command-completion)
+  (add-hook 'agent-shell-mode-hook #'+agent-shell-treemacs-source-h)
   (dolist (buffer (buffer-list))
     (with-current-buffer buffer
       (when (derived-mode-p 'agent-shell-mode)
-        (+agent-shell-disable-transcripts))))
+        (+agent-shell-disable-transcripts)
+        (+agent-shell-treemacs-source-h))))
   ;; CWD is used for both process creation and the asynchronous session/new
   ;; request; the resolver turns it into the agent's native path.
   (advice-add 'agent-shell-cwd :filter-return #'+agent-shell-process-directory)

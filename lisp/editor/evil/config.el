@@ -79,8 +79,9 @@ highlight swallow Escape before Evil returned to normal state."
   "Return non-nil when the current buffer should recover to Evil normal state."
   (and (not (minibufferp))
        (not (apply #'derived-mode-p +evil-emacs-state-modes))
-       (not (string-match-p "\\` \\|\\`\\*"
-                            (buffer-name)))))
+       (or (apply #'derived-mode-p +evil-editing-modes)
+           (not (string-match-p "\\` \\|\\`\\*"
+                                (buffer-name))))))
 
 (defun +evil-normal-state-maybe ()
   "Recover Evil normal state in ordinary editing buffers.

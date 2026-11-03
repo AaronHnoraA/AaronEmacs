@@ -188,6 +188,19 @@
     (should (equal (+agent-menu--reply-in (point-min) (point-max))
                    "The answer is $x^2$\nand $$y$$."))))
 
+(ert-deftest agent-chat-is-a-treemacs-source-by-its-directory ()
+  (require 'tools/project/config)
+  (should (memq '+agent-shell-treemacs-source-h agent-shell-mode-hook))
+  (should (memq 'agent-shell-mode +evil-editing-modes))
+  (with-temp-buffer
+    (setq default-directory user-emacs-directory)
+    (should-not (+treemacs-source-buffer-p))
+    (should-not (+treemacs-find-current-user-project-a (lambda () "/root")))
+    (+agent-shell-treemacs-source-h)
+    (should (+treemacs-source-buffer-p))
+    (should (+treemacs-find-current-user-project-a (lambda () user-emacs-directory)))
+    (should (+treemacs-follow-path))))
+
 (ert-deftest agent-appearance-c53-palette-follows-all-aaron-themes ()
   (let ((variant aaron-ui-current-variant))
     (unwind-protect

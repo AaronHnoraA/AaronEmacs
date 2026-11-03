@@ -1540,12 +1540,19 @@ actually change."
   (when (boundp 'treemacs--previously-followed-tag-position)
     (setq-local treemacs--previously-followed-tag-position nil)))
 
+(defvar-local +treemacs-directory-source nil
+  "Non-nil in a buffer without a file whose directory is its place in a project.
+An Agent chat sets it: Treemacs then finds its project and follows its
+`default-directory' as it does for Dired.  Other file-less buffers (help,
+messages) stay out, so switching to them never repoints the tree.")
+
 (defun +treemacs-source-buffer-p ()
   "Return non-nil when the current buffer should drive Treemacs following."
   (and (not (minibufferp))
        (not (derived-mode-p 'treemacs-mode))
        (or (+treemacs-source-file)
-           (eq major-mode 'dired-mode))))
+           (eq major-mode 'dired-mode)
+           (and +treemacs-directory-source default-directory t))))
 
 (defun +treemacs-follow-context-active-p (&optional buffer)
   "Return non-nil when BUFFER is still the active source for Treemacs follow.
@@ -1578,7 +1585,7 @@ When BUFFER is nil, use the current buffer in the selected window."
   (cond
    ((+treemacs-source-file)
     (+treemacs-project-path (+treemacs-source-file)))
-   ((derived-mode-p 'dired-mode)
+   ((or (derived-mode-p 'dired-mode) +treemacs-directory-source)
     (+treemacs-project-path default-directory))))
 
 (defun +treemacs-normalize-workspace-paths ()

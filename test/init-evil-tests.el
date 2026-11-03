@@ -41,5 +41,27 @@
     (should state-changed)
     (should highlight-cleared)))
 
+;; An Agent chat is named `*Agent ...*' yet is edited: Escape leaves insert.
+(define-derived-mode evil-tests-chat-mode text-mode "Chat")
+
+(ert-deftest evil-escape-returns-declared-editing-modes-to-normal ()
+  (let ((+evil-editing-modes nil))
+    (set-evil-initial-state! 'evil-tests-chat-mode 'insert)
+    (should (memq 'evil-tests-chat-mode +evil-editing-modes))
+    (with-temp-buffer
+      (rename-buffer "*Agent · test*" t)
+      (evil-tests-chat-mode)
+      (should (+evil-normal-editing-buffer-p))
+      (evil-local-mode 1)
+      (evil-insert-state)
+      (should (+evil-escape-state-h))
+      (should (eq evil-state 'normal)))
+    (with-temp-buffer
+      (rename-buffer "*Messages-like*" t)
+      (text-mode)
+      (should-not (+evil-normal-editing-buffer-p)))
+    (set-evil-initial-state! 'evil-tests-chat-mode 'emacs)
+    (should-not (memq 'evil-tests-chat-mode +evil-editing-modes))))
+
 (provide 'init-evil-tests)
 ;;; init-evil-tests.el ends here
