@@ -781,7 +781,8 @@ In the input RET only writes: `S-RET' sends (steering a running turn) and
         "RET" #'+agent-shell/newline
         "<return>" #'+agent-shell/newline
         :desc "Send / steer" "S-RET" #'agent-shell-submit
-        :desc "Send / steer" "S-<return>" #'agent-shell-submit))
+        :desc "Send / steer" "S-<return>" #'agent-shell-submit
+        :desc "Paste image" "M-V" #'agent-shell-send-clipboard-image))
 
 (with-eval-after-load 'agent-shell
   (setq agent-shell-markdown-render-function #'+agent-shell-render-markdown))

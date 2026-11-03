@@ -130,6 +130,7 @@
     (should (eq (keymap-lookup agent-shell-mode-map key) #'agent-shell-submit)))
   (dolist (key '("M-RET" "M-<return>"))
     (should (eq (keymap-lookup agent-shell-mode-map key) #'agent-shell-submit-override)))
+  (should (eq (keymap-lookup agent-shell-mode-map "M-V") #'agent-shell-send-clipboard-image))
   (should (eq agent-shell-busy-submit-default-function #'+agent-shell-busy-submit-steer-or-queue))
   (should (eq agent-shell-busy-submit-override-function #'agent-shell-busy-submit-queue)))
 
