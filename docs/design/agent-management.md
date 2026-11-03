@@ -211,7 +211,9 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
 - **C14 回收保护所有工作。** 初始化、RPC、审批、问答、Run、队列、草稿或可见
   任一条件成立时不得自动回收。测试：`agent-manager-c14-*`。
 - **C15 取消与回调有归属。** 重复停止不重复发送；超时只表达未确认。新回合、
-  清理和 state 更换使旧观察与回调失效；订阅在所属 buffer 中执行。
+  清理和 state 更换使旧观察与回调失效；订阅在所属 buffer 中执行。领域审批
+  broker 的异步应答只在同一物理 state、client 和原生请求仍待决时转发；停止、
+  重启或另一应答已经收口后，迟到决定不得再发送 ACP 回复。
   测试：`agent-manager-c15-*`。
 - **C16 返回不破坏布局。** 普通会话只增加一个右侧 dock；聊天和 popup 的输入、
   隐藏按键一致。隐藏返回来源窗口并保留执行。测试：`agent-manager-c16-*`。
@@ -380,7 +382,7 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
 - **C58 回答可以归档进 Wiki。** `F`（`/file`）取上一条回复的 Markdown（与 C57 同一来源），
   打开 Noema 现有的新建节点工作台：回复以标题开头时它成为页面标题，正文去掉该行，否则
   取首行作暂定标题。命令本身不写文件；人确认标题、位置和标签后按 `c`，由同一创建
-  runtime 建页，正文接在模板之后。通用层只公开 `+agent-last-reply`，建页留在
+  runtime 在同一次创建写入中把正文接在模板之后。通用层只公开 `+agent-last-reply`，建页留在
   `noema/roam`，不进入 `tools/agent`（C10）。没有回复时报告而不打开工作台。
   测试：`agent-c58-*`。
 - **C59 旁路提问继承原生上下文。** `/side` 在提供方报告 fork 且原会话已有原生

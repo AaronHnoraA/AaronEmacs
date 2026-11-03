@@ -2784,10 +2784,37 @@ workspace is meant to replace."
   (advice-add 'agent-shell--display-buffer :around
               #'+agent-acp--display-buffer-a))
 
+(defun +agent-acp--fence-permission-response (buffer state permission)
+  "Limit PERMISSION's response to its still pending request in BUFFER.
+The domain broker may answer asynchronously, after stop, restart or a
+different answer has already settled the native ACP request (C15)."
+  (let* ((request (map-elt (map-elt permission :tool-call) :permission-request-id))
+         (client (map-elt state :client))
+         (respond (map-elt permission :respond))
+         (copy (copy-sequence permission)))
+    (when (functionp respond)
+      (map-put! copy :respond
+                (lambda (option)
+                  (when (and request
+                             (+agent-acp-agent-buffer-p buffer)
+                             (eq state (buffer-local-value 'agent-shell--state buffer))
+                             (eq client (map-elt state :client))
+                             (seq-some
+                              (lambda (pair)
+                                (equal request (map-elt (cdr pair) :permission-request-id)))
+                              (map-pairs (map-elt state :tool-calls))))
+                    (funcall respond option)))))
+    copy))
+
 (defun +agent-acp-set-permission-responder (buffer responder &optional settle-pending)
   "Install RESPONDER in BUFFER; SETTLE-PENDING also handles its current requests."
   (with-current-buffer buffer
-    (setq-local agent-shell-permission-responder-function responder)
+    (setq-local agent-shell-permission-responder-function
+                (and (functionp responder)
+                     (lambda (permission)
+                       (funcall responder
+                                (+agent-acp--fence-permission-response
+                                 buffer (+agent-acp--state buffer) permission)))))
     (when (and settle-pending (functionp responder) (not (+agent-acp-client-exited-p buffer)))
       (let* ((state (+agent-acp--state buffer)) (client (map-elt state :client))
              (calls (copy-sequence (map-pairs (map-elt state :tool-calls)))))

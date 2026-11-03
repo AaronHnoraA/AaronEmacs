@@ -1935,6 +1935,9 @@ directory without DRAFT resumes the current unsubmitted form."
           (kind . ,(plist-get draft :kind))
           (templateKey . ,(or (plist-get draft :template-key) ""))
           (tags . ,(vconcat (plist-get draft :tags)))
+          ,(when-let* ((body (plist-get draft :body))
+                       ((not (string-empty-p (string-trim body)))))
+             `(appendContent . ,body))
           ,(when-let* ((id (plist-get draft :id)))
              `(id . ,id)))))
 
@@ -1950,11 +1953,6 @@ directory without DRAFT resumes the current unsubmitted form."
     (unless (and file (file-exists-p file))
       (user-error "Noema runtime did not create the node (path: %s)"
                   (or file "nil")))
-    (when-let* ((body (plist-get draft :body))
-                ((not (string-empty-p (string-trim body)))))
-      ;; The template wrote the meta block and title; the body follows them.
-      (let ((coding-system-for-write 'utf-8-unix))
-        (write-region (concat "\n" (string-trim body) "\n") nil file t 'silent)))
     (+noema-roam--clear-runtime-cache)
     (when (derived-mode-p '+noema-roam-new-mode)
       (setq-local +noema-roam-new--created-file file)

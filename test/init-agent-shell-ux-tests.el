@@ -213,13 +213,16 @@
     (should (equal (plist-get (cadr opened) :body) "body")))
   (cl-letf (((symbol-function '+agent-last-reply) (lambda (&rest _) nil)))
     (should-error (+noema-roam/file-agent-reply) :type 'user-error))
-  ;; Creating writes the body after what the template wrote.
+  ;; The runtime receives the body in the create request and writes it once.
   (let* ((root (make-temp-file "noema-file-reply" t))
          (file (expand-file-name "t.md" root)))
     (unwind-protect
         (cl-letf (((symbol-function '+noema-roam--runtime-call)
-                   (lambda (&rest _)
-                     (with-temp-file file (insert "#+begin meta\nid: x\n#+end meta\n\n# T\n"))
+                   (lambda (_action _option json)
+                     (let ((payload (json-parse-string json :object-type 'hash-table)))
+                       (should (equal (gethash "appendContent" payload) "Body $x^2$.")))
+                     (with-temp-file file
+                       (insert "#+begin meta\nid: x\n#+end meta\n\n# T\n\nBody $x^2$.\n"))
                      (let ((table (make-hash-table :test #'equal)))
                        (puthash "file" file table)
                        table)))

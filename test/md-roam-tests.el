@@ -1459,6 +1459,7 @@ source: roam/demo/analysis.md
           '((nodeType . "roam")
             (title . "Group")
             (path . "public/Math/Algebra/group.md")
+            (appendContent . "Body from reply.")
             (tags . ["algebra" "qc"]))))
         captured)
     (cl-letf (((symbol-function '+noema--api-call-sync)
@@ -1472,7 +1473,8 @@ source: roam/demo/analysis.md
     (should (equal (car captured)
                    "noema:api:notes:create-node"))
     (let ((body (aref (cadr captured) 0)))
-      (should (equal (gethash "tags" body) ["algebra" "qc"])))))
+      (should (equal (gethash "tags" body) ["algebra" "qc"]))
+      (should (equal (gethash "appendContent" body) "Body from reply.")))))
 
 (ert-deftest +noema-roam-new-editable-fields-sync-draft ()
   (with-temp-buffer

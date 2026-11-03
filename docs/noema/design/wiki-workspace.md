@@ -129,6 +129,8 @@ After creation, the clicked source link is upgraded to `[[roam://id|Label]]`
 if its original source text is still present in the source editor. An existing
 page or alias in the chosen repository and namespace can be selected instead.
 `roam://id` remains the stable exact-link form.
+When a New Page draft carries body text, the creation runtime writes it with
+the template in one save, so a second append cannot leave a template-only page.
 
 A colon is read as a namespace separator only when a page answers to that
 reading. `[[Chapter 1: Scope]]` and `[[定理：存在性]]` therefore link the page

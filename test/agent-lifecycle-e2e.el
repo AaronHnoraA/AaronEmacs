@@ -131,6 +131,43 @@
     (should (+agent-acp-confirm-stop buffer "close"))
     (should-not agent-lifecycle-e2e--asked)))
 
+(ert-deftest agent-manager-c15-a-late-broker-decision-cannot-approve-a-cancelled-turn ()
+  "An asynchronous domain broker must not answer an ACP request after stop."
+  (agent-lifecycle-e2e--with-session (buffer store directory)
+    (let (respond)
+      (+agent-acp-set-permission-responder
+       buffer (lambda (permission)
+                (setq respond (map-elt permission :respond))
+                t))
+      (agent-flow-e2e--send buffer "permission")
+      (agent-flow-e2e--wait (lambda () (functionp respond)))
+      (+agent-acp-stop buffer)
+      (agent-flow-e2e--idle buffer)
+      (funcall respond "allow")
+      (accept-process-output nil 0.1)
+      (should-not
+       (cl-some (lambda (line) (string-match-p "\\\"optionId\\\":\\\"allow\\\"" line))
+                (agent-lifecycle-e2e--events store))))))
+
+(ert-deftest agent-manager-c15-a-broker-decision-answers-once-while-pending ()
+  "A live domain answer reaches ACP once; a repeated callback has no effect."
+  (agent-lifecycle-e2e--with-session (buffer store directory)
+    (let (respond)
+      (+agent-acp-set-permission-responder
+       buffer (lambda (permission)
+                (setq respond (map-elt permission :respond))
+                t))
+      (agent-flow-e2e--send buffer "permission")
+      (agent-flow-e2e--wait (lambda () (functionp respond)))
+      (funcall respond "allow")
+      (agent-flow-e2e--idle buffer)
+      (funcall respond "allow")
+      (accept-process-output nil 0.1)
+      (should (= 1
+                 (cl-count-if
+                  (lambda (line) (string-match-p "\\\"optionId\\\":\\\"allow\\\"" line))
+                  (agent-lifecycle-e2e--events store)))))))
+
 (ert-deftest agent-process-c38-a-deliberate-shutdown-is-not-a-failure ()
   "The session's own shutdown is not reported as a lost client."
   (agent-lifecycle-e2e--with-session (buffer store directory)
