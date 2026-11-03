@@ -1254,6 +1254,90 @@ selection and mark behavior."
 (add-hook 'after-load-theme-hook #'aaron-ibuffer-apply-ui)
 
 ;; Recently opened files
+(defvar aaron-recentf--save-process nil)
+(defvar aaron-recentf--pending-save nil)
+(defvar aaron-recentf--exiting nil)
+
+(defun aaron-recentf--snapshot ()
+  "Return the current recent-file list in recentf's save-file format."
+  (with-temp-buffer
+    (set-buffer-file-coding-system recentf-save-file-coding-system)
+    (insert (format-message recentf-save-file-header (current-time-string)))
+    (recentf-dump-variable 'recentf-list recentf-max-saved-items)
+    (recentf-dump-variable 'recentf-filter-changer-current)
+    (insert "\n\f\n;; Local Variables:\n"
+            (format ";; coding: %s\n" recentf-save-file-coding-system)
+            ";; End:\n")
+    (encode-coding-string (buffer-string) recentf-save-file-coding-system)))
+
+(defun aaron-recentf--start-save (save)
+  "Write SAVE, a (FILE . CONTENT) pair, in a background process."
+  (let (process)
+    (condition-case error
+        (let ((process-connection-type nil))
+          (setq process
+                (make-process
+                 :name "recentf-save"
+                 :buffer nil
+                 :command
+                 (list "/bin/sh" "-c"
+                       "umask 077; tmp=$(mktemp \"$1.XXXXXXXX\") || exit 1; trap 'rm -f \"$tmp\"' EXIT; cat > \"$tmp\" && mv -f \"$tmp\" \"$1\""
+                       "recentf-save" (car save))
+                 :coding 'binary
+                 :noquery t
+                 :sentinel #'aaron-recentf--save-sentinel))
+          (setq aaron-recentf--save-process process)
+          (process-send-string process (cdr save))
+          (process-send-eof process))
+      (error
+       (when (process-live-p process)
+         (delete-process process))
+       (setq aaron-recentf--save-process nil)
+       (warn "recentf background save failed: %s"
+             (error-message-string error))))))
+
+(defun aaron-recentf--save-sentinel (process _event)
+  "Start the latest queued save after PROCESS exits."
+  (when (and (eq process aaron-recentf--save-process)
+             (memq (process-status process) '(exit signal)))
+    (setq aaron-recentf--save-process nil)
+    (unless (or aaron-recentf--exiting
+                (and (eq (process-status process) 'exit)
+                     (zerop (process-exit-status process))))
+      (warn "recentf background save failed"))
+    (when (and aaron-recentf--pending-save
+               (not aaron-recentf--exiting))
+      (let ((save aaron-recentf--pending-save))
+        (setq aaron-recentf--pending-save nil)
+        (aaron-recentf--start-save save)))))
+
+(defun aaron-recentf--save-after-close-a (original &rest args)
+  "Save after ORIGINAL updates a tracked file's recentf entry."
+  (let ((tracked (and buffer-file-name
+                      (recentf-string-member
+                       (recentf-expand-file-name buffer-file-name)
+                       recentf-list))))
+    (prog1 (apply original args)
+      (when tracked
+        (let ((save (cons (expand-file-name recentf-save-file)
+                          (aaron-recentf--snapshot))))
+          (if (process-live-p aaron-recentf--save-process)
+              (setq aaron-recentf--pending-save save)
+            (setq aaron-recentf--pending-save nil)
+            (aaron-recentf--start-save save)))))))
+
+(defun aaron-recentf--finish-save-on-exit ()
+  "Finish background writes before recentf's normal exit save."
+  (setq aaron-recentf--exiting t
+        aaron-recentf--pending-save nil)
+  (let ((deadline (+ (float-time) 2)))
+    (while (and (< (float-time) deadline)
+                (process-live-p aaron-recentf--save-process))
+      (accept-process-output nil 0.05)))
+  (when (process-live-p aaron-recentf--save-process)
+    (delete-process aaron-recentf--save-process))
+  (setq aaron-recentf--pending-save nil))
+
 (use-package recentf
   :ensure nil
   :hook (aaron-first-file . recentf-mode)
@@ -1268,7 +1352,11 @@ selection and mark behavior."
                      "/su\\(do\\)?:"
                      "^/usr/include/"
                      "/TAGS\\'"
-                     "COMMIT_EDITMSG\\'")))
+                     "COMMIT_EDITMSG\\'"))
+  :config
+  (advice-add 'recentf-track-closed-file :around
+              #'aaron-recentf--save-after-close-a)
+  (add-hook 'kill-emacs-hook #'aaron-recentf--finish-save-on-exit -90))
 
 (use-package savehist
   :ensure nil
@@ -1973,10 +2061,9 @@ interrupt the current window layout.")
   :group 'files :type 'integer
   :doc "Number of recent files remembered across sessions.")
 
-;; Emacs runs here for weeks, and recentf otherwise writes its list only on a
-;; clean exit; Doom saves it on a timer in a daemon for the same reason.
-;; recentf restarts its timer from its custom setter, which the registry's
-;; Customize bridge replaces, so the restart is done here.
+;; Keep the timer setting available for opt-in use.  recentf restarts its
+;; timer from its custom setter, which the registry's Customize bridge
+;; replaces, so the restart is done here.
 (declare-function recentf--cancel-autosave-timer "recentf" ())
 (declare-function recentf--manage-autosave-timer "recentf" ())
 (config-register 'recentf-autosave-interval
@@ -1986,7 +2073,11 @@ interrupt the current window layout.")
          (when (fboundp 'recentf--manage-autosave-timer)
            (recentf--cancel-autosave-timer)
            (recentf--manage-autosave-timer)))
-  :doc "Seconds between saves of the recent-file list; nil saves only on exit.")
+  :doc "Seconds between timed saves; nil saves on file close and exit only.")
+
+(config-register 'recentf-show-messages
+  :group 'files :type 'boolean
+  :doc "Show messages from automatic recent-file maintenance.")
 
 (config-register 'undo-tree-auto-save-history
   :group 'files :type 'boolean

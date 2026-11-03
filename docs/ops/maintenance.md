@@ -458,9 +458,11 @@ savehist 的临时 buffer 里去掉文本属性：带图片、overlay 之类属�
 savehist 整个丢掉这个变量，而当前会话里的 kill ring 保留原来的属性。mark ring
 里是 marker，无法保存，所以不在保存列表里。
 
-最近文件列表每 10 分钟写一次盘（`recentf-autosave-interval`，在 `config-board`
-里改），不只在正常退出时写：后台 Emacs 一次运行几周，崩溃时不会丢掉这段时间的
-记录。
+关闭已被 `recentf` 记录的真实文件 buffer 时，它先更新最近文件列表，再由后台进程
+静默写入 `var/recentf-save.el`。虚拟 buffer 和仅关闭窗口不会触发；连续关闭多个文件
+会按顺序完成写入，只保留最新的待写快照。正常退出也会保存。默认没有定时写盘。
+`config-board` 中的 `recentf-autosave-interval` 可以按需开启定时保存，
+`recentf-show-messages` 可以开启写盘提示。
 
 undo-tree 历史保存在 `var/undo-tree-history/`，但加密文件（`.gpg`、`.age` 及其备份）
 和 Git 的提交/合并/rebase 消息文件不保存：前者的历史里是解密后的明文，后者每次都被
