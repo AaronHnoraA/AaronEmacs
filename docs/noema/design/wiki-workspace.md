@@ -19,6 +19,15 @@ specific examples and constraints for future refinements. Table top and
 bottom rules, tabular numerals, restrained caption lines and the metadata
 strip use the existing theme tokens and font families.
 
+`#+begin layout {cols=2 mode=grid}` places Markdown blocks beside each other;
+`mode=flow` continues prose across columns. Both use a fine top/bottom rule and
+quiet column dividers in the editor and published view. Grid dividers follow
+the chosen column count and disappear when columns stack on narrow screens.
+The metadata cover gives the title, date and Topics their own spacing, with
+one rule above the topics and one small ornament below; the abstract keeps a
+shorter reading measure. These decorations preserve the theme background,
+palette and font families.
+
 ## Layouts
 
 `workspace.layout` is deliberately explicit:

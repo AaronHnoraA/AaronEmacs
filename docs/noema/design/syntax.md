@@ -202,7 +202,7 @@ Open and close lines pair by kind and nest.  Parser: `ORG_ENV_OPEN_RE` in
 | `note`, `info`, `attention`, `warning`, `important` | admonition |
 | `comment` | collapsed comment, shown on demand |
 | `fold` | folded region |
-| `layout {cols=3 mode=grid widths=30-40-30 align=center}` | side-by-side group; `cols` 1–4, `mode` `grid`/`flow` (`src/layout-group.ts`) |
+| `layout {cols=3 mode=grid widths=30-40-30 align=center}` | side-by-side Markdown group; `cols` 1–4, `grid` keeps blocks in cells, `flow` continues prose across columns (`src/layout-group.ts`) |
 | `tikz [id]` | TikZ/PGFPlots figure, kept verbatim in LaTeX (`shared/tikz-source.mjs`) |
 | `html` | sanitized raw HTML block |
 | `av [title]` | attribute view (below) |
@@ -423,7 +423,7 @@ compatibility rules are `shared/tex-compat-rules.json`; the macro contract is
 | ` ```mermaid ` | Mermaid diagram |
 | ` ```marmind ` (also `mindmap`, `markmind`) | interactive mind map: indentation is the hierarchy, `{…}` sets size and placement |
 | `#+begin tikz` | TikZ figure, rendered in the browser and kept verbatim in LaTeX |
-| `#+begin layout {…}` | figures side by side |
+| `#+begin layout {…}` | Markdown blocks or figures side by side; `mode=flow` for continuous prose |
 
 Supported fence languages: `supportedDiagramLang` in `src/diagram-langs.ts`.
 
