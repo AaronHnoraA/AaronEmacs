@@ -834,6 +834,22 @@ as old as `remote-ancestor-prefetch-lifetime' allows."
       (cl-pushnew name remote-ancestor-marker-names :test #'equal)))
   remote-ancestor-marker-names)
 
+(defun remote-fs-forget-ancestor-scans (&optional target-id)
+  "Forget which ancestor directories were scanned, for TARGET-ID or all.
+A backend calls this when it drops the cached answers a scan seeded, so
+the next upward walk scans again in one round trip instead of asking
+marker by marker."
+  (if (null target-id)
+      (clrhash remote-fs--ancestor-prefetched)
+    (let (stale)
+      (maphash (lambda (directory _time)
+                 (when (equal (ignore-errors (remote-file-name-target directory))
+                              target-id)
+                   (push directory stale)))
+               remote-fs--ancestor-prefetched)
+      (dolist (directory stale)
+        (remhash directory remote-fs--ancestor-prefetched)))))
+
 (defun remote-prefetch-ancestor-markers (directory)
   "Learn in one round trip which registered markers DIRECTORY's ancestors hold.
 Discovery of a project root, a version-control root or an `.envrc' asks for

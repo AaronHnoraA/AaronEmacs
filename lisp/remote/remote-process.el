@@ -500,6 +500,16 @@ adapter."
                 (car command) infile destination display
                 (cdr command)))))))
 
+(defun remote--environment-path-directories (environment)
+  "Return ENVIRONMENT's PATH as a list of directories, or nil."
+  (when (and (fboundp 'remote-environment-p)
+             (remote-environment-p environment))
+    (setq environment (remote-environment-vars environment)))
+  (when-let* (((listp environment))
+              (path (cdr (assoc-string "PATH" environment t)))
+              ((stringp path)))
+    (split-string path path-separator t)))
+
 (defun remote--environment-sets-path-p (environment)
   "Return non-nil when ENVIRONMENT overrides PATH."
   (when (and (fboundp 'remote-environment-p)
@@ -895,6 +905,10 @@ The return value is a target-native path, never a physical TRAMP link name."
                     (expand-file-name program physical-directory))))
             (rpc-probe
              (cond
+              ((and (not absolute)
+                    (remote-backend-executable-find
+                     route physical-directory program
+                     (remote--environment-path-directories environment))))
               ((equal (remote-route-link-plugin-id route) "tramp-rpc")
                (remote--rpc-executable-find program))
               ((and (not absolute)

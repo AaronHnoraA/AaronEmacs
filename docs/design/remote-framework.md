@@ -815,16 +815,27 @@ Magit/VC、项目文件列表、搜索、Dired 与 PTY 都走它。实测在 Aar
 （`remote-connection-closed-hook`）、按 target 记录的搜索路径、session PATH 索引、
 目录访问答案、元数据作用域与祖先预取。
 
-还缺的部分：
+跨命令保持与程序解析：
 
-- tramp-rpc 每次 `process-file` 后都会清空自己的 stat 缓存，所以预取的标记、写入
-  之外的元数据在下一个命令后就失效。要改为：project 根有服务端 watcher 时，以事件
-  而不是“跑过一个进程”作为失效依据。
-- `remote-executable-find` 每查一个程序都要一次 `process.run`，lsp-mode 启动时会
-  连查五个。应由 backend 提供 `:executable-find` 能力，用 session PATH 索引加上
-  一次内核确认来回答。
-- 这些知识目前分散在 backend 与 remote-fs 里，应有统一的登记与失效入口，并在
-  Remote Doctor 中显示。
+- tramp-rpc 每执行一次 `process-file` 就清空该连接的全部元数据缓存，因为命令可能
+  写入任何文件。Emacs 允许调用方绑定 `process-file-side-effects` 为 nil 来说明
+  命令不写文件。adapter 对可证明只读的命令自动这样做，与是哪个包发起的无关：只读
+  程序名单、只读的 git 子命令（`git status` 会改写 index，不在其中）、不带执行或
+  删除动作的 `find`/`fd`，以及每一级都只读、且不含重定向、`;`、`&&`、命令替换
+  或换行的 `sh -c` 管道。无法判断的命令仍然清空，规则见
+  `remote-backend-tramp-rpc--argv-read-only-p`。tramp-rpc 主动丢弃元数据时（例如
+  Magit 刷新），框架会忘记该 target 的祖先扫描记录
+  （`remote-fs-forget-ancestor-scans`），下一次向上查找仍是一个 batch。
+- backend 可提供 `:executable-find`（`remote-backend-executable-find`）。
+  `remote-executable-find` 先问它，并把环境 capsule 的 PATH 按顺序传入。tramp-rpc
+  用 session PATH 索引回答：取第一个列表中含该名字、且不是目录的目录，用一次内核
+  检查确认；所有目录都没有则直接回答没有；有目录列不出时退回通用探测。
+
+还缺的部分：项目根有服务端 watcher 时，写命令之后也只按事件失效，不必整体清空；
+这些知识应有统一的登记与失效入口，并在 Remote Doctor 中显示。
+
+实测（Aaron-PC，单位为往返次数）：冷打开 28→16，Dired 9→4，project-files 12→8，
+compile 15→12，Magit status 40→33。
 
 `remote-copy-file-to-target` 是 provisioning 的批量传输边界。native backend 使用
 本地复制，TRAMP/tramp-rpc SSH backend 使用 SCP；consumer 只提交客户端绝对源文件、
@@ -1532,7 +1543,7 @@ devcontainer、Dape/tasks 编排、动态 SOCKS forward 与托管 tunnel 不在�
 | TRAMP/RPC network client、remote listener 与 SSH 双向 port forward | 已通过 native 回环、命令测试、SSH `-R` 真机数据往返，以及 `-L` 真机强制重连后原端口数据往返；突发断线与 `-R` 恢复故障注入待补 |
 | pipeline stage 的实际逐段建连 | executor/runtime 已建立；内建 overlay/hop 主要负责 endpoint 变换 |
 | workspace/service/channel/terminal 生命周期 | 基础已建立；service/forward、逻辑 watch 与 lsp-mode resource 已登记恢复，仍缺长期真机故障注入；terminal 手动重启 |
-| 单连接与 session/project 知识层 | 常用操作共用一条 SSH/RPC 连接；登录 PATH 单一来源，session PATH 索引、目录访问、祖先标记与 Dired 列目录已由底层回答；跨 `process-file` 的缓存保持与 backend 程序解析待补 |
+| 单连接与 session/project 知识层 | 常用操作共用一条 SSH/RPC 连接；登录 PATH 单一来源，session PATH 索引、目录访问、祖先标记与 Dired 列目录已由底层回答；只读命令保留知识、backend 程序解析已建立；写命令后按 watcher 事件失效待补 |
 | Remote Doctor | 已建立结构化报告与可选 target probe |
 | SSH 真机回归 | `make remote-e2e`，只使用随机临时目录 |
 | WSL2 direnv + C clangd + Python pylsp | 已真实验证走远程环境与 tramp-rpc |

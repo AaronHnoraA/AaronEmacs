@@ -53,6 +53,7 @@
 (declare-function tramp-rpc--cached-remote-path "tramp-rpc-transport" (vec))
 (declare-function tramp-rpc-handle-exec-path "tramp-rpc" ())
 (declare-function remote-fs-target-search-path "remote-fs" (target-id))
+(declare-function remote-fs-forget-ancestor-scans "remote-fs" (&optional target-id))
 (defvar remote-path-facts-cache)
 (defvar tramp-rpc-protocol-error-file-not-found)
 (declare-function tramp-rpc--selinux-enabled-p "tramp-rpc" (vec))
@@ -107,7 +108,8 @@
     (tramp-rpc--cache-file-stat-result . (3 . 4))
     (tramp-rpc--fetch-remote-exec-path . (1 . 1))
     (tramp-rpc--cached-remote-path . (1 . 1))
-    (tramp-rpc-handle-exec-path . (0 . 0)))
+    (tramp-rpc-handle-exec-path . (0 . 0))
+    (tramp-rpc-handle-process-file . (1 . many)))
   "Private upstream seams isolated by this backend adapter.
 A connection generation is a `tramp-rpc-connection' record; it is read only
 through `remote-backend-tramp-rpc--connection-slot'.")
@@ -959,7 +961,10 @@ again after at most this long.  Zero disables the index."
        do (let ((names (make-hash-table :test #'equal)))
             (unless missing
               (dolist (entry listing)
-                (puthash (tramp-rpc--decode-filename entry) t names)))
+                (puthash (tramp-rpc--decode-filename entry)
+                         (let ((type (and (listp entry) (alist-get 'type entry))))
+                           (if (stringp type) type t))
+                         names)))
             (puthash (tramp-make-tramp-file-name vec directory)
                      (cons now (cons process names))
                      remote-backend-tramp-rpc--path-index))))))
@@ -1035,6 +1040,144 @@ within tramp-rpc's TTL policy."
         nil)
     (funcall function filename mode)))
 
+(defun remote-backend-tramp-rpc-executable-find
+    (_route physical-directory program directories)
+  "Find bare PROGRAM in DIRECTORIES from the session PATH index.
+DIRECTORIES is the target-native search path in order, or nil for the
+remote `exec-path' tramp-rpc hands `executable-find'.  The directories are
+listed once per session; the first one whose listing holds PROGRAM is
+confirmed with one kernel `access' check, and a program absent from every
+listing costs no round trip.  Return (t . PATH), (t . nil), or nil when a
+directory could not be listed, leaving the lookup to the generic probe.
+The search follows `executable-find': regular executable files only."
+  (when-let* (((advice-member-p #'remote-backend-tramp-rpc--path-index-a
+                                'tramp-rpc--file-access-p))
+              ((and (numberp remote-backend-tramp-rpc-path-index-ttl)
+                    (> remote-backend-tramp-rpc-path-index-ttl 0)))
+              ((stringp program))
+              ((not (string-empty-p program)))
+              ((not (string-match-p "/" program)))
+              (vec (ignore-errors (tramp-dissect-file-name physical-directory)))
+              (process (remote-backend-tramp-rpc--vec-connection-slot
+                        vec :process))
+              (directories
+               (seq-uniq
+                (mapcar #'file-name-as-directory
+                        (seq-filter
+                         (lambda (directory)
+                           (and (stringp directory)
+                                (file-name-absolute-p directory)))
+                         (or directories
+                             (remote-backend-tramp-rpc--session-path vec))))))
+              (keys (mapcar (lambda (directory)
+                              (tramp-make-tramp-file-name vec directory))
+                            directories)))
+    (let ((missing (cl-loop for directory in directories
+                            for key in keys
+                            unless (remote-backend-tramp-rpc--path-index-entry
+                                    key process)
+                            collect directory)))
+      (when missing
+        (ignore-errors
+          (remote-backend-tramp-rpc--path-index-build vec process missing))))
+    (catch 'done
+      (cl-loop
+       for directory in directories
+       for key in keys
+       for names = (remote-backend-tramp-rpc--path-index-entry key process)
+       ;; An unlisted directory could hold PROGRAM: let the probe decide.
+       unless names do (throw 'done nil)
+       when (let ((type (gethash program names)))
+              (and type (not (equal type "directory"))))
+       do (when (file-executable-p (concat key program))
+            (throw 'done (cons t (concat directory program)))))
+      (cons t nil))))
+
+;;;; Read-only commands keep the session's knowledge
+
+(defconst remote-backend-tramp-rpc--read-only-programs
+  '("rg" "grep" "egrep" "fgrep" "ls" "stat" "test" "[" "true" "false"
+    "uname" "id" "whoami" "hostname" "getent" "printenv" "which" "cat"
+    "head" "tail" "wc" "file" "readlink" "realpath" "basename" "dirname"
+    "date" "df" "du" "md5sum" "sha1sum" "sha256sum" "cut" "sort" "uniq"
+    "tr")
+  "Programs that never write to the file system whatever their arguments.")
+
+(defconst remote-backend-tramp-rpc--read-only-git-commands
+  '("rev-parse" "ls-files" "ls-tree" "log" "show" "cat-file" "describe"
+    "for-each-ref" "show-ref" "symbolic-ref" "merge-base" "rev-list"
+    "blame" "version" "name-rev" "grep" "shortlog" "check-ignore"
+    "check-attr" "var" "diff" "diff-files" "diff-index" "diff-tree")
+  "Git subcommands that read the repository without writing to it.
+`status' is absent: it rewrites the index to refresh stat information.")
+
+(defconst remote-backend-tramp-rpc--find-writing-actions
+  '("-delete" "-exec" "-execdir" "-ok" "-okdir" "-fprint" "-fprint0"
+    "-fprintf" "-fls" "-x" "-X" "--exec" "--exec-batch")
+  "`find' and `fd' arguments that run commands or write files.")
+
+(defun remote-backend-tramp-rpc--git-read-only-p (arguments)
+  "Return non-nil when git ARGUMENTS only read the repository."
+  (let ((rest arguments) subcommand)
+    (while (and rest (not subcommand))
+      (let ((argument (pop rest)))
+        (cond
+         ((member argument '("-c" "-C" "--git-dir" "--work-tree"
+                             "--namespace"))
+          (pop rest))
+         ((string-prefix-p "-" argument))
+         (t (setq subcommand argument)))))
+    (and subcommand
+         (member subcommand remote-backend-tramp-rpc--read-only-git-commands)
+         (not (seq-some (lambda (argument)
+                          (or (string-prefix-p "--output" argument)
+                              (equal argument "-o")))
+                        rest)))))
+
+(defun remote-backend-tramp-rpc--argv-read-only-p (argv)
+  "Return non-nil when command ARGV provably writes nothing."
+  (when-let* ((program (car argv))
+              ((stringp program))
+              (name (file-name-nondirectory program)))
+    (cond
+     ((equal name "git")
+      (remote-backend-tramp-rpc--git-read-only-p (cdr argv)))
+     ((member name '("find" "fd" "fdfind"))
+      (not (seq-intersection (cdr argv)
+                             remote-backend-tramp-rpc--find-writing-actions)))
+     ((member name '("sh" "bash" "dash" "zsh"))
+      (and (equal (cadr argv) "-c")
+           (stringp (nth 2 argv))
+           (remote-backend-tramp-rpc--script-read-only-p (nth 2 argv))))
+     (t (member name remote-backend-tramp-rpc--read-only-programs)))))
+
+(defun remote-backend-tramp-rpc--script-read-only-p (script)
+  "Return non-nil when shell SCRIPT is a read-only pipeline of simple commands.
+Redirection, sequencing, background jobs, substitution and multi-line
+scripts are never judged; each pipeline stage must itself be read-only."
+  (and (not (string-match-p "[><;&`\n]\\|\\$(" script))
+       (cl-every
+        (lambda (stage)
+          (let ((argv (ignore-errors (split-string-shell-command stage))))
+            (and argv (remote-backend-tramp-rpc--argv-read-only-p argv))))
+        (split-string script "|" t "[ \t]+"))))
+
+(defun remote-backend-tramp-rpc--read-only-command-a
+    (function program &rest arguments)
+  "Run FUNCTION's PROGRAM without flushing caches when it only reads.
+tramp-rpc forgets every cached stat, truename and existence answer of the
+connection after each `process-file', because a command may write
+anything.  Emacs lets a caller say otherwise by binding
+`process-file-side-effects' to nil; this does so for a command that
+provably writes nothing, whichever package runs it, so `git ls-files' or
+`rg' leave the session's knowledge in place.  ARGUMENTS are FUNCTION's
+INFILE, DESTINATION, DISPLAY and the program's arguments."
+  (let ((process-file-side-effects
+         (and process-file-side-effects
+              (not (remote-backend-tramp-rpc--argv-read-only-p
+                    (cons program (nthcdr 3 arguments)))))))
+    (apply function program arguments)))
+
 ;;;; Ancestor marker prefetch
 
 (defvar remote-backend-tramp-rpc--ancestor-prefetch nil
@@ -1102,6 +1245,20 @@ lookups.  Return non-nil when the batch answered."
 (add-hook 'remote-ancestor-prefetch-functions
           #'remote-backend-tramp-rpc-prefetch-ancestor-markers)
 
+(defun remote-backend-tramp-rpc--metadata-dropped-h (vec)
+  "Let Remote scan VEC's ancestors again after tramp-rpc dropped metadata.
+The scan's answers lived in the cache that was just cleared (Magit's
+refresh clears the connection's on purpose); VEC nil means every
+connection."
+  (when (fboundp 'remote-fs-forget-ancestor-scans)
+    (if (null vec)
+        (remote-fs-forget-ancestor-scans)
+      (when-let* ((target (ignore-errors
+                            (remote-file-name-target
+                             (remote-canonicalize-file-name
+                              (tramp-make-tramp-file-name vec "/"))))))
+        (remote-fs-forget-ancestor-scans target)))))
+
 ;;;; Version-gated shims
 
 (defconst remote-backend-tramp-rpc--shims
@@ -1157,6 +1314,9 @@ lookups.  Return non-nil when the batch answered."
      tramp-rpc--call-batch
      tramp-rpc--encode-path tramp-rpc--decode-filename
      tramp-rpc--batch-error-p tramp-rpc--get-connection)
+    (read-only-commands
+     tramp-rpc-handle-process-file :around
+     remote-backend-tramp-rpc--read-only-command-a)
     (directory-access-cache
      tramp-rpc--file-access-p :around
      remote-backend-tramp-rpc--directory-access-a
@@ -1292,6 +1452,11 @@ All shim advice, current and retired, is removed first."
       ;; Buffer hygiene.  The cleanup hooks only use public TRAMP names and
       ;; read a generation only through the verified accessors.
       (clrhash remote-backend-tramp-rpc--directory-access)
+      (remove-hook 'tramp-rpc-cache-invalidate-functions
+                   #'remote-backend-tramp-rpc--metadata-dropped-h)
+      (when remote-backend-tramp-rpc--ancestor-prefetch
+        (add-hook 'tramp-rpc-cache-invalidate-functions
+                  #'remote-backend-tramp-rpc--metadata-dropped-h))
       (remove-hook 'tramp-rpc-fs-events-functions
                    #'remote-backend-tramp-rpc--directory-access-events-h)
       (when (advice-member-p #'remote-backend-tramp-rpc--directory-access-a
@@ -1491,6 +1656,7 @@ associating that HOME with a named account.  Other names keep upstream lookup."
    :open-network-stream #'remote-backend-tramp-stream
    :port-forward #'remote-backend-tramp-forward
    :classify-error #'remote-backend-tramp-rpc-classify-error
+   :executable-find #'remote-backend-tramp-rpc-executable-find
    :program-form 'absolute
    :describe
    (lambda ()

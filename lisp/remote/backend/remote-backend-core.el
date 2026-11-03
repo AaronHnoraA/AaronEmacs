@@ -52,7 +52,8 @@
   forward-function
   classify-error-function
   describe-function
-  program-form)
+  program-form
+  executable-find-function)
 
 (cl-defstruct (remote-backend-execution
                (:constructor remote-backend-execution-create))
@@ -299,7 +300,7 @@ returns a plist with at least `:status' and `:capabilities'."
         connect live disconnect
         prepare-process stdio-bridge copy-file-to-target client-shell
         make-network-process open-network-stream port-forward
-        classify-error describe (program-form 'search))
+        classify-error describe executable-find (program-form 'search))
   "Register transport backend ID and return it.
 
 CAPABILITIES are route capabilities implemented by the backend.  PROJECT maps
@@ -333,6 +334,11 @@ own: `:command' is the client argv of a remote shell without its destination,
 `:destination' that destination, and `:environment' an alist of extra client
 variables.  A backend whose files the client reads directly needs none.
 
+EXECUTABLE-FIND receives ROUTE, the route's physical directory, a bare
+PROGRAM and the target-native DIRECTORIES the lookup searches in order (nil
+for the backend's own PATH).  It returns (t . PATH) or (t . nil) when it
+knows the answer, and nil to leave the lookup to the generic probe.
+
 MAKE-NETWORK-PROCESS, OPEN-NETWORK-STREAM, and PORT-FORWARD are optional
 channel operations.  PROGRAM-FORM is `search' when the backend accepts a bare
 program name and `absolute' when its spawn protocol requires an absolute
@@ -365,7 +371,8 @@ target-native executable."
             :forward-function port-forward
             :classify-error-function classify-error
             :describe-function describe
-            :program-form program-form)))
+            :program-form program-form
+            :executable-find-function executable-find)))
       (when-let* ((problems (remote-backend-capability-problems backend)))
         (signal
          'remote-operation-contract-error
@@ -405,6 +412,17 @@ variables.  Nil means the backend offers no such connection."
   (when-let* ((backend (remote-route-backend route))
               (function (remote-backend-client-shell-function backend)))
     (funcall function route)))
+
+(defun remote-backend-executable-find
+    (route physical-directory program directories)
+  "Ask ROUTE's backend where bare PROGRAM is, or return nil.
+PHYSICAL-DIRECTORY is the route's directory and DIRECTORIES the
+target-native search path in order, nil for the backend's own.  A backend
+without the operation, or one that cannot answer, returns nil."
+  (when-let* ((backend (remote-route-backend route))
+              (function (remote-backend-executable-find-function backend)))
+    (ignore-errors
+      (funcall function route physical-directory program directories))))
 
 (defun remote-backend-copy-file-to-target
     (route local-file target-file &optional overwrite)
