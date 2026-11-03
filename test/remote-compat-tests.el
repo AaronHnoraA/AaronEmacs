@@ -1210,6 +1210,95 @@ used until its events have had time to arrive; the rest are dropped."
         (should (equal (reverse seen) '(nil nil t)))
         (should (equal flushed '("box")))))))
 
+(ert-deftest remote-tramp-rpc-listings-prove-only-absence ()
+  "The nearest known listing proves a name missing; it never invents one."
+  (require 'tramp)
+  (let ((remote-backend-tramp-rpc--listings (make-hash-table :test #'equal))
+        (names (make-hash-table :test #'equal)))
+    (cl-letf (((symbol-function 'tramp-rpc--cache-entry-valid-p)
+               (lambda (_timestamp) t)))
+      (puthash "HEAD" t names)
+      (puthash "refs" t names)
+      (puthash "/ssh:box:/w/.git/" (cons 1.0 (cons 'proc names))
+               remote-backend-tramp-rpc--listings)
+      (puthash "/ssh:box:/w/gone/" (cons 1.0 (cons 'proc nil))
+               remote-backend-tramp-rpc--listings)
+      (cl-flet ((missing (name &optional (process 'proc))
+                  (remote-backend-tramp-rpc--listing-proves-missing-p
+                   name process)))
+        (should (missing "/ssh:box:/w/.git/MERGE_HEAD"))
+        ;; Below a component the listing lacks.
+        (should (missing "/ssh:box:/w/.git/rebase-apply/onto"))
+        ;; Below a directory known to be missing.
+        (should (missing "/ssh:box:/w/gone/x/y"))
+        ;; Present names and unlisted places are not judged.
+        (should-not (missing "/ssh:box:/w/.git/HEAD"))
+        (should-not (missing "/ssh:box:/w/.git/refs/heads/main"))
+        (should-not (missing "/ssh:box:/w/src/a.c"))
+        ;; Another transport generation knows nothing.
+        (should-not (missing "/ssh:box:/w/.git/MERGE_HEAD" 'other))))))
+
+(ert-deftest remote-tramp-rpc-listings-come-from-complete-reads ()
+  "Complete listings are kept; filtered or counted ones are not."
+  (require 'tramp)
+  (let ((remote-backend-tramp-rpc--listings (make-hash-table :test #'equal))
+        kept)
+    (cl-letf (((symbol-function 'remote-backend-tramp-rpc--keep-listing)
+               (lambda (directory names) (push (cons directory names) kept))))
+      (cl-flet ((files (&rest args) '("a" "b")))
+        (remote-backend-tramp-rpc--keep-listing-a #'files "/ssh:box:/w/")
+        (remote-backend-tramp-rpc--keep-listing-a
+         #'files "/ssh:box:/w/" nil directory-files-no-dot-files-regexp)
+        (remote-backend-tramp-rpc--keep-listing-a #'files "/ssh:box:/w/" nil "\\.el\\'")
+        (remote-backend-tramp-rpc--keep-listing-a #'files "/ssh:box:/w/" nil nil nil 1)
+        (remote-backend-tramp-rpc--keep-completions-a #'files "" "/ssh:box:/w/")
+        (remote-backend-tramp-rpc--keep-completions-a #'files "a" "/ssh:box:/w/"))
+      (should (= (length kept) 3)))))
+
+(ert-deftest remote-tramp-rpc-listing-needs-three-distinct-misses ()
+  "A directory is listed after three different names miss, not before."
+  (require 'tramp)
+  (let ((remote-backend-tramp-rpc--listings (make-hash-table :test #'equal))
+        (remote-backend-tramp-rpc--listing-misses (make-hash-table :test #'equal))
+        (listed 0))
+    (cl-letf (((symbol-function 'remote-backend-tramp-rpc--list-directory)
+               (lambda (&rest _) (cl-incf listed))))
+      (let ((vec (tramp-dissect-file-name "/ssh:box:/w/")))
+        (dolist (name '("a" "a" "b"))
+          (remote-backend-tramp-rpc--note-miss vec 'proc (concat "/ssh:box:/w/" name)))
+        (should (= listed 0))
+        (remote-backend-tramp-rpc--note-miss vec 'proc "/ssh:box:/w/c")
+        (should (= listed 1))))))
+
+(ert-deftest remote-tramp-rpc-listings-follow-invalidation ()
+  "Events, path invalidation and cache drops forget the right listings."
+  (require 'tramp)
+  (let ((remote-backend-tramp-rpc--listings (make-hash-table :test #'equal))
+        (vec (tramp-dissect-file-name "/ssh:box:/")))
+    (cl-flet ((fill ()
+                (clrhash remote-backend-tramp-rpc--listings)
+                (dolist (dir '("/ssh:box:/w/" "/ssh:box:/w/sub/" "/ssh:box:/v/"
+                               "/ssh:other:/w/"))
+                  (puthash dir (cons 1.0 (cons 'proc nil))
+                           remote-backend-tramp-rpc--listings)))
+              (keys () (sort (hash-table-keys remote-backend-tramp-rpc--listings)
+                             #'string<)))
+      (fill)
+      ;; A change to /w/new changes /w/'s listing only.
+      (remote-backend-tramp-rpc--forget-listings-h vec '("/ssh:box:/w/new"))
+      (should (equal (keys) '("/ssh:box:/v/" "/ssh:box:/w/sub/" "/ssh:other:/w/")))
+      ;; A change to /w (say, removed) also drops everything below it.
+      (fill)
+      (remote-backend-tramp-rpc--forget-listings-h vec '("/ssh:box:/w"))
+      (should (equal (keys) '("/ssh:box:/v/" "/ssh:other:/w/")))
+      ;; Unknown changes or a cache drop forget the host.
+      (fill)
+      (remote-backend-tramp-rpc--forget-listings-h vec)
+      (should (equal (keys) '("/ssh:other:/w/")))
+      (fill)
+      (remote-backend-tramp-rpc--forget-listings-h nil)
+      (should (equal (keys) nil)))))
+
 (ert-deftest remote-tramp-rpc-read-timeout-retires-only-current-generation ()
   "A timed-out request must never close a replacement SSH process."
   (remote-tramp-rpc-test--readable
@@ -2724,7 +2813,12 @@ invalidation, or from a filtered listing, the server is asked."
       (remote-backend-tramp-rpc-metadata-uninstall)
       (should-not (advice-member-p
                    #'remote-backend-tramp-rpc-metadata--scope-a
-                   'find-file-noselect)))))
+                   'find-file-noselect))
+      ;; Without tramp-rpc loaded these symbols were only waiting for a
+      ;; definition; leave no pending-advice hook for later stubs.
+      (pcase-dolist (`(,symbol . ,_) remote-backend-tramp-rpc-metadata--advice)
+        (unless (fboundp symbol)
+          (put symbol 'defalias-fset-function nil))))))
 
 ;;;; Explicit TRAMP cleanup lifecycle
 

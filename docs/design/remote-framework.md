@@ -839,13 +839,25 @@ Magit/VC、项目文件列表、搜索、Dired 与 PTY 都走它。实测在 Aar
   这等同于 tramp-rpc 原来的整体清空；该值设为 0 则恢复原行为。adapter 自己的目录
   访问与 PATH 索引有各自的失效规则，不受这个窗口约束。
 
+- 目录列表也是 session 知识。任何包读到的完整列表都会保留：不带过滤的
+  `directory-files`、只去掉 `.` 与 `..` 的列表、`directory-files-and-attributes`，
+  以及空前缀的 `file-name-all-completions`。此外，同一目录在几秒内有三个不同的名字
+  stat 落空时，主动列一次。名字不在列表里，或者某个已列出的祖先目录里没有下一级
+  路径分量，就直接判为不存在；名字在列表里时仍做真正的 stat。列表随 transport
+  generation、tramp-rpc 的 TTL 与 settle 规则失效，也会在 tramp-rpc 丢弃该连接的
+  元数据或文件事件涉及它时被清掉；强制 fresh 的 stat 不使用列表。Magit 每次刷新都要
+  逐个检查 `.git/` 下的 sequencer 与 merge 状态文件，因此 status 从 33 次往返降到
+  31 次，refresh 从 28 降到 26；project-files 则因为复用 Projectile 读到的列表，
+  从 8 次降到 7 次。
+
 知识由各自的所有者保存，但生命周期只有一个入口：`remote-knowledge.el`。所有者
 用 `remote-knowledge-register` 登记来源，写明名字、范围（`session` 或 `project`）、
 按 target 遗忘的函数和报告函数。session 关闭（`remote-connection-closed-hook`）或
 Remote 重置时，`remote-knowledge-forget` 让该 target 的所有来源一起遗忘；某个来源
 出错不会妨碍其他来源。Remote Doctor 为每个来源列出一行 `knowledge:NAME`。目前的
 来源有：`search-path`（project）、`ancestor-scans`、`tramp-rpc-path-index`、
-`tramp-rpc-directory-access` 与 `tramp-rpc-metadata`（session）。新的缓存登记到这里，
+`tramp-rpc-directory-access`、`tramp-rpc-directory-listings` 与
+`tramp-rpc-metadata`（session）。新的缓存登记到这里，
 不再各自挂失效钩子。
 
 实测（Aaron-PC，单位为往返次数）：冷打开 28→16，Dired 9→4，project-files 12→8，

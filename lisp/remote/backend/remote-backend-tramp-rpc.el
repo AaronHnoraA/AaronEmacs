@@ -115,7 +115,11 @@
     (tramp-rpc--fetch-remote-exec-path . (1 . 1))
     (tramp-rpc--cached-remote-path . (1 . 1))
     (tramp-rpc-handle-exec-path . (0 . 0))
-    (tramp-rpc-handle-process-file . (1 . many)))
+    (tramp-rpc-handle-process-file . (1 . many))
+    (tramp-rpc--call-file-stat . (2 . 3))
+    (tramp-rpc-handle-directory-files . (1 . 5))
+    (tramp-rpc-handle-directory-files-and-attributes . (1 . 6))
+    (tramp-rpc-handle-file-name-all-completions . (2 . 2)))
   "Private upstream seams isolated by this backend adapter.
 A connection generation is a `tramp-rpc-connection' record; it is read only
 through `remote-backend-tramp-rpc--connection-slot'.")
@@ -1369,6 +1373,184 @@ connection."
                               (tramp-make-tramp-file-name vec "/"))))))
         (remote-fs-forget-ancestor-scans target)))))
 
+;;;; Hot directory listings
+
+(defvar remote-backend-tramp-rpc--listings (make-hash-table :test #'equal)
+  "DIRECTORY -> (TIMESTAMP PROCESS . NAMES); NAMES is nil for a missing one.")
+
+(defvar remote-backend-tramp-rpc--listing-misses (make-hash-table :test #'equal)
+  "DIRECTORY -> (FIRST-TIME . NAMES) of recent distinct stat misses in it.")
+
+(defvar remote-backend-tramp-rpc--listing-hits 0
+  "Stats answered as missing from a directory listing.")
+
+(defconst remote-backend-tramp-rpc--listing-hot-misses 3
+  "Distinct names missed in one directory within a few seconds that make it hot.
+Two is what a project root sees (a marker or two), where a listing would
+cost a round trip and save none.")
+
+(defun remote-backend-tramp-rpc--listing-entry (directory process)
+  "Return DIRECTORY's listing (TIMESTAMP PROCESS . NAMES) if still valid."
+  (when-let* ((entry (gethash directory remote-backend-tramp-rpc--listings))
+              ((eq (cadr entry) process))
+              ((tramp-rpc--cache-entry-valid-p (car entry))))
+    entry))
+
+(defun remote-backend-tramp-rpc--listing-proves-missing-p (name process)
+  "Return non-nil when a known listing proves NAME does not exist.
+The nearest listed ancestor decides: NAME's own directory listed without
+NAME, an ancestor listed without the next component, or an ancestor known
+to be missing."
+  (let ((file (directory-file-name name))
+        result done)
+    (while (not done)
+      (let ((parent (file-name-directory file)))
+        (if (or (null parent) (equal (directory-file-name parent) file))
+            (setq done t)
+          (if-let* ((entry (remote-backend-tramp-rpc--listing-entry
+                            parent process)))
+              (setq result (or (null (cddr entry))
+                               (not (gethash (file-name-nondirectory file)
+                                             (cddr entry))))
+                    done t)
+            (setq file (directory-file-name parent))))))
+    result))
+
+(defun remote-backend-tramp-rpc--list-directory (vec process directory)
+  "List DIRECTORY on VEC for PROCESS, recording its names or its absence."
+  (let* ((result (car (tramp-rpc--call-batch
+                       vec (list (cons "dir.list"
+                                       (tramp-rpc--encode-path
+                                        (tramp-file-name-localname
+                                         (tramp-dissect-file-name directory))))))))
+         (missing (and (tramp-rpc--batch-error-p result)
+                       (boundp 'tramp-rpc-protocol-error-file-not-found)
+                       (eql (plist-get result :error)
+                            tramp-rpc-protocol-error-file-not-found))))
+    (when (or missing
+              (and (listp result) (not (tramp-rpc--batch-error-p result))))
+      (let ((names (unless missing (make-hash-table :test #'equal))))
+        (unless missing
+          (dolist (entry result)
+            (puthash (tramp-rpc--decode-filename entry) t names)))
+        (puthash directory (cons (float-time) (cons process names))
+                 remote-backend-tramp-rpc--listings)))))
+
+(defun remote-backend-tramp-rpc--keep-listing (directory names)
+  "Remember complete listing NAMES of DIRECTORY for its transport."
+  (when-let* (((listp names))
+              ((cl-every #'stringp names))
+              (key (file-name-as-directory (expand-file-name directory)))
+              (vec (ignore-errors (tramp-dissect-file-name key)))
+              (process (remote-backend-tramp-rpc--vec-connection-slot
+                        vec :process)))
+    (let ((table (make-hash-table :test #'equal)))
+      (dolist (name names)
+        (puthash (file-name-nondirectory (directory-file-name name)) t table))
+      (puthash key (cons (float-time) (cons process table))
+               remote-backend-tramp-rpc--listings))))
+
+(defun remote-backend-tramp-rpc--keep-listing-a
+    (function directory &optional full match nosort count)
+  "Call FUNCTION and keep DIRECTORY's listing when it is complete.
+FULL, MATCH, NOSORT and COUNT are `directory-files' arguments; a listing
+filtered by MATCH (other than leaving out . and ..) or cut by COUNT is
+not complete."
+  (let ((names (funcall function directory full match nosort count)))
+    ;; Leaving out only "." and ".." still names every entry.
+    (when (and (or (null match)
+                   (equal match directory-files-no-dot-files-regexp))
+               (null count))
+      (ignore-errors (remote-backend-tramp-rpc--keep-listing directory names)))
+    names))
+
+(defun remote-backend-tramp-rpc--keep-listing-attributes-a
+    (function directory &optional full match nosort id-format count)
+  "Call FUNCTION and keep DIRECTORY's listing when it is complete.
+FULL, MATCH, NOSORT, ID-FORMAT and COUNT are its arguments."
+  (let ((entries (funcall function directory full match nosort id-format
+                          count)))
+    (when (and (null match) (null count) (listp entries))
+      (ignore-errors
+        (remote-backend-tramp-rpc--keep-listing
+         directory (mapcar #'car entries))))
+    entries))
+
+(defun remote-backend-tramp-rpc--keep-completions-a (function filename directory)
+  "Call FUNCTION and keep DIRECTORY's listing for an empty FILENAME.
+Completing the empty prefix lists every entry (directories with a final
+slash), which is how Projectile and completion frameworks read a folder."
+  (let ((names (funcall function filename directory)))
+    (when (equal filename "")
+      (ignore-errors (remote-backend-tramp-rpc--keep-listing directory names)))
+    names))
+
+(defun remote-backend-tramp-rpc--note-miss (vec process name)
+  "Count a stat miss of NAME; list its directory once the directory is hot."
+  (let* ((directory (file-name-directory (directory-file-name name)))
+         (now (float-time))
+         (seen (gethash directory remote-backend-tramp-rpc--listing-misses))
+         (seen (if (and seen (< (- now (car seen)) 3)) seen (list now))))
+    (cl-pushnew name (cdr seen) :test #'equal)
+    (puthash directory seen remote-backend-tramp-rpc--listing-misses)
+    (when (and (>= (length (cdr seen)) remote-backend-tramp-rpc--listing-hot-misses)
+               (not (remote-backend-tramp-rpc--listing-entry directory process)))
+      (remhash directory remote-backend-tramp-rpc--listing-misses)
+      (ignore-errors
+        (remote-backend-tramp-rpc--list-directory vec process directory)))))
+
+(defun remote-backend-tramp-rpc--listing-stat-a
+    (function vec localname &optional lstat)
+  "Answer FUNCTION's stat of LOCALNAME on VEC as missing from a listing.
+A tool that checks for several files that are usually absent -- Magit
+looks for a dozen sequencer and merge state files under .git/ on every
+refresh -- pays one round trip each.  Any complete listing a package
+makes is kept, and after three distinct misses in one directory within a
+few seconds the directory is listed once; a name absent from a listing,
+or below a component absent from a listed ancestor, is missing without a
+round trip.  A name that is present still gets its real stat.  Listings
+belong to their transport generation, follow tramp-rpc's TTL and settle
+rules, and go whenever tramp-rpc drops metadata for the connection or
+an event touches them.  A forced-fresh stat never uses them."
+  (let* ((name (tramp-make-tramp-file-name vec localname))
+         (process (and (not (eq remote-file-name-inhibit-cache t))
+                       (remote-backend-tramp-rpc--vec-connection-slot
+                        vec :process))))
+    (if (and process
+             (remote-backend-tramp-rpc--listing-proves-missing-p name process))
+        (progn
+          (cl-incf remote-backend-tramp-rpc--listing-hits)
+          nil)
+      (let ((result (funcall function vec localname lstat)))
+        (when (and process (null result))
+          (remote-backend-tramp-rpc--note-miss vec process name))
+        result))))
+
+(defun remote-backend-tramp-rpc--forget-listings-h (vec &optional paths)
+  "Drop listings on VEC that PATHS may change; every one when PATHS is nil.
+A nil VEC, as tramp-rpc passes when it clears every cache, drops them all."
+  (unless vec
+    (clrhash remote-backend-tramp-rpc--listings))
+  (when (and (tramp-file-name-p vec)
+             (> (hash-table-count remote-backend-tramp-rpc--listings) 0))
+    (let ((host (tramp-make-tramp-file-name vec ""))
+          stale)
+      (maphash
+       (lambda (directory _entry)
+         (when (and (string-prefix-p host directory)
+                    (or (null paths)
+                        (cl-some
+                         (lambda (path)
+                           (or (equal directory (file-name-directory
+                                                 (directory-file-name path)))
+                               (string-prefix-p
+                                (file-name-as-directory path) directory)))
+                         paths)))
+           (push directory stale)))
+       remote-backend-tramp-rpc--listings)
+      (dolist (directory stale)
+        (remhash directory remote-backend-tramp-rpc--listings)))))
+
 ;;;; Session knowledge sources
 
 (defun remote-backend-tramp-rpc--key-target (key)
@@ -1398,6 +1580,17 @@ connection."
                                remote-backend-tramp-rpc--path-index)
                  :answered remote-backend-tramp-rpc--path-index-hits
                  :ttl remote-backend-tramp-rpc-path-index-ttl)))
+
+(remote-knowledge-register
+ "tramp-rpc-directory-listings" :scope 'session
+ :forget (lambda (target-id)
+           (remote-backend-tramp-rpc--forget-table
+            remote-backend-tramp-rpc--listings target-id)
+           (unless target-id
+             (clrhash remote-backend-tramp-rpc--listing-misses)))
+ :report (lambda ()
+           (list :listed (hash-table-count remote-backend-tramp-rpc--listings)
+                 :answered remote-backend-tramp-rpc--listing-hits)))
 
 (remote-knowledge-register
  "tramp-rpc-directory-access" :scope 'session
@@ -1480,6 +1673,21 @@ connection."
     (read-only-commands
      tramp-rpc--cache-entry-valid-p :around
      remote-backend-tramp-rpc--settled-a)
+    (directory-listings
+     tramp-rpc-handle-directory-files :around
+     remote-backend-tramp-rpc--keep-listing-a)
+    (directory-listings
+     tramp-rpc-handle-directory-files-and-attributes :around
+     remote-backend-tramp-rpc--keep-listing-attributes-a)
+    (directory-listings
+     tramp-rpc-handle-file-name-all-completions :around
+     remote-backend-tramp-rpc--keep-completions-a)
+    (directory-listings
+     tramp-rpc--call-file-stat :around
+     remote-backend-tramp-rpc--listing-stat-a
+     tramp-rpc--call-batch tramp-rpc--encode-path tramp-rpc--decode-filename
+     tramp-rpc--batch-error-p tramp-rpc--cache-entry-valid-p
+     tramp-rpc--get-connection)
     (directory-access-cache
      tramp-rpc--file-access-p :around
      remote-backend-tramp-rpc--directory-access-a
@@ -1517,7 +1725,7 @@ these by name, so a live upgrade cannot keep an old shim on new code.")
                  '(1 . 1))))
     ((or 'adapter-timeout 'attribute-probe-cache 'transport-death-notice
          'stderr-relay-release 'directory-access-cache 'path-index
-         'read-only-commands)
+         'read-only-commands 'directory-listings)
      (remote-backend-tramp-rpc--connection-readable-p))
     (_ t)))
 
@@ -1621,6 +1829,13 @@ All shim advice, current and retired, is removed first."
       (when remote-backend-tramp-rpc--ancestor-prefetch
         (add-hook 'tramp-rpc-cache-invalidate-functions
                   #'remote-backend-tramp-rpc--metadata-dropped-h))
+      (clrhash remote-backend-tramp-rpc--listings)
+      (dolist (hook '(tramp-rpc-fs-events-functions
+                      tramp-rpc-cache-invalidate-functions))
+        (remove-hook hook #'remote-backend-tramp-rpc--forget-listings-h)
+        (when (advice-member-p #'remote-backend-tramp-rpc--listing-stat-a
+                               'tramp-rpc--call-file-stat)
+          (add-hook hook #'remote-backend-tramp-rpc--forget-listings-h)))
       (remove-hook 'tramp-rpc-fs-events-functions
                    #'remote-backend-tramp-rpc--directory-access-events-h)
       (when (advice-member-p #'remote-backend-tramp-rpc--directory-access-a

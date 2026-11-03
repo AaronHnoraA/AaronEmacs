@@ -762,10 +762,12 @@ DIRECTORY is the invalidated subtree; any scope file may lie below it."
 
 (defun remote-backend-tramp-rpc-metadata-uninstall ()
   "Remove the metadata adapter and drop its cache."
+  ;; Also unbound symbols: advice on a function that is not loaded yet
+  ;; (Dired's) waits to be applied when it is defined, and must not outlive
+  ;; an uninstall.
   (pcase-dolist (`(,symbol ,_how ,function)
                  remote-backend-tramp-rpc-metadata--advice)
-    (when (fboundp symbol)
-      (advice-remove symbol function)))
+    (advice-remove symbol function))
   (remote-backend-tramp-rpc-metadata-flush))
 
 (defun remote-backend-tramp-rpc-metadata-install (verified compatible-p)
