@@ -148,6 +148,46 @@
         (+agent-shell/newline)
         (should submitted)))))
 
+(ert-deftest agent-c57-last-reply-opens-as-a-page-beside-the-chat ()
+  (require 'tools/agent/menu)
+  (should (eq (nth 2 (assoc "o" (+agent-actions--rows +agent-actions))) #'+agent-menu-page))
+  (let* ((+agent-menu-reply-directory (make-temp-file "agent-replies" t "/"))
+         (+agent-menu-reply-limit 2)
+         (reply "Energy $E = mc^2$.\n\n$$\\int_0^1 x\\,dx$$")
+         opened)
+    (unwind-protect
+        (with-temp-buffer
+          (rename-buffer "*Agent · demo*" t)
+          (cl-letf (((symbol-function '+agent-menu--last-reply) (lambda (_) reply))
+                    ((symbol-function 'aaron-open-place)
+                     (lambda (file placement) (push (cons file placement) opened))))
+            (+agent-menu--page (current-buffer))
+            (+agent-menu--page (current-buffer))
+            (should (equal (cdar opened) 'other))
+            (should (equal (caar opened) (caadr opened)))
+            (should (equal (with-temp-buffer (insert-file-contents (caar opened)) (buffer-string))
+                           (concat reply "\n")))
+            (dolist (text '("second" "third"))
+              (setq reply text)
+              (+agent-menu--page (current-buffer)))
+            (should (= (length (directory-files +agent-menu-reply-directory nil "\\.md\\'")) 2))
+            (setq reply "  ")
+            (should-error (+agent-menu--page (current-buffer)) :type 'user-error)))
+      (delete-directory +agent-menu-reply-directory t))))
+
+(ert-deftest agent-c57-the-page-holds-only-the-final-message ()
+  (require 'tools/agent/menu)
+  (with-temp-buffer
+    (dolist (part '(("thinking hard\n" "1-agent_thought_chunk")
+                    ("Checking first.\n" "1-msg_a-agent_message_chunk")
+                    ("ls output\n" "1-toolu_1")
+                    ("The answer is $x^2$\n" "1-msg_b-agent_message_chunk")
+                    ("and $$y$$.\n" "1-msg_b-agent_message_chunk")))
+      (insert (propertize (car part) 'agent-shell-ui-section 'body
+                          'agent-shell-ui-state `((:qualified-id . ,(cadr part))))))
+    (should (equal (+agent-menu--reply-in (point-min) (point-max))
+                   "The answer is $x^2$\nand $$y$$."))))
+
 (ert-deftest agent-appearance-c53-palette-follows-all-aaron-themes ()
   (let ((variant aaron-ui-current-variant))
     (unwind-protect

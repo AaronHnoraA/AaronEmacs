@@ -42,7 +42,8 @@ Research 的逻辑 Session 和 Run ID 不可互换。关闭视图只改变显示
 | 想做的事 | 方式 |
 | --- | --- |
 | 说话、排队、steering | 输入区 `RET` 换行；`S-RET` 发送（生成中 steer），`M-RET` 发送（生成中排队） |
-| 不离开输入区操作会话 | 本地斜杠命令 `/queue`、`/next`、`/changes`、`/resume`、`/fork`、`/rename`、`/restart`、`/new`、`/side`、`/agents`，在 `/` 补全里列出 |
+| 不离开输入区操作会话 | 本地斜杠命令 `/queue`、`/next`、`/changes`、`/resume`、`/fork`、`/rename`、`/restart`、`/new`、`/side`、`/agents`、`/page`，在 `/` 补全里列出 |
+| 读公式多的回复 | `C-c A o`／`/page` 把上一条回复作为 Noema Markdown 页面在旁边打开；聊天本身不渲染公式 |
 | 看所有动作 | 输入区外按 `?`，或任意位置 `C-c C-z`，打开同一菜单 |
 | 停止回合 | agent-shell 原生的 `C-c C-c`，走统一的停止路径 |
 | 模型、模式、思考级别 | agent-shell 原生的 `C-c C-v`、`C-c C-m`、`C-c C-t` |
@@ -368,6 +369,10 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   发送，生成中 steer（不能 steer 的 provider 与 Run 改为排队），`M-RET` 发送，生成中
   排队；空闲时两者都直接发送。输入区外 `RET` 保留原生动作，表单、按钮和补全菜单的
   `RET` 不受影响。提示行写出同样的键。测试：`agent-c56-*`。
+- **C57 回复作为页面阅读。** 聊天 buffer 不渲染公式；`o`（`/page`）取上一条回复的
+  Markdown 原文，写入 `var/agent/replies/`，在另一个窗口作为 Noema 页面打开，聊天保持
+  可见。同一回复复用同一文件；目录只保留最近 20 份，正被访问的不删。没有回复时报告
+  而不创建文件。测试：`agent-c57-*`。
 
 ## 实现位置
 

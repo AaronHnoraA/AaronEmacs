@@ -19,6 +19,8 @@
      ("j" "Next waiting session" +agent-menu-next :slash "next"
       :doc "Go to the next session waiting on you")
      ("y" "Copy last reply" +agent-menu-copy :if +agent-menu--session-p)
+     ("o" "Last reply as page" +agent-menu-page :if +agent-menu--session-p :slash "page"
+      :doc "Open the last reply as a Markdown page, math rendered")
      ("h" "History…" +agent-menu-history :slash "resume"
       :doc "Resume a saved conversation"))
     ("Session"

@@ -117,6 +117,67 @@
   (when (bound-and-true-p +agent-manager--model) (+agent-manager-hide))
   (+agent/next-attention project))
 
+(declare-function shell-maker-mark-output "shell-maker" ())
+(declare-function agent-shell-markdown-reconstruct "agent-shell-markdown" (beg end &optional deepen))
+(declare-function aaron-open-place "aaron-open"
+                  (file &optional placement line column no-focus))
+
+(defvar +agent-menu-reply-directory (locate-user-emacs-file "var/agent/replies/")
+  "Where `+agent-menu-page' writes replies opened as Markdown pages.")
+
+(defconst +agent-menu-reply-limit 20
+  "How many reply pages `+agent-menu-reply-directory' keeps; older ones go.")
+
+(defun +agent-menu--reply-in (beg end)
+  "Return the Markdown of the last agent message between BEG and END.
+A turn interleaves thoughts and tool calls with message fragments; only a
+fragment whose ID names an `agent_message_chunk' is the agent talking, and
+the last message is its answer."
+  (let ((pos beg) last parts)
+    (while (< pos end)
+      (let* ((next (min (next-single-property-change pos 'agent-shell-ui-section nil end)
+                        (next-single-property-change pos 'agent-shell-ui-state nil end)))
+             (id (map-elt (get-text-property pos 'agent-shell-ui-state) :qualified-id)))
+        (when (and (eq (get-text-property pos 'agent-shell-ui-section) 'body)
+                   (stringp id) (string-suffix-p "agent_message_chunk" id))
+          (unless (equal id last) (setq last id parts nil))
+          (push (agent-shell-markdown-reconstruct pos next) parts))
+        (setq pos next)))
+    (string-trim (apply #'concat (nreverse parts)))))
+
+(defun +agent-menu--last-reply (buffer)
+  "Return BUFFER's last agent reply as its original Markdown."
+  (with-current-buffer buffer
+    (let ((process (or (get-buffer-process buffer) (user-error "No agent running"))))
+      (save-mark-and-excursion
+        (goto-char (process-mark process))
+        (shell-maker-mark-output)
+        (+agent-menu--reply-in (region-beginning) (region-end))))))
+
+(defun +agent-menu--reply-file (buffer text)
+  "Write TEXT, BUFFER's reply, to a bounded reply directory and return the file.
+The same reply maps to the same file, so opening it twice reuses one page."
+  (let* ((directory +agent-menu-reply-directory)
+         (stem (replace-regexp-in-string "[^[:alnum:]_.-]+" "-" (string-trim (buffer-name buffer) "[ *]+" "[ *]+")))
+         (file (expand-file-name (format "%s-%s.md" stem (substring (secure-hash 'sha1 text) 0 8))
+                                 directory)))
+    (make-directory directory t)
+    (unless (file-exists-p file)
+      (let ((coding-system-for-write 'utf-8-unix))
+        (write-region text nil file nil 'silent)))
+    (set-file-times file)
+    (dolist (old (nthcdr +agent-menu-reply-limit
+                         (sort (directory-files directory t "\\.md\\'")
+                               #'file-newer-than-file-p)))
+      (unless (find-buffer-visiting old) (delete-file old)))
+    file))
+
+(defun +agent-menu--page (buffer)
+  "Open BUFFER's last reply as a Markdown page beside the chat."
+  (let ((text (string-trim (or (+agent-menu--last-reply buffer) ""))))
+    (when (string-empty-p text) (user-error "No reply yet"))
+    (aaron-open-place (+agent-menu--reply-file buffer (concat text "\n")) 'other)))
+
 (defun +agent-menu--act (operation)
   "Apply OPERATION to the real scoped session through its public owner."
   (let ((buffer (+agent-menu--buffer)))
@@ -126,6 +187,7 @@
       ('rename (+agent-session-rename buffer))
       ('close (+agent-acp-close buffer))
       ('copy (with-current-buffer buffer (agent-shell-copy-last-output)))
+      ('page (+agent-menu--page buffer))
       ((or 'queue 'changes 'tree 'side-chat 'close-others)
        (when (bound-and-true-p +agent-manager--model) (+agent-manager-hide))
        (pcase operation
@@ -153,7 +215,7 @@
 
 (autoload '+agent-top-report "tools/agent/top" nil t)
 
-(dolist (operation '(input review stop stop-group rename close restart fork model mode queue changes tree side-chat close-others copy jump archive compact usage))
+(dolist (operation '(input review stop stop-group rename close restart fork model mode queue changes tree side-chat close-others copy page jump archive compact usage))
   (let ((action operation))
     (defalias (intern (format "+agent-menu-%s" action))
       (lambda () (interactive) (+agent-menu--act action)))))

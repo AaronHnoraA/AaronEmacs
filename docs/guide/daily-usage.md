@@ -1802,6 +1802,7 @@ Emacs 通用 agent 层统一管理轻量模型交互与结构化 coding-agent �
 | `C-c A p` | 把当前 agent-shell session 纳入 research |
 | `C-c A S` | Agent Manager 会话页；`C-u` 仅看当前项目 |
 | `C-c A G` | 同一管理器的 Inbox：待审批、待回答、失败或未读结果，最急的在前 |
+| `C-c A o` | 上一条回复作为 Noema Markdown 页面在旁边打开（公式渲染）；聊天里也可用 `/page` |
 | `C-c A j` | 下一个等待你的会话，跨项目循环，直接落在审批或问答控件上；`C-u` 只看当前项目 |
 | `C-c A q` | 排队的 prompt：`e` 编辑、`d` 删除、`J/K` 调序、`s` 立即发送、`r` 恢复、`h` 挂起 |
 | `C-c A h` | 选择并恢复提供方保存的对话，不需要活动会话；取消不留下 buffer |
