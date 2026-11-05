@@ -208,6 +208,7 @@ Noema is developed in its own repository (`site-lisp/noema/`); its documentation
 - [markdown-editors-line-audit-2026-10.md](noema/records/audits/markdown-editors-line-audit-2026-10.md) Marker / MarkText / files.md 逐文件行号清单（2026-10）
 - [markdown-editors-noema-audit-2026-10.md](noema/records/audits/markdown-editors-noema-audit-2026-10.md) Source-linked comparison of three Markdown editors with Noema: merged format toggles, CJK emphasis, context-aware paste, code-block input, word-sized undo, range-selection rendering, CRLF save and save retry; with a [per-file line inventory](noema/records/audits/markdown-editors-line-audit-2026-10.md).
 - [marker-marktext-filesmd-study-2026-10.md](noema/records/audits/marker-marktext-filesmd-study-2026-10.md) Marker / MarkText / files.md editor study (round 2)
+- [marginnote-plugin-audit-2026-11.md](noema/records/audits/marginnote-plugin-audit-2026-11.md) Noema 的 MarginNote 通道安全、重试、安装包和双端能力审计；包含图文定位到独立批注的 skill 验证。
 - [markwright-line-audit-2026-09.md](noema/records/audits/markwright-line-audit-2026-09.md) MarkWright 固定提交的逐文件行号清单
 - [markwright-noema-audit-2026-09.md](noema/records/audits/markwright-noema-audit-2026-09.md) Source-linked comparison of MarkWright with the Noema editor: merged slash-menu, inline HTML and print details; rendering, CSS, theme and lifecycle findings; with a [per-file line inventory](noema/records/audits/markwright-line-audit-2026-09.md).
 - [mediawiki-roam-ux-audit-2026-10.md](noema/records/audits/mediawiki-roam-ux-audit-2026-10.md) Noema Wiki / Roam 创建与管理交互审计（对照 MediaWiki）

@@ -102,6 +102,21 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   `noema.extension.agent` 作为升级身份。Agent、画布批注及实验能力都属于同一插件，
   不再分发独立 Lab 插件。未完成验证的实验代码不随命名调整进入正式包。
 
+- **MN-C19：** 插件执行通道是持令牌者的原生管理权限，不是沙箱；不按学习集、只读角色或
+  JSB 方法分权。浏览器 Origin 被拒绝，本机其他进程仍须令牌。Agent 从笔记、图像、网页读到的内容
+  是数据，不是执行授权。官方确认门不自动覆盖直接原生 API。源码、构建包、在线插件与活跃 host
+  分别验收；构建/install 不能当作 MN 已装上插件。
+- **MN-C20：** Node 客户端只接受回环 HTTP 的 `/v1/marginnote` 描述符，不跟随重定向；原生包
+  校验同类回环配置。打包在权限 0700 的临时目录内以 0600 创建凭据包，然后原子替换目标，
+  不跟随既有输出符号链接。安装包含独立令牌，不是可公开分发的无凭据包。
+- **MN-C21：** HTTP 请求按字节限 2 MiB，完整拼接后才解码 UTF-8；原生 JSON 值按 UTF-8
+  字节限 1 MiB，错误字段和日志有界。畸形 URL 返回 400，不产生未处理的路由拒绝。
+  传输预算不限制脚本 CPU、内存、文件和原生 API 权限。
+- **MN-C22：** 超时不撤销执行；仍在执行的请求身份不能由完成结果 TTL 或容量清理丢弃，
+  晚到结果仍可释放窗口。原生结果缓存无原型键。幂等记录是易失且有界的，host 重启或完成记录
+  淘汰后不提供永久去重；业务写入还需 plan/source 身份及目标内容读回。停止轮询也不能终止
+  已经运行的异步 JS/原生回调。
+
 ## 实现位置
 
 - App 自带 Bridge：`~/.config/mn-bridge/<设备>/`、`mn-bridge` skill；README 技能库的
@@ -140,6 +155,9 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   `references/workflows.md`。
 
 ## 安装与调用
+
+安全边界与操作能力审计见 [审计记录](../records/audits/marginnote-plugin-audit-2026-11.md)。
+当前已构建 1.0.5；安装和 host 重新加载以运行时版本、PID 与回执为准，不能由本节版本推断。
 
 在 Noema 源码目录运行 `node scripts/build-marginnote-addon.mjs`，将
 `build/marginnote/noema.mnaddon` 交给 MarginNote 原生安装器并启用。
