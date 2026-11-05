@@ -136,11 +136,16 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 - **MN-C26：** 已授权的单卡位置更新可由 skill 接到同一原生执行器：官方核对局部媒体，原生即时核对
   卡片旧值、根画布来源及碰撞，Undo 组同时写坐标和关系，保存后回读实际 frame。未知结果不重放，
   未保存笔迹与未验过的绑定/变换不推断为安全；精确移动、按需跟随与后台监听分别验收。
+- **MN-C27：** 局部批注创建在实际草稿根按 planId 保存创建记录，不遍历全图查重；同一原生 Undo 组
+  写预留记录、新卡、初始位置与来源关系。刷新后按实际 frame 尺寸核验，尺寸/位置最终调整是另一个 Undo 组，
+  不宣称整个创建流程一键撤销。未知或部分结果先找回原请求及 noteId，已被用户改动或删除的卡不自动覆盖或重建。
+  记录不是跨设备锁，宿主崩溃前未保存的数据和大量根 metadata 的成本仍属边界。
 
 ## 实现位置
 
 - `marginnote-agent` 的 `mn_annotation_state.mjs/.js`、`mn_annotation_follow.py`：原生局部布局、已有批注的源变化和冲突复查；只读。
 - 同 skill 的 `mn_annotation_position.mjs/.js`、`mn_annotation_source_check.py`：已有文本卡的单次原生位置/关系写入、官方源复查与实际布局验收。
+- 同 skill 的 `mn_annotation_create.mjs/.js`、`mn_annotation_create_request.py`：从局部方案创建独立卡、按实际尺寸适配并找回同方案记录；`mn_annotation_native.js` 共用原生来源检查。
 
 - App 自带 Bridge：`~/.config/mn-bridge/<设备>/`、`mn-bridge` skill；README 技能库的
   `marginnote-agent` 记录双端通道选择、能力矩阵和 `scripts/mn.py`。
@@ -150,7 +155,7 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   的官方流程；页内文字只经留白写入。
 - `plugins/marginnote/`：原生插件、API 声明索引、agent CLI 与 stdio MCP。
 - `server/Features/MarginNote/`：任务中转、会话和 HTTP 控制器。
-- `scripts/build-marginnote-addon.mjs`：将本机连接配置打入 `.mnaddon`。
+- `scripts/build-marginnote-addon.mjs`：构建无凭据的默认 `.mnaddon`；仅显式 legacy 包带本机兼容配置。
 - `tests/marginnote-*.test.ts`：原生宿主、传输与 agent 接口契约。
 - `lisp/noema-marginnote.el`：`noema-marginnote-sync` 自有会话入口及其 pack
   解析。
@@ -164,7 +169,8 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 
 - **MN-G6：** skill 的局部布局与源移动复查已在真实批注跑通，移动建议与冲突规则有隔离测试。
   已接到通用的原生位置/关系写入与读回，测试卡精确移动/恢复、位置与关系共同 Undo 已实测。
-  真实图文移动后的完整按需跟随、新卡创建/尺寸适配的通用工具和后台监听仍缺验收；大脑图尚无真实规模基准。
+  新卡创建工具已在真实图片旁通过尺寸适配、官方正文/原生位置回读及同方案查重，隔离创建组 Undo 通过。
+  真实图文移动后的完整按需跟随和后台监听仍缺验收；大脑图尚无真实规模基准。
 
 - **MN-G5：** 官方 panel/eval → 本插件 onMessage → 原生返回已在现有 Noema 身份的临时面板实测。
   1.0.6 正式包、设备客户端、异步回执与去重已实现并通过针对性测试；原生安装器替换确认尚待完成。
