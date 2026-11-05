@@ -139,3 +139,50 @@ iPad 限 RFC1918 IPv4，拒绝 userinfo、仿冒私网域名、异常路径/端�
 实际尺寸无空间、碰撞、新鲜度和素材引用。Noema 插件源码本轮未改，不重复全仓构建。
 本机证据：`var/noema/marginnote/annotation-create/`，图片背景证据在 `alignment-recheck/eye-expanded-view/`。
 尚待正式包实机全程、iPad、真实图文移动后的完整跟随及大图规模基准。
+
+
+## 需求收敛与无浮窗修复
+
+用户明确只要求在字迹/图片旁精确放独立批注，不要求源内容移动后跟随。
+已移除 `mn_annotation_follow.py` 及对应测试，保留局部增量读取、只读布局、独立卡创建和明确的位置调整；
+此前的跟随验收清单不再是交付要求。原 Research 双眼卡与归约方向卡在重启后经官方接口仍存在，
+双眼图文的源矩形未变。实验卡/源/根的三个精确 ID 在重启后均未找到；不因此扫描全库或重建实验。
+
+用户已确认替换为单一 Noema 并删除 Canvas Lab。官方 status 已实际返回 1.0.6、official、ready。
+此前“普通模式不能取得面板”已被该在线证据更新。随后用户指出可见面板挡住画布且无法关闭，
+要求默认启用、无 UI。本次通过现有官方原生执行调用 `hideFloating()`，请求回执随通道销毁而中断，
+随后查回同一 requestId 返回 PANEL_NOT_OPEN，未重放。静态读取证实该方法最终调用 teardown。
+不能据此把断线当作后台运行成功。
+
+同身份 1.0.7 现在只调用 loadPanel 并初始化 UIViewController.view，不调用 showFloatingIn，
+场景连接/激活/前台恢复自动就绪，胶囊和 open 仅确保后台通道。用户仍可经宿主暂停/停用；
+原生工厂拒绝时记录错误、等待下次生命周期事件，不空闲轮询或自行改模板。
+不可见页的宿主注册使用插件级回退，多个连接窗口时拒绝所有任务，避免将另一窗口当作当前窗口。
+这是保守限制，不是多窗口后台路由已经验证。
+
+本次另记录原生探查事故：通用 UI KVC 的 text getter 触发 NSKeyValueCoding valueForUndefinedKey
+导致 MN 闪退，JS try/catch 未能捕获。已停止通用 UI KVC 枚举并写入 skill 警戒；不再重跑，
+也不读取被 TCC 拒绝的已安装插件目录。修复只通过正常 .mnaddon 安装流程，不改 MN 本体或安装目录。
+
+检查：skill Python 78 项、原生脚本 VM 32 项与 validator 通过；Go 测试及 make build 通过。
+全仓 3602 通过、2 失败、16 跳过：image-layout 为既有失败，renderer-build-watch 为时序失败，另行定点复跑。
+Research 234 通过/1 既有失败，Jupyter 214 通过/1 既有失败。原始日志见本机 var/noema/marginnote/ui-fix-*.log。
+1.0.7 的正常升级、无 UI 实际执行结果在后续回执补记，未把模拟宿主通过当作已安装。
+
+
+1.0.7 正常升级后无需 open 已返回后台 ready。真实异步执行的回执查询暴露页面缓存边界错误：
+16 个已完成项占满容量时，新请求仍被判为 Too many pending calls。经同一官方认证入口只读取回
+原 requestId，确认任务完成、floatingVisible:false、count:1、timers:0，未重放原生动作。
+1.0.8 为新请求先回收最旧完成项并预留一格，保留同 ID 回执及全部未完成项，满 16 个 pending 仍拒绝。
+测试加入 40 次连续调用、16 个 pending 保护与跨页面回执淘汰后的原生去重。
+
+用户通过正常安装器确认 1.0.8 替换。未调用 open 即读到新 session、1.0.8、official、backgroundReady:true。
+真实异步原生任务完成、浮窗不可见、0 空闲定时器；连续 24 次 status 成功，同 requestId 同结果且 count 仍为 1；
+胶囊 open 后同 session，第二次原生回读仍 floatingVisible:false。未在此轮修改笔记内容。
+证据 ui-fix-live.json；正式包 SHA256 e84dd4746b737b9aee159061da63b96230b9b40f3a09751c6f7cfa9887ac3da6，
+单一身份 noema.extension.agent、四个文件、无凭据。安装目录受 TCC 限制，未越过限制读取文件；
+在线版本与真实行为是部署证据，不声称取得了安装后文件摘要。
+
+最终相关 4 文件 44 项通过；此前 renderer-build-watch 单独复跑通过（同轮 5 文件 45 项）。
+make install 通过。全仓及 Elisp 的既有失败如上保留，不声称全仓通过。
+用户要求本次完成即停止；不继续移动原稿、不加入自动跟随、不启动后台开发任务。
