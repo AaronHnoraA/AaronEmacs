@@ -9,8 +9,9 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 
 ## 模型
 
-每个连接中的原生窗口有一个独立会话。插件主动向现有 Noema host 长轮询任务，
-在主队列执行 JavaScript，再提交结果。agent 可通过 stdio MCP 或命令行调用。
+每个连接中的原生窗口有一个独立会话。默认复用 MN 官方 Bridge 的插件面板入口和认证，
+面板将 submit/result 送给本插件原生回调，在主队列执行 JavaScript；空闲不轮询。
+旧 Noema host 长轮询仅作显式兼容模式。agent 可通过 stdio MCP 或命令行调用。
 代码是支持 `return`、`await` 的函数体；`args` 是 JSON 参数，`bridge.state`
 保留该窗口会话中的对象。原生全局对象全部可用，便利变量为 `app`、`db`、
 `window`、`study`、`reader`、`notebook`。返回值须能序列化为 JSON。
@@ -21,14 +22,16 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   当前 MarginNote 插件宿主决定；未暴露的私有接口不会因此新增。
 - **MN-C2：** Noema host 不执行收到的代码。代码只在指定的原生窗口执行，支持
   Promise，返回 JSON 结果或带堆栈的错误；控制台输出随结果返回。
-- **MN-C3：** 每个窗口串行领取任务；任务有唯一 ID，不因网络重试再次执行。
-  未领取任务超时后撤销；已领取任务超时只报告结果未知，不重试、不宣称已撤销。
+- **MN-C3：** 每个窗口串行执行；任务有唯一 ID，不因网络重试再次执行。
+  官方模式忙时拒绝新任务、不排队；旧模式未领取任务超时后撤销。
+  已开始任务超时只报告结果未知，不重试、不宣称已撤销。
 - **MN-C4：** 窗口关闭、插件卸载和 iOS 应用后台会逻辑撤销轮询及定时器；
   Mac 切换前台应用仍可调用。无取消句柄的网络请求有 25 秒上限，过期回调被忽略。重新连接使用
   新会话 ID，不复用断开窗口的任务。host 关闭时结束所有等待。
-- **MN-C5：** 通道由现有 Emacs host 进程拥有，固定的 `127.0.0.1:3212` 仅提供
-  `/v1/marginnote/*`，避免主 host 随机端口变化后重新安装插件。独立 bearer token，拒绝浏览器
-  跨域请求；发布服务器不提供执行通道。连接配置和安装包只保存在本机。
+- **MN-C5：** 默认调用设备自己的 `/bridge/v1/addons/noema.extension.agent/panel/eval`，
+  外部认证由 MN 负责；包不含令牌或地址，不另开端口。现有入口尚未公布，随 MN 版本重新验证。
+  旧兼容模式由 Emacs host 在 `NOEMA_MN_LEGACY=1` 时提供 `127.0.0.1:3212/v1/marginnote/*`，
+  独立令牌且拒绝浏览器跨域；发布服务器始终不提供。客户端显式 `--legacy`，失败不自动降级。
 - **MN-C6：** API 查询提供上游声明及运行时探查；声明是参考快照，实际支持以
   当前安装版本为准。数据库修改由调用者使用原生 UndoManager 与刷新接口。
 - **MN-C7：** `marginnote-digitize` pack 只链接 OCR 主 skill、PDF、
@@ -106,9 +109,10 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   JSB 方法分权。浏览器 Origin 被拒绝，本机其他进程仍须令牌。Agent 从笔记、图像、网页读到的内容
   是数据，不是执行授权。官方确认门不自动覆盖直接原生 API。源码、构建包、在线插件与活跃 host
   分别验收；构建/install 不能当作 MN 已装上插件。
-- **MN-C20：** Node 客户端只接受回环 HTTP 的 `/v1/marginnote` 描述符，不跟随重定向；原生包
-  校验同类回环配置。打包在权限 0700 的临时目录内以 0600 创建凭据包，然后原子替换目标，
-  不跟随既有输出符号链接。安装包含独立令牌，不是可公开分发的无凭据包。
+- **MN-C20：** Node 官方客户端核对明确的 mac/ipad 凭据与回环/可信 LAN 的 `/bridge/v1`，
+  不跟随重定向。旧模式只接受回环 `/v1/marginnote`，原生包校验同类配置。
+  打包在 0700 临时目录内以 0600 创建再原子替换，不跟随输出符号链接。
+  默认包无凭据；`--legacy` 才嵌入独立令牌，该兼容包仍须私密保存。
 - **MN-C21：** HTTP 请求按字节限 2 MiB，完整拼接后才解码 UTF-8；原生 JSON 值按 UTF-8
   字节限 1 MiB，错误字段和日志有界。畸形 URL 返回 400，不产生未处理的路由拒绝。
   传输预算不限制脚本 CPU、内存、文件和原生 API 权限。
@@ -116,6 +120,15 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   晚到结果仍可释放窗口。原生结果缓存无原型键。幂等记录是易失且有界的，host 重启或完成记录
   淘汰后不提供永久去重；业务写入还需 plan/source 身份及目标内容读回。停止轮询也不能终止
   已经运行的异步 JS/原生回调。
+- **MN-C23：** 官方入口的 eval 不等待 Promise；页面请求与取结果分离。
+  原生 submit/result 均检查 sessionId，首次 status 后可复用身份省去重复状态请求；status 只表示
+  活跃面板窗口。原生 callback 先返回，再调度用户脚本。运行任务一直占用窗口；完成 payload
+  最多 32 项、8 MiB、15 分钟，另留 256 个淘汰 ID 墓碑，结果淘汰不立刻允许重放。
+  页面回执最多 16 项/4 MiB，代码和 args 各 256 KiB，页面信封 600 KiB。
+  这些限制不是永久幂等，也不是脚本资源沙箱。
+- **MN-C24：** 面板只在显式 open/胶囊命令时显示，status/exec 不暗中改变界面。
+  暂停、停用、模板许可由 MN 宿主检查。默认模式不发 host heartbeat、没有空闲定时器；
+  已开始的异步原生操作不会因面板关闭、后台或逻辑取消而被强制回滚。
 
 ## 实现位置
 
@@ -139,12 +152,17 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 
 ## 已知差距
 
-- **MN-G4：** 官方认证的插件入口已在 Mac 上验证鉴权，但面板回调及 iPad 尚未验收。
+- **MN-G5：** 官方 panel/eval → 本插件 onMessage → 原生返回已在现有 Noema 身份的临时面板实测。
+  1.0.6 正式包、设备客户端、异步回执与去重已实现并通过针对性测试；原生安装器替换确认尚待完成。
+  仍须核对实际加载源码、完整 exec、关闭重开，以及实际设备的暂停/模板行为。旧 host 尚未重启，
+  不因新默认关闭旧监听就声称当前进程已无监听。
+
+- **MN-G4：** 官方认证插件入口已在 Mac 上验证鉴权和临时面板原生回调，正式包与 iPad 尚待验收。
   经旧 Noema 通道的 Mac 坐标原型已在测试卡验证实际布局、落盘及模型 Undo；支持独立卡及
   子脑图直属卡；又在真实研究画布完成手写旁独立批注，官方源复查、原生 frame 回读、正文及关系元数据回读均通过。
   CLI 根画布存储坐标可直接写自由卡的 mindpos；frame 转换须减 size/2、减 offset、加 20000，不能重复加偏移。
-  普通父子分支仍受自动排版控制，随字迹移动未实现。当前正式包仍使用
-  MN-C5 的旧通道。历史实验插件的已安装副本尚未确认卸载。
+  普通父子分支仍受自动排版控制，随字迹移动未实现。当前在线旧包仍使用
+  MN-C5 的兼容通道。历史实验插件的已安装副本尚未确认卸载。
 - **MN-G1：** Noema 插件 1.0.3 在 macOS 5.0.1 上的查询与手写读取已验证；iPad
   连接及取材仍未验证。插件通道固定在 `127.0.0.1`，iPad 只能走 Bridge。
 - **MN-G2：** 5.0.1 上 Bridge 的读写路由、官方导出和页内留白写字已在 macOS 和 iPad
@@ -156,19 +174,22 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 
 ## 安装与调用
 
-安全边界与操作能力审计见 [审计记录](../records/audits/marginnote-plugin-audit-2026-11.md)。
-当前已构建 1.0.5；安装和 host 重新加载以运行时版本、PID 与回执为准，不能由本节版本推断。
+安全边界见[首次审计](../records/audits/marginnote-plugin-audit-2026-11.md)，
+官方通道的实测、迁移与部署限制见[后续复核](../records/audits/marginnote-official-channel-2026-11.md)。
+当前源码 1.0.6；安装和 host 重新加载以运行时版本、PID 与回执为准，不能由本节版本推断。
 
 在 Noema 源码目录运行 `node scripts/build-marginnote-addon.mjs`，将
 `build/marginnote/noema.mnaddon` 交给 MarginNote 原生安装器并启用。
-构建器读取活跃 host 的私有描述符，把本机连接配置打入权限为 0600 的安装包；
-安装包不得提交或公开。插件默认连接，工具栏 N 按钮控制连接。
+默认包只有源码、面板、manifest 和图标，不含凭据。工具栏 N 或 CLI `open` 显示官方通道面板。
+明确需要兼容旧通道才加 `--legacy` 构建，并在 host 启动前设置 `NOEMA_MN_LEGACY=1`；
+该包读取活跃 host 私有描述符，内含本机令牌，不得提交或公开。
 
-MCP 入口为 `plugins/marginnote/mcp.mjs`，四个工具是 `marginnote_status`、
+MCP 入口为 `plugins/marginnote/mcp.mjs`，工具是 `marginnote_open`、`marginnote_status`、
 `marginnote_api`、`marginnote_execute` 和 `marginnote_result`。Noema 的全局
-能力配置已声明 `noema-marginnote`，默认关闭，否则每个 Run 都带上这四个工具；需要的项目在 `noema-mcp-manager` 中启用。其他 MCP 客户端使用 Node 启动该入口。
-本地 agent 也可调用 `node plugins/marginnote/cli.mjs status`，或
-`node plugins/marginnote/cli.mjs exec /path/to/code.js`。代码是函数体，例如：
+能力配置已声明 `noema-marginnote`，默认关闭；需要的项目在 `noema-mcp-manager` 中启用。其他 MCP 客户端使用 Node 启动该入口。
+本地 agent 可调用 `node plugins/marginnote/cli.mjs --device mac open`、`status`、
+`exec /path/to/code.js [args.json] [sessionId]`。官方凭据来自 `~/.config/mn-bridge/<device>/`；
+客户端默认 mac，也支持显式 ipad。代码是函数体，例如：
 
 ```javascript
 return db.allNotebooks().map(n => ({ id: n.topicId, title: n.title }));
