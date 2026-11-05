@@ -129,8 +129,13 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 - **MN-C24：** 面板只在显式 open/胶囊命令时显示，status/exec 不暗中改变界面。
   暂停、停用、模板许可由 MN 宿主检查。默认模式不发 host heartbeat、没有空闲定时器；
   已开始的异步原生操作不会因面板关闭、后台或逻辑取消而被强制回滚。
+- **MN-C25：** 批注复查属于 skill，只按点名卡片和已接受区域取原生布局与官方源库存。
+  `allBounds` 剪去区域外分支，预算耗尽不能声称覆盖完整；源图文共同平移、身份唯一、卡片未被用户改动且
+  目的地已读无碰撞时只提出位置更新。来源分离、换图、用户编辑或越界要重新审阅，不后台全图轮询或追踪。
 
 ## 实现位置
+
+- `marginnote-agent` 的 `mn_annotation_state.mjs/.js`、`mn_annotation_follow.py`：原生局部布局、已有批注的源变化和冲突复查；只读。
 
 - App 自带 Bridge：`~/.config/mn-bridge/<设备>/`、`mn-bridge` skill；README 技能库的
   `marginnote-agent` 记录双端通道选择、能力矩阵和 `scripts/mn.py`。
@@ -151,6 +156,9 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   （MN-C8、MN-C10–C12）；`+agent-acp-tests.el` 覆盖模型双向隔离。
 
 ## 已知差距
+
+- **MN-G6：** skill 的局部布局与源移动复查已在真实批注跑通，移动建议与冲突规则有隔离测试。
+  建议尚未接通通用的原生位置/关系写入与读回，也没有后台移动监听；大脑图只做预算保护，尚无真实规模基准。
 
 - **MN-G5：** 官方 panel/eval → 本插件 onMessage → 原生返回已在现有 Noema 身份的临时面板实测。
   1.0.6 正式包、设备客户端、异步回执与去重已实现并通过针对性测试；原生安装器替换确认尚待完成。
