@@ -1,243 +1,104 @@
-;;; noema/bridge/agent-bridge.el --- Local Codex Remote to Noema ACP bridge -*- lexical-binding: t; -*-
+;;; agent-bridge.el --- Local transport for the shared Emacs Agent API -*- lexical-binding: t; -*-
 
-;; A separate Codex Remote task may ask this Emacs instance to send a turn to
-;; one of its existing ACP clients.  The bridge never resumes a Codex task or
-;; starts an ACP process.  Emacs's own local server socket is the transport.
-
+;; Legacy CLI transport only.  Session/queue/receipt ownership is tools/agent.
 (require 'cl-lib)
 (require 'json)
-(require 'map)
 (require 'seq)
 (require 'server)
-(require 'subr-x)
-
-(defvar agent-shell--state)
-(defvar +agent-acp-session-name)
-(defvar shell-maker--busy)
-
-(declare-function +agent-shell--session-context "tools/agent/config" (directory))
-(declare-function +agent-shell--find-execution "tools/agent/config"
-                  (session-id config directory &optional exclude))
-(declare-function +agent-shell-execution-live-p "tools/agent/config" (buffer))
-(declare-function +agent-acp-busy-p "tools/agent/acp" (buffer))
-(declare-function +agent-acp-pending-prompt-count "tools/agent/acp" (buffer))
-(declare-function +agent-acp-enqueue "tools/agent/acp" (buffer text))
-(declare-function +agent-acp-prompt "tools/agent/acp" (&rest args))
-(declare-function +agent-acp-stop "tools/agent/acp" (&optional buffer))
-(declare-function agent-shell-subscribe-to "agent-shell" (&rest args))
+(declare-function +agent/api "tools/agent/api" (body))
+(declare-function +agent-requests-get "tools/agent/requests" (id))
 
 (defvar +noema-agent-bridge-enabled nil
-  "Non-nil when the local Emacs server may route explicit bridge requests.")
-
-(defvar +noema-agent-bridge--serial 0)
-(defvar-local +noema-agent-bridge--subscription nil)
-(defvar-local +noema-agent-bridge--records nil)
-(defvar-local +noema-agent-bridge--current nil)
-
-(defun +noema-agent-bridge--finish (record status)
-  "Mark RECORD with STATUS and stop assigning further output to it."
-  (when record
-    (setf (plist-get record :status) status)
-    (when (eq +noema-agent-bridge--current record)
-      (setq +noema-agent-bridge--current nil))))
-
-(defun +noema-agent-bridge--event (event)
-  "Collect ACP reply EVENT before Noema's optional hidden rendering."
-  (pcase (map-elt event :event)
-    ('input-submitted
-     (let* ((prompt (map-elt (map-elt event :data) :prompt))
-            (record (seq-find
-                     (lambda (item)
-                       (and (eq (plist-get item :status) 'queued)
-                            (equal (plist-get item :message) prompt)))
-                     (reverse +noema-agent-bridge--records))))
-       (when record
-         (setf (plist-get record :status) 'running)
-         (setq +noema-agent-bridge--current record))))
-    ('agent-message-chunk
-     (when-let* ((record +noema-agent-bridge--current)
-                 (chunk (map-elt (map-elt event :data) :text-chunk)))
-       (let ((text (concat (plist-get record :text) chunk)))
-         (when (> (length text) 100000)
-           (setq text (substring text (- (length text) 100000)))
-           (setf (plist-get record :truncated) t))
-         (setf (plist-get record :text) text))))
-    ('turn-complete
-     (+noema-agent-bridge--finish +noema-agent-bridge--current 'completed))
-    ('error
-     (+noema-agent-bridge--finish +noema-agent-bridge--current 'failed))
-    ('clean-up
-     (dolist (record +noema-agent-bridge--records)
-       (when (memq (plist-get record :status) '(queued running))
-         (setf (plist-get record :status) 'failed)))
-     (setq +noema-agent-bridge--current nil))))
-
-(defun +noema-agent-bridge--watch (buffer)
-  "Subscribe once to BUFFER's ACP events for bridge reply collection."
-  (with-current-buffer buffer
-    (unless +noema-agent-bridge--subscription
-      (setq-local +noema-agent-bridge--subscription
-                  (agent-shell-subscribe-to
-                   :shell-buffer buffer :on-event #'+noema-agent-bridge--event)))))
+  "Non-nil when the local Emacs socket accepts Agent bridge requests.")
 
 (defun +noema/agent-bridge-start ()
-  "Enable local-socket access to live Noema ACP sessions for Codex Remote."
+  "Enable local-socket access to Emacs-managed Agent sessions."
   (interactive)
-  (when server-use-tcp
-    (user-error "Noema agent bridge requires a local Emacs server socket"))
-  (unless (server-running-p)
-    (server-start))
+  (when server-use-tcp (user-error "Agent bridge requires a local Emacs server socket"))
+  (unless (server-running-p) (server-start))
   (setq +noema-agent-bridge-enabled t)
-  (message "Noema agent bridge enabled on the local Emacs server socket"))
+  (message "Agent bridge enabled on the local Emacs server socket"))
 
 (defun +noema/agent-bridge-stop ()
-  "Disable bridge requests without stopping another Emacs server user."
+  "Disable this transport without stopping any Agent or Emacs server."
   (interactive)
-  (setq +noema-agent-bridge-enabled nil)
-  (message "Noema agent bridge disabled"))
+  (setq +noema-agent-bridge-enabled nil))
 
 (defun +noema-agent-bridge--sessions ()
-  "Return live initialized ACP executions in this Emacs as JSON records."
+  "Expose public initialized ACP sessions, regardless of provider."
+  (require 'tools/agent/api)
   (vconcat
-   (seq-keep
-    (lambda (buffer)
-      (when (+agent-shell-execution-live-p buffer)
-        (with-current-buffer buffer
-          (when-let* (((eq (map-nested-elt agent-shell--state
-                                          '(:agent-config :identifier))
-                           'codex))
-                      (session-id (map-nested-elt agent-shell--state
-                                                  '(:session :id)))
-                      (agent (map-nested-elt agent-shell--state
-                                             '(:agent-config :identifier))))
-            `((sessionId . ,session-id)
-              (agent . ,(symbol-name agent))
-              (workspace . ,(+agent-shell--session-context default-directory))
-              (name . ,(or (and (boundp '+agent-acp-session-name)
-                                +agent-acp-session-name)
-                           :null))
-              (busy . ,(if (+agent-acp-busy-p buffer) t :false))
-              (queued . ,(+agent-acp-pending-prompt-count buffer)))))))
-    (buffer-list))))
+   (delq nil
+         (mapcar (lambda (buffer)
+                   (let ((s (+agent-session-snapshot buffer)))
+                     (when (and (eq (plist-get s :process-state) 'live) (plist-get s :native-session-id))
+                       `((sessionId . ,(plist-get s :native-session-id))
+                         (buffer . ,(buffer-name buffer))
+                         (agent . ,(format "%s" (or (plist-get s :agent) (plist-get s :provider))))
+                         (workspace . ,(directory-file-name (plist-get s :workspace))) (name . ,(plist-get s :name))
+                         (busy . ,(if (plist-get s :busy) t :json-false))
+                         (queued . ,(plist-get s :queued))))))
+                 (+agent-pool-buffers nil nil 'all)))))
 
-(defun +noema-agent-bridge--target (request)
-  "Resolve REQUEST to one live ACP execution, without starting a process."
-  (let* ((session-id (alist-get 'sessionId request))
-         (agent-name (alist-get 'agent request))
-         (workspace (alist-get 'workspace request))
-         (agent (and (stringp agent-name) (intern-soft agent-name))))
-    (unless (and (stringp session-id) (not (string-empty-p session-id))
-                 (stringp workspace) (not (string-empty-p workspace))
-                 (eq agent 'codex))
-      (user-error "A Codex sessionId, agent and workspace are required"))
-    (or (+agent-shell--find-execution
-         session-id `((:identifier . ,agent)) workspace)
-        (user-error "No live matching ACP session; list sessions again"))))
+(defun +noema-agent-bridge--identity (request)
+  "Resolve the legacy identity triple to the public API's exact buffer/ID."
+  (let* ((workspace (directory-file-name
+                     (remote-canonicalize-emacs-file-name (alist-get 'workspace request))))
+         (row (seq-find
+               (lambda (s) (and (equal (alist-get 'sessionId request) (alist-get 'sessionId s))
+                                (equal (alist-get 'agent request) (alist-get 'agent s))
+                                (equal workspace (alist-get 'workspace s))))
+               (+noema-agent-bridge--sessions))))
+    (unless row (user-error "No live matching ACP session; list sessions again"))
+    `((buffer . ,(alist-get 'buffer row)) (nativeSessionId . ,(alist-get 'sessionId row)))))
 
-(defun +noema-agent-bridge--send (request)
-  "Deliver REQUEST as the next turn to its exact live ACP target."
-  (let* ((buffer (+noema-agent-bridge--target request))
-         (message-text (alist-get 'message request)))
-    (unless (and (stringp message-text)
-                 (not (string-empty-p (string-trim message-text))))
-      (user-error "A nonempty message is required"))
-    (unless (+agent-shell-execution-live-p buffer)
-      (user-error "ACP session exited before the message was sent"))
-    (+noema-agent-bridge--watch buffer)
-    (with-current-buffer buffer
-      ;; Noema's structured Run prompts do not use shell-maker's turn-end
-      ;; queue drain.  Do not promise automatic delivery behind one.
-      (when (and (+agent-acp-busy-p buffer)
-                 (not (bound-and-true-p shell-maker--busy)))
-        (user-error "Noema Run is active; retry when it finishes"))
-      (when (and (map-elt agent-shell--state :active-requests)
-                 (not (+agent-acp-busy-p buffer)))
-        (user-error "ACP control request in progress; retry after it settles"))
-      (when (>= (length +noema-agent-bridge--records) 100)
-        (if-let* ((oldest-finished
-                   (seq-find (lambda (item)
-                               (memq (plist-get item :status) '(completed failed)))
-                             (reverse +noema-agent-bridge--records))))
-            (setq +noema-agent-bridge--records
-                  (delq oldest-finished +noema-agent-bridge--records))
-          (user-error "Bridge has 100 unfinished requests; wait for one to finish")))
-      (let* ((queued (or (+agent-acp-busy-p buffer)
-                         (> (+agent-acp-pending-prompt-count buffer) 0)))
-             (record (list :id (format "bridge-%d" (cl-incf +noema-agent-bridge--serial))
-                           :message message-text :status (if queued 'queued 'running)
-                           :text "" :truncated nil)))
-        (push record +noema-agent-bridge--records)
-        (condition-case err
-            (if queued
-                (+agent-acp-enqueue buffer message-text)
-              (setq +noema-agent-bridge--current record)
-              (+agent-acp-prompt
-               :buffer buffer
-               :content (list `((type . "text") (text . ,message-text)))
-               :on-success (lambda (_response)
-                             (when (buffer-live-p buffer)
-                               (with-current-buffer buffer
-                                 (+noema-agent-bridge--finish record 'completed))))
-               :on-failure (lambda (_error _raw)
-                             (when (buffer-live-p buffer)
-                               (with-current-buffer buffer
-                                 (+noema-agent-bridge--finish record 'failed))))))
-          (error
-           (setq +noema-agent-bridge--records
-                 (delq record +noema-agent-bridge--records))
-           (+noema-agent-bridge--finish record 'failed)
-           (signal (car err) (cdr err))))
-        `((ok . t) (requestId . ,(plist-get record :id))
-          (state . ,(if queued "queued" "submitted")))))))
-
-(defun +noema-agent-bridge--read (request)
-  "Read only the ACP reply associated with REQUEST's bridge request ID."
-  (let* ((buffer (+noema-agent-bridge--target request))
-         (request-id (alist-get 'requestId request))
-         (record (and (stringp request-id)
-                      (with-current-buffer buffer
-                        (seq-find (lambda (item)
-                                    (equal (plist-get item :id) request-id))
-                                  +noema-agent-bridge--records)))))
-    (unless record
-      (user-error "Unknown bridge request ID in this ACP session"))
-    `((ok . t)
-      (requestId . ,request-id)
-      (state . ,(symbol-name (plist-get record :status)))
-      (text . ,(plist-get record :text))
-      (truncated . ,(if (plist-get record :truncated) t :false)))))
-
-(defun +noema-agent-bridge--interrupt (request)
-  "Explicitly interrupt REQUEST's active turn without terminating its client."
-  (let ((buffer (+noema-agent-bridge--target request)))
-    (unless (+agent-acp-busy-p buffer)
-      (user-error "The selected ACP session is idle"))
-    (+agent-acp-stop buffer)
-    '((ok . t) (state . "interrupt-requested"))))
+(defun +noema-agent-bridge--dispatch (request)
+  "Translate REQUEST; all execution uses the shared Emacs API."
+  (require 'tools/agent/api)
+  (pcase (alist-get 'action request)
+    ("list" `((ok . t) (sessions . ,(+noema-agent-bridge--sessions))))
+    ("api" (+agent/api (alist-get 'body request)))
+    ((or "send" "read" "interrupt")
+     (let ((identity (+noema-agent-bridge--identity request)))
+       (pcase (alist-get 'action request)
+         ("send"
+          (let ((buffer (get-buffer (alist-get 'buffer identity))))
+            (when (and (+agent-acp-busy-p buffer)
+                       (not (buffer-local-value 'shell-maker--busy buffer))
+                       (not (buffer-local-value '+agent-requests--current buffer)))
+              (user-error "Noema Run is active; retry when it finishes"))
+            (let ((reply (+agent/api `((action . "send") (prompt . ,(alist-get 'message request)) ,@identity))))
+              (when (equal (alist-get 'state reply) "running") (setf (alist-get 'state reply) "submitted"))
+              reply)))
+         ("interrupt" (append '((state . "interrupt-requested")) (+agent/api `((action . "stop") ,@identity))))
+         ("read"
+          (let ((record (+agent-requests-get (alist-get 'requestId request))))
+            (unless (eq (plist-get record :buffer) (get-buffer (alist-get 'buffer identity)))
+              (user-error "Request belongs to another Agent session"))
+            ;; The legacy CLI has no pagination arguments: retain its full,
+            ;; bounded receipt while the shared API continues to page results.
+            (let* ((body `((action . "result") (requestId . ,(alist-get 'requestId request)) (limit . 32000)))
+                   (reply (+agent/api body)) (page reply) (chunks (list (alist-get 'text reply))))
+              (while (alist-get 'nextOffset page)
+                (setq page (+agent/api `((offset . ,(alist-get 'nextOffset page)) ,@body)))
+                (push (alist-get 'text page) chunks))
+              (setf (alist-get 'text reply) (apply #'concat (nreverse chunks))
+                    (alist-get 'nextOffset reply) nil)
+              reply))))))
+    (_ (user-error "Unknown Agent bridge action"))))
 
 (defun +noema-agent-bridge-request (encoded-json)
-  "Handle one base64 ENCODED-JSON request from a local emacsclient.
-  Return a JSON string.  Only list, send, read, and interrupt are exposed."
+  "Decode data and route it to the one Emacs Agent runtime."
   (condition-case err
       (progn
         (unless +noema-agent-bridge-enabled
-          (user-error "Noema agent bridge is disabled; run M-x +noema/agent-bridge-start"))
-        (require 'tools/agent/acp)
-        (let* ((request (json-parse-string
-                         (decode-coding-string
-                          (base64-decode-string encoded-json) 'utf-8)
-                         :object-type 'alist))
-               (action (alist-get 'action request)))
-          (json-serialize
-           (pcase action
-             ("list" `((ok . t) (sessions . ,(+noema-agent-bridge--sessions))))
-             ("send" (+noema-agent-bridge--send request))
-             ("read" (+noema-agent-bridge--read request))
-             ("interrupt" (+noema-agent-bridge--interrupt request))
-             (_ (user-error "Unknown Noema bridge action"))))))
-    (error
-     (json-serialize `((ok . :false)
-                       (error . ,(error-message-string err)))))))
+          (user-error "Agent bridge is disabled; use the Noema API or enable agent-bridge-start"))
+        (require 'remote-gateway)
+        (remote-gateway--encode
+         (+noema-agent-bridge--dispatch
+          (json-parse-string (decode-coding-string (base64-decode-string encoded-json) 'utf-8)
+                             :object-type 'alist :array-type 'list :false-object :json-false :null-object nil))))
+    (error (json-serialize `((ok . :false) (error . ,(error-message-string err)))))))
 
 (provide 'noema/bridge/agent-bridge)
-;;; noema/bridge/agent-bridge.el ends here
+;;; agent-bridge.el ends here

@@ -193,7 +193,8 @@
           "noema-elisp-api",
           "noema-editor-interaction",
           "noema-prompt-document",
-          "noema-agent-operations"
+          "noema-agent-operations",
+          "emacs-agent-collaboration"
         ],
         "preamble": "需要时用现有 Emacs 命令和语义 API，够用就不读 Skill。Emacs 管理窗口、Agent 进程、Session、权限和用户交互。Markdown 语法与原位审阅见 noema-md，项目协作见 noema-project。"
       },

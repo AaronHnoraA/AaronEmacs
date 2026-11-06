@@ -319,10 +319,10 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
   清单，`C-c A l`、会话菜单 `l`、管理器 `l` 选择并打开文件。清单是这个 client 的
   内存事实，不是 Git 状态，也不跨重启。测试：`agent-changes-c44-*`。
 - **C45 管家复用执行接口。** `tools/agent/api` 在现有注册表和 ACP 上提供有界的
-  list/status/create/send/read/stop/show；列表不返回 prompt、草稿或完整对话。
-  除 list/create 外，调用者必须给出 buffer 和匹配的 nativeSessionId；可额外限制
-  root/target。创建只初始化 client，发送复用原生队列且不自动清空挂起任务，读取
-  只分页返回 transcript 并排除输入草稿。后台操作不选择窗口，不代理权限决策。
+  list/tasks/status/create/spawn/send/result/read/stop/show；列表不返回 prompt、草稿或完整对话。
+  除 list/tasks/create/spawn/result 外，调用者必须给出 buffer 和匹配的 nativeSessionId；可额外限制
+  root/target。`create` 只初始化 client，`spawn` 还派发任务；发送复用原生队列且不自动清空挂起任务。
+  `read` 分页返回 transcript 并排除输入草稿，`result` 只读任务回执。后台操作不选择窗口，不代理权限决策。
   精确 buffer/ID 查询直接校验该物理会话，不遍历其他会话的快照；status 复用这份
   只读快照，变更操作后重新读取。列表先按项目、target 和隐私过滤 buffer，再分页
   构造返回项；旧 snapshot 隐私谓词仍按兼容契约读取候选完整快照。
@@ -423,6 +423,28 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   但有自己的后续历史。原会话的当前回合、队列和输入不动。不支持 fork 或原会话
   尚未初始化时另开空白临时聊天。旁路会话不进入项目的持久会话登记。
   测试：`agent-side-c59-*`。
+- **C60 按任务交接。** `emacs:agent` 的 `spawn` 以独立 ACP 会话后台执行任务，
+  初始化完成后发送；`send` 在已有会话中派发。两者返回 `requestId`，`result`
+  只返回该任务的有界文本、状态、停止原因与分页位置，不用聊天正文匹配身份。
+  同一会话复用原生队列；带回执的队列项通过结构化 ACP 请求发送原始内容，并独立完成，
+  不与相同文本或其他任务合并。不同会话可并行。`end_turn` 才是 `completed`；
+  取消、拒绝、RPC 失败、初始化失败与 client 退出保留不同终态；修改或移除队列项
+  使原回执成为 `untracked`，不把后来的回答归给它。停止后的 `held` 队列不自动恢复。
+  可选 `notify:{buffer,nativeSessionId}` 在终态向确切父 client 发送一次通知，忙时排队；
+  父会话可结束回合等待，不须轮询或要求 worker 再发消息。父 client 已替换或退出时
+  通知失败，结果仍可查。回执最多 128 个，每个保留 100000 字符；只淘汰已结束且无待发
+  通知的项。满额在创建前拒绝，创建后派发准备失败则清理新 client。回执不跨 Emacs 重启，
+  不替代原生产物和历史。`tasks` 按 root/target 分页列回执的身份、状态、Unix 秒时间戳，
+  遵循会话隐私过滤，不返回 prompt 或回复；遗失 ID 可据此找回。`result` 同时给出任务
+  创建时的项目与 worker 身份，worker 结束后仍保留。终态释放请求正文和旧 client 状态，
+  通知尝试后释放父 client 引用。测试：`agent-delegation-c60-*`。
+- **C61 后台执行 buffer。** `spawn` 创建 `subagent` 来源的真实 agent-shell buffer；
+  `create` 可指定 `background:true`。它们不抢窗口，不参加普通聊天的默认标签或最近会话
+  召回，仍出现在统一 Agent Manager、显式选择器和 API 列表，带 background 与 parent 信息。
+  手动打开、隐藏与重连保留后台身份；关闭视图不停止任务。`agent-spawn`／`C-c A b`／
+  `/delegate` 派工，`agent-open-worker`／`C-c A B`／`/workers` 打开已有 worker。
+  `C-c A E`／`/butler` 召回全局 Pi；Pi 与其他 Agent 共用同一运行时。
+  旧 local bridge 只翻译为公共 API，不另存回执或管理队列。
 
 ## 实现位置
 
@@ -431,6 +453,7 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
 | 依赖、Remote 接入与配置登记 | `lisp/tools/agent/config.el` |
 | 物理会话、能力快照、项目池、队列与暖会话回收 | `lisp/tools/agent/acp.el` |
 | 管家调用公共会话的语义接口 | `lisp/tools/agent/api.el` |
+| 有界任务回执、完成通知与后台派工命令 | `lisp/tools/agent/{requests,delegate}.el` |
 | 常规视图放置、来源返回、frame 边界与物理替换 | `lisp/tools/agent/views.el` |
 | 原生聊天配色、输入提示和可编辑行首 | `lisp/tools/agent/appearance.el` |
 | 管理页面的指标、上下文进度和原生表格样式 | `lisp/tools/agent/ui.el` |

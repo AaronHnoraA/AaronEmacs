@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send a small, explicit request to this Mac's live Noema ACP sessions."""
+"""Local-socket transport for the shared Emacs Agent API and legacy callers."""
 
 import argparse
 import base64
@@ -9,9 +9,13 @@ import sys
 
 
 def request(action, session_id=None, agent=None, workspace=None, message=None,
-            request_id=None, socket=None):
+            request_id=None, socket=None, body=None):
     payload = {"action": action}
-    if action != "list":
+    if action == "api":
+        if not isinstance(body, dict):
+            raise ValueError("api requires a JSON object")
+        payload["body"] = body
+    elif action != "list":
         payload.update(sessionId=session_id, agent=agent, workspace=workspace)
     if action == "send":
         payload["message"] = message
@@ -33,6 +37,7 @@ def main():
     parser.add_argument("--socket", help="Emacs local socket name/path (default: emacsclient default)")
     commands = parser.add_subparsers(dest="action", required=True)
     commands.add_parser("list", help="List live Noema/agent-shell ACP sessions")
+    commands.add_parser("api", help="Read an Emacs Agent API JSON object from stdin")
     for action in ("send", "read", "interrupt"):
         item = commands.add_parser(action)
         item.add_argument("--session-id", required=True)
@@ -49,6 +54,7 @@ def main():
             parser.error("send needs --message or text on stdin")
         message = sys.stdin.read()
     try:
+        body = json.load(sys.stdin) if args.action == "api" else None
         response = request(
             args.action,
             session_id=getattr(args, "session_id", None),
@@ -57,6 +63,7 @@ def main():
             message=message,
             request_id=getattr(args, "request_id", None),
             socket=args.socket,
+            body=body,
         )
     except (OSError, subprocess.TimeoutExpired, ValueError, RuntimeError) as error:
         response = {"ok": False, "error": str(error)}

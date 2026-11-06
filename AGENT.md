@@ -121,6 +121,12 @@ exit or restart moves it to the Emacs-held part, edited through
 `tools/agent/queue`, and an event callback never asks a question.  A client's
 exit is reported from its process sentinel; facts about an exited client's
 requests come from `+agent-acp-client-exited-p`, not from stale state.
+Global Pi dispatches through `tools/agent/api`; `spawn` creates background
+agent-shell buffers in the same pool, hidden from ordinary recall and chat tabs
+but manually openable. `tools/agent/requests` owns bounded per-task receipts and
+one completion notification to an exact parent identity, not another session
+registry or queue. See agent-management C60–C61; do not ask the user to relay
+worker output or insert a mandatory Project Pi intermediary.
 
 When adding a module:
 

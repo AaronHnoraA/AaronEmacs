@@ -173,6 +173,10 @@
   在当前窗口打开新会话，不是开关；`C-u C-u` 选择会话、新建或已保存对话
 - `C-c a` / `C-u C-c a`
   召回本项目最近的会话，在聊天里执行则返回 / 选择会话、新建或已保存对话
+- `C-c A b` / `C-c A B` / `C-c A E`
+  派后台任务 / 打开后台 worker / 全局 Pi；也可用 `M-x agent-spawn`、`agent-open-worker`、
+  `noema-pi-emacs-open`，聊天中是 `/delegate`、`/workers`、`/butler`。
+  后台 worker 不加入普通聊天的默认标签和召回，仍可在 Agent Manager 查看并打开。
 
 ### macOS Option `H-`
 

@@ -91,14 +91,15 @@
              (or (string-empty-p needle)
                  (string-match-p
                   (regexp-quote needle)
-                  (downcase (format "%s %s %s %s %s %s %s"
+                  (downcase (format "%s %s %s %s %s %s %s %s"
                                     (plist-get session :name)
                                     (plist-get session :agent)
                                     (plist-get session :root)
                                     (plist-get (plist-get session :group) :label)
                                     (plist-get (plist-get session :usage) :model)
                                     (or (plist-get session :title) "")
-                                    (or (plist-get session :last-prompt) "")))))))
+                                    (or (plist-get session :last-prompt) "")
+                                    (if (plist-get session :background) "background worker" "")))))))
       sessions)
      (lambda (a b)
        (let ((ga (+agent-manager--group a)) (gb (+agent-manager--group b))
@@ -348,8 +349,9 @@ Without a live selection a new client lists the provider's saved conversations."
 
 (defun +agent-manager--status-line (session)
   "SESSION's state with its elapsed time and queue."
-  (string-join (cons (+agent-manager--state-label session)
-                     (+agent-session-progress session))
+  (string-join (append (and (plist-get session :background) '("Background"))
+                      (list (+agent-manager--state-label session))
+                      (+agent-session-progress session))
                " · "))
 
 (defun +agent-manager--usage-line (session)

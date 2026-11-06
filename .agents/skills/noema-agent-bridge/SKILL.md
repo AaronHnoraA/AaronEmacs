@@ -1,32 +1,43 @@
 ---
 name: noema-agent-bridge
-description: From a separate Codex Remote task on the same Mac, find a live Codex ACP session in Noema or agent-shell and send it a message without reopening its task.
+description: From another Agent on the same Mac, use Emacs's shared ACP API to delegate background tasks or contact an existing session. Emacs owns execution; callers never attach a second client to an occupied task.
 ---
 
-# Talk to an existing Noema agent session
+# Collaborate through Emacs
 
-Use this skill when the user wants a new Codex Remote chat to contact a Codex
-ACP session already running inside Emacs. The new chat is a messenger; it does
-not attach to that session or inherit its conversation history.
+Prefer `node ~/.config/emacs/site-lisp/noema/scripts/agent-api.mjs call emacs:agent -`
+with a JSON argument array on stdin. The shared API supports `list`, `status`,
+`tasks`, `create`, `spawn`, `send`, `result`, `read`, `stop` and `show`. Read the operational
+skill at `~/.config/emacs/site-lisp/noema/resources/skills/noema-agent-operations/SKILL.md`
+for background workers and completion notifications. Global Pi is the manager;
+it uses this same API. Callers keep independent contexts, not inherited history.
+For delegation and file handoffs, use `emacs-agent-collaboration`; `tasks` recovers
+request IDs by root/target without returning prompts or replies.
 
-Run `python3 ~/.config/emacs/.agents/skills/noema-agent-bridge/scripts/bridge.py list`.
-Choose the exact `sessionId`, `agent`, and `workspace` from the result. If no
-matching session is listed, report that it is unavailable; do not resume it or
-start another process. The Emacs owner must first run
-`M-x +noema/agent-bridge-start` in that Emacs instance. The bridge uses only
-the local Emacs server socket on the same Mac.
+For a new background task use `spawn` with `root`, `agent`, `prompt` and optional
+`name`, `files`, `notify:{buffer,nativeSessionId}`. Save `requestId`; use `result`
+for its bounded reply, or end your turn and receive the notification. `show`
+opens the real worker buffer only when requested. Do not make the user relay
+OCR output or worker messages.
 
-To pass the user's message, run the script's `send` command with those three
-fields and `--message TEXT` or text on stdin. A busy interactive Codex turn
-queues the message for its next turn; an idle agent receives a new ACP turn.
-If a structured Noema Run owns the session, wait for it to finish and retry.
-Report whether the
-result is `queued` or `submitted`, without claiming the agent has completed it.
-Save the returned `requestId`. Use `read` with the same session fields and
-`--request-id ID` to retrieve its current state and streamed reply. For a
-queued message, its reply begins only after agent-shell submits it. Do not
-mistake `submitted` for completion; check `read` again when needed.
+## Local socket fallback
 
-Run `interrupt` only when the user explicitly asks to stop the selected
-agent's current turn. It does not terminate the agent process. Never use
-Codex `resume` on the occupied task or kill the owning session as recovery.
+When the Noema HTTP host is unavailable and the local bridge is enabled, run
+`python3 ~/.config/emacs/.agents/skills/noema-agent-bridge/scripts/bridge.py api`
+with one JSON object on stdin. This is a transport adapter to the same Emacs API;
+it owns no queue or reply tracking. It uses only this Mac's local Emacs socket.
+
+The legacy `list` command returns exact `sessionId`, `agent`, `workspace` and
+`buffer` fields for all public live ACP providers. `send`, `read`, `interrupt`
+accept the first three identity fields; `send` takes `--message TEXT` or stdin,
+and `read` also takes `--request-id ID`. They route to shared send/result/stop.
+For a result after the worker exits, prefer `api` with action=result and requestId.
+
+No matching session means unavailable, not permission to recreate its conversation.
+Do not resume an occupied task with another CLI, kill it as recovery, or resend a
+mutation after an ambiguous timeout. If this fallback is disabled, report that fact;
+its explicit Emacs enable command is `M-x +noema/agent-bridge-start`.
+
+`starting`, `running`, `queued` and `held` are not completion. Only the request's
+terminal result describes how it ended; inspect artifacts before accepting its claim.
+Stop only within the user's instruction, and keep permission decisions with the user.

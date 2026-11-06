@@ -11,7 +11,8 @@ Pi 是 Emacs 的常驻助手，并在项目中首次调用时创建该项目的�
 flowchart TD
   D[Dashboard] --> E
   E --> M[Pi Sessions]
-  E[Emacs Pi] --> P[项目 Pi]
+  E[全局 Pi] --> P[项目 Pi]
+  E --> W
   P --> W[执行任务的 Agent]
   M --> S[Pi 会话记录]
   S --> R[共享 ACP 运行时]
@@ -28,8 +29,8 @@ flowchart TD
 | ACP client / buffer | 当前连接、队列、权限、草稿和显示 | 持久 Session 身份 |
 | 执行 Agent | 接受明确任务与上下文，返回结果 | 项目 Pi 的管理对话 |
 
-Emacs Pi 负责编辑器操作、跨项目路由和找到项目 Pi。项目 Pi 负责项目上下文、
-任务分工、prompt 文档和交接。执行 Agent 只获得该任务需要的材料和写入范围。
+全局 Pi 负责编辑器操作、跨项目协调，也可直接调度执行 Agent。项目 Pi 保留项目上下文、
+prompt 文档和交接，按需参与，不是派工必经层。执行 Agent 只获得该任务需要的材料和写入范围。
 项目 Pi 的管理关系指向 Emacs 作用域；主 Pi 换对话不会销毁项目 Pi 的历史。
 
 ## 契约
@@ -75,10 +76,11 @@ Emacs Pi 负责编辑器操作、跨项目路由和找到项目 Pi。项目 Pi �
   主 Pi 不把自己的启动目录当成用户当前项目。
   没有可用编辑来源时返回 `sourceAvailable:false`，目录与项目为空，不回退到 Pi 的 home。
   `sourceAvailable`、`pageOwned`、`modified` 经 gateway 保持 JSON 布尔值，不返回符号名字符串。
-- **C11 调度复用公共 Agent。** Pi 通过 `emacs:agent` 查询、创建、发送、读取结果
-  或停止真实会话；没有另一份 Agent 注册表、队列或执行状态。变更和读取必须携带
-  buffer 与 native ID，防止把旧指令发送到同名新会话。查询不打开 UI；创建不提交
-  任务；发送默认后台受理，只有显式 focus/show 才显示。受理、排队和完成分别报告。
+- **C11 调度复用公共 Agent。** 全局 Pi 和项目 Pi 通过 `emacs:agent` 查询、派工、
+  读取结果或停止真实会话；没有另一份 Agent 注册表、队列或执行状态。已有会话操作携带
+  buffer 与 native ID，防止把旧指令发送到同名新会话；任务结果使用独立 requestId。
+  查询不打开 UI；`create` 只初始化，`spawn` 后台初始化并发送任务，`notify` 回传终态。
+  只有显式 show 才打开 worker。受理、排队和完成分别报告，细节见 Agent 管理 C60–C61。
   正常完成后继续原生排队任务；停止、失败或拒绝后保留挂起任务，等待显式恢复。
 - **C12 Idle 预热。** 启动只登记一次主 Pi 的 idle 工作，项目切换不安排启动。
   明确打开或发送才创建或复用项目 Pi；关闭自动模式或退出取消
@@ -177,10 +179,16 @@ Emacs Pi 负责编辑器操作、跨项目路由和找到项目 Pi。项目 Pi �
   Agent 据此判断要不要叫人重启，不把沙盒当作 host 故障。测试：`C24 *`。
 ## 提示词地图
 
+全局 Pi 可直接通过 `emacs:agent` 的 `spawn/send/result` 调度后台子 Agent，不要求先建项目 Pi。
+`notify` 传它从 `emacs:pi status companion:true` 得到的 buffer/native ID，Emacs 在任务结束后
+发送一次结果通知；Pi 检查产物再继续答复，不要求用户传话。后台 worker 仍由普通 Agent
+Manager 管理，Pi 自己的历史归 Pi Sessions。运行细节见 Agent 管理 C60–C61。
+
 Agent 读到的每段文本都在这张表里。新增入口时加一行，并说明它补了哪些入口特有的事实。
 
 | 文本 | 位置 | 谁收到、何时 | 内容 |
 | --- | --- | --- | --- |
+| 任务完成通知 | `lisp/tools/agent/task-result.txt`（Emacs） | 显式指定的父 Agent，在子任务终态后一次 | 请求身份、终态、输出与核查指引 |
 | 工具指南 | `resources/agent/tools.md` | 经下面三个入口 | 有哪些工具、什么请求用哪个 |
 | MCP 说明 | `scripts/agent-mcp.mjs` | 有 Noema MCP 的 Agent，会话开始 | 工具指南原文 |
 | CLI `help` | `scripts/agent-api.mjs` | 有 shell 的 Agent，主动查询 | 工具指南和命令用法 |

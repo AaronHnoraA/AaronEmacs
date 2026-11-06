@@ -720,7 +720,8 @@ Pi's managed roles are independent of the provider used by ordinary agents."
   (let* ((kind (+agent-session-kind (current-buffer)))
          (main (eq +agent-acp-session-origin 'pi-emacs))
          (buffers (+agent-pool-buffers (or root +agent-acp-session-root) nil kind)))
-    (if (eq kind 'agent) buffers
+    (if (eq kind 'agent)
+        (seq-remove (lambda (buffer) (buffer-local-value '+agent-acp-background buffer)) buffers)
       (seq-filter (lambda (buffer)
                     (eq main (eq (buffer-local-value '+agent-acp-session-origin buffer) 'pi-emacs)))
                   buffers))))
@@ -1589,6 +1590,13 @@ Adopted from Pisper's temporary side chat."
   "Name of the session this ephemeral side chat was opened beside.")
 (put '+agent-acp-side-parent 'permanent-local t)
 
+(defvar-local +agent-acp-background nil
+  "Non-nil for an execution buffer opened only by an explicit show action.")
+(put '+agent-acp-background 'permanent-local t)
+(defvar-local +agent-acp-parent-session nil
+  "Identity of the Agent that delegated this background session, if supplied.")
+(put '+agent-acp-parent-session 'permanent-local t)
+
 (defcustom +agent-acp-auto-stop-origins '(run probe pi side latex-export)
   "Session origins whose idle, hidden agents may be stopped automatically.
 Automatic stops are the periodic warm-buffer sweep and closing a project when
@@ -2267,6 +2275,7 @@ This queries one registry."
         (list :buffer buffer :name +agent-acp-session-name :agent +agent-acp-session-agent
               :provider (map-nested-elt state '(:agent-config :identifier))
               :origin +agent-acp-session-origin :root +agent-acp-session-root
+              :background +agent-acp-background :parent +agent-acp-parent-session
               :group (+agent-session-group buffer) :retired (+agent-acp-retired-p buffer)
               :target (and (fboundp 'remote-file-name-target) (remote-file-name-target directory))
               :workspace (if (fboundp 'remote-canonicalize-emacs-file-name)
@@ -2623,6 +2632,8 @@ replayed.  A failed start retains unsent text in an explicit recovery buffer."
          (name (buffer-name buffer))
          (session-id (or requested-session-id (+agent-acp-state-value buffer '(:session :id))))
          (origin (buffer-local-value '+agent-acp-session-origin buffer))
+         (background (buffer-local-value '+agent-acp-background buffer))
+         (parent (buffer-local-value '+agent-acp-parent-session buffer))
          (session-name (buffer-local-value '+agent-acp-session-name buffer))
          (agent (buffer-local-value '+agent-acp-session-agent buffer))
          (root (buffer-local-value '+agent-acp-session-root buffer))
@@ -2655,6 +2666,8 @@ replayed.  A failed start retains unsent text in an explicit recovery buffer."
               (dolist (property popup-properties)
                 (set (make-local-variable (car property)) (cdr property)))
               (setq-local +agent-acp-session-origin origin
+                          +agent-acp-background background
+                          +agent-acp-parent-session parent
                           +agent-acp-display-buffer-function display
                           +agent-acp--origin-window origin-window
                           +agent-render-policy policy
@@ -2690,7 +2703,7 @@ replayed.  A failed start retains unsent text in an explicit recovery buffer."
              (display-buffer (current-buffer)))))
        (signal (car err) (cdr err))))))
 
-(cl-defun +agent-acp-start (&key config directory session-id fork-session-id focus
+(cl-defun +agent-acp-start (&key config directory session-id fork-session-id focus background
                                       (origin 'manual) (render-policy 'visible)
                                       display-function strict-restore choose-saved)
   "Start CONFIG in DIRECTORY, optionally resuming or forking a native session.
@@ -2738,6 +2751,7 @@ visible-only render policy.  Neither setting affects ACP transport or events."
                       +agent-acp-strict-restore (or strict-restore choose-saved)
                       +agent-acp--choose-saved choose-saved
                       +agent-acp-session-origin origin
+                      +agent-acp-background background
                       +agent-acp-display-buffer-function display-function
                       +agent-acp-session-root
                       (file-name-as-directory (expand-file-name directory)))
@@ -3174,6 +3188,31 @@ Used when a session is mid-turn: upstream sends the queued prompt itself once
 the running turn finishes."
   (with-current-buffer buffer
     (agent-shell--prompt-queue-enqueue :prompt text)))
+
+(defvar +agent-acp-separate-prompt-functions nil
+  "Predicates called with BUFFER and queue TEXT that requires its own turn.")
+(defvar +agent-acp-dispatch-prompt-functions nil
+  "Handlers called with BUFFER and its head TEXT; non-nil owns dispatch.")
+
+(defun +agent-acp-pop-prompt (buffer text)
+  "Remove exactly TEXT from BUFFER's queue head before structured dispatch."
+  (with-current-buffer buffer
+    (unless (eq text (car (map-elt agent-shell--state :pending-prompts)))
+      (user-error "Queued task no longer owns the next prompt"))
+    (map-put! agent-shell--state :pending-prompts (cdr (map-elt agent-shell--state :pending-prompts)))))
+
+(defun +agent-acp--queue-dispatch-a (original &rest args)
+  "Preserve task identity when ORIGINAL drains the native prompt queue."
+  (let* ((pending (map-elt agent-shell--state :pending-prompts))
+         (separate (seq-some
+                    (lambda (text)
+                      (run-hook-with-args-until-success
+                       '+agent-acp-separate-prompt-functions (current-buffer) text)) pending))
+         (agent-shell-prompt-queue-merge (and agent-shell-prompt-queue-merge (not separate))))
+    (unless (and pending (run-hook-with-args-until-success
+                         '+agent-acp-dispatch-prompt-functions (current-buffer) (car pending)))
+      (apply original args))))
+(advice-add 'agent-shell--prompt-queue-process-next :around #'+agent-acp--queue-dispatch-a)
 
 (defun +agent-acp--queue-changed-a (&rest _)
   "Report a queue length change, which agent-shell keeps to itself."

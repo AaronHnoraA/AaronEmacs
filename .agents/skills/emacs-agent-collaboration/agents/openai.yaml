@@ -1,0 +1,4 @@
+interface:
+  display_name: "Emacs Agent 协作"
+  short_description: "由全局 Pi 通过 Emacs 派工、接收交付并协调 OCR 与数学答疑"
+  default_prompt: "使用 $emacs-agent-collaboration，通过 Emacs 安排后台 Agent 分工，自动交接结果并完成核验。"

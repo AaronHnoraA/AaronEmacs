@@ -1,7 +1,7 @@
 # 用 Pi 协作
 
-一个项目里可以有多个 Agent。它们活不长，也互相不认识；项目 Pi 活得长，掌握项目全局。这份
-指南讲日常怎么用：Agent 怎样找 Pi，事情怎样留到以后做，任务怎样落盘。
+Pi 是 Emacs 的全局管家，可以跨项目安排后台执行 Agent；项目 Pi 保留各项目自己的管理上下文。
+这份指南讲 Agent 怎样交接结果、找到 Pi、把事情留到以后和保存任务状态。
 
 设计与契约在 [Pi 会话](../design/pi-sessions.md)、[Pi 的观察项](../design/pi-watches.md)和
 [项目任务图谱](../noema/design/project-graph.md)。
@@ -18,6 +18,17 @@
 pack 是协议和契约，随 Skill 目录披露给 Agent，用到才读。
 
 ## 日常
+
+全局 Pi 用 `C-c A E`、`/butler` 或 `M-x noema-pi-emacs-open`。可以直接告诉它
+“安排一个 OCR Agent 读取这段笔记，再让答疑 Agent 检查推导”。它通过 Emacs 的
+`spawn` 创建后台 worker，通过 `notify` 接收结果。你不需要取图、复制回复或管理 session ID。
+后台 worker 保留可手动打开的真实 buffer；`C-c A B`／`agent-open-worker` 打开它，
+Agent Manager 统一显示状态。`C-c A b`／`agent-spawn` 也可直接派后台任务。
+
+协作 skill 是 `emacs-agent-collaboration`：按任务提供输入、写入范围、交付文件和
+核验要求；OCR 与数学答疑的交接有独立参考。Pi 从 Skill 目录按需读取，Codex 可用
+`$emacs-agent-collaboration`。遗失任务 ID 时用 `emacs:agent tasks` 按项目查回，
+再读 `result`，不必翻整段聊天或重新派发。
 
 项目 Pi 是手动打开的：`M-x pi`、`C-c A P`，或在聊天里输入 `/pi`。打开它，观察项才开始运行；
 关掉它，一切停下，观察项等下次打开。

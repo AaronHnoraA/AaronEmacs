@@ -32,7 +32,7 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L lisp/core/aaron-ui -l lisp/core/aaron-ui
         health health-startup health-byte health-native core-test ui-test activity-test performance-test ui-tokens audit-ui-tokens \
         remote-test remote-source-test remote-transfer-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e remote-cleanup-live-smoke remote-route-benchmark remote-local-visit-benchmark remote-ssh-visit-benchmark remote-ssh-write-benchmark remote-directory-benchmark \
 		lsp-test lsp-protocol-rebuild writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke lsp-remote-tty-smoke lsp-remote-gui-smoke lsp-gui-company-popup lsp-key-to-screen lsp-existing-file-live-probe remote-task-live-smoke remote-task-disconnect-smoke remote-terminal-live-smoke \
-        jupyter-test research-test pi-setup pi-live-smoke pi-idle-benchmark agenda-test agenda-apple-test project-workflow-test \
+        jupyter-test research-test agent-delegation-test pi-setup pi-live-smoke pi-idle-benchmark agenda-test agenda-apple-test project-workflow-test \
         jupyter-linux-disconnect-live-smoke \
         noema-help noema-setup noema-build noema-install noema-test noema-kernel-build noema-kernel-install \
         noema-server-config-init noema-server-build noema-server-start noema-server-deploy noema-disk-audit noema-clean \
@@ -428,6 +428,9 @@ terminal-remote-gui-live:
 
 terminal-ui-regression-live:
 	sh site-lisp/portal/test/gui-ert.sh --init-directory=$(CURDIR) -l $(CURDIR)/early-init.el -l $(CURDIR)/init.el -l $(CURDIR)/test/terminal-ui-regression-live.el --eval '(portal-gui-ert-start "^terminal-ui-regression-")'
+
+agent-delegation-test:
+	$(BATCH) -l test/agent-delegation-tests.el --eval '(ert-run-tests-batch-and-exit "agent-delegation-")'
 
 agent-remote-test:
 	$(BATCH) -l test/agent-remote-performance-tests.el -f ert-run-tests-batch-and-exit

@@ -77,6 +77,7 @@ createInterface({input:process.stdin}).on('line', line => {
           });break;
         }
         if(prompt==='crash'){process.exit(23);break;}
+        if(prompt==='rpc-fail'){active.delete(sid);send({id:msg.id,error:{code:-32000,message:'Fixture task failed'}});break;}
         if(prompt==='hold'){text(sid,'Working; waiting for cancellation.\n');break;}
         if(prompt==='refuse'){text(sid,'Refusing.\n');finish(sid,'refusal');break;}
         if(prompt==='crash-later'){text(sid,'Working; the process will exit.\n');setTimeout(()=>process.exit(24),150);break;}

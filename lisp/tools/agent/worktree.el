@@ -245,7 +245,7 @@ counterpart of the Project workspace."
   (let ((root (+agent-acp-project-root)))
     (cons root (+agent-workspace root))))
 
-(cl-defun +agent-worktree--start (agent name &key focus group)
+(cl-defun +agent-worktree--start (agent name &key focus group background)
   "Start AGENT in a new worktree NAME of the current Project; return a plist.
 FOCUS shows the session.  GROUP, a slug, records the worktree as one attempt
 of that parallel group.  The plist is the worktree's plus :buffer."
@@ -262,11 +262,11 @@ of that parallel group.  The plist is the worktree's plus :buffer."
     (when group
       (+agent-worktree--set worktree "noemaGroup" group))
     (let ((buffer (+agent-acp-start
-                   :config config :origin 'manual :focus focus
+                   :config config :origin (if background 'subagent 'manual) :focus focus :background background
                    :directory (file-name-as-directory
                                (expand-file-name offset (plist-get worktree :path))))))
       (+agent-acp-adopt
-       buffer :agent agent :origin 'manual :root root
+       buffer :agent agent :origin (if background 'subagent 'manual) :root root
        :name (+agent-acp--unique-name
               (format "worktree/%s" (substring branch (length +agent-worktree-branch-prefix)))
               root))

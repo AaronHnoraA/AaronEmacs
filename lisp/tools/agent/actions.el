@@ -51,6 +51,10 @@
      ("U" "Usage" +agent/usage :slash "usage" :doc "Show what sessions cost")
      ("u" "Detailed usage" +agent-menu-usage :if +agent-menu--session-p)
      ("n" "New session…" +agent-menu-new :slash "new" :doc "Start another session in this management scope")
+     ("b" "Delegate in background…" +agent/spawn :slash "delegate"
+      :doc "Start a background worker for a task")
+     ("B" "Open background worker…" +agent/open-worker :slash "workers"
+      :doc "Open an existing background worker")
      ("w" "New in a worktree…" +agent-worktree-start)
      ("N" "Parallel attempts…" +agent-worktree-parallel)
      ("A" "Attempts board" +agent-worktree-board)
@@ -58,6 +62,7 @@
     ("Noema"
      ("W" "Noema" noema)
      ("P" "Pi" noema-pi-open :slash "pi" :doc "Open this project's Pi")
+     ("E" "Global Pi" noema-pi-emacs-open :slash "butler" :doc "Open the global Emacs Pi")
      ("D" "Pi doctor" noema-pi-doctor :slash "doctor" :doc "Check Pi's setup")
      ("I" "Research attention" noema-research-attention)
      ("O" "Orchestration" noema-orchestration)
@@ -94,6 +99,10 @@ a local command typed at the agent's input.")
   "The actions under `c', which all hand material to an agent.")
 
 (autoload '+agent-session-menu "tools/agent/menu" nil t)
+(autoload '+agent/spawn "tools/agent/delegate" nil t)
+(autoload '+agent/open-worker "tools/agent/delegate" nil t)
+(autoload 'agent-spawn "tools/agent/delegate" nil t)
+(autoload 'agent-open-worker "tools/agent/delegate" nil t)
 
 (defun +agent-actions--rows (table)
   "Return every action row of TABLE."

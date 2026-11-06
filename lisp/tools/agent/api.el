@@ -3,7 +3,7 @@
 ;;; Commentary:
 ;; No registry or execution state lives here.  The Noema gateway exposes this
 ;; adapter to Pi through the same progressively disclosed API as editor actions.
-;; Contract: docs/design/agent-management.md C45, C50.
+;; Contract: docs/design/agent-management.md C45, C50, C60–C61.
 
 ;;; Code:
 (require 'cl-lib)
@@ -11,6 +11,7 @@
 (require 'seq)
 (require 'subr-x)
 (require 'tools/agent/acp)
+(require 'tools/agent/requests)
 (declare-function +agent-context--reference "tools/agent/context" (file root &optional buffer region session))
 (declare-function +agent-context-content-blocks "tools/agent/context" (prompt references))
 (declare-function +agent-context--deliver "tools/agent/context" (buffer blocks &optional instructions no-focus))
@@ -43,7 +44,9 @@
 (defun +agent-api--describe (snapshot)
   "Return a JSON description of SNAPSHOT's exact physical buffer."
   (append `((buffer . ,(buffer-name (plist-get snapshot :buffer)))
-            (busy . ,(if (plist-get snapshot :busy) t :json-false)))
+            (busy . ,(if (plist-get snapshot :busy) t :json-false))
+            (background . ,(if (plist-get snapshot :background) t :json-false))
+            (parent . ,(plist-get snapshot :parent)))
           (+agent-api--public snapshot)))
 
 (defun +agent-api--facts (snapshot)
@@ -104,20 +107,45 @@ as zero."
   (remote-require-on-client 'tools/agent/worktree)
   (let* ((default-directory root)
          (started (+agent-worktree--start agent (+agent-api--string body "worktree")
+                                          :background (eq (+agent-api--value body "background") t)
                                           :group (+agent-api--string body "group"))))
     `((ok . t) (accepted . t)
       (worktree . ((branch . ,(plist-get started :branch))
                    (path . ,(plist-get started :path))))
       (session . ,(+agent-api--describe (+agent-session-snapshot (plist-get started :buffer)))))))
 
-(defun +agent-api--create-in-workspace (root agent directory)
+(defun +agent-api--tasks (body offset limit)
+  "List bounded task receipts under BODY's root and target fences."
+  (unless (and (natnump offset) (integerp limit) (<= 1 limit 100))
+    (user-error "offset must be >= 0 and limit must be 1..100"))
+  (let* ((records
+          (seq-filter
+           (lambda (r)
+             (let* ((buffer (plist-get r :buffer))
+                    (scope (plist-get r :scope)))
+               (and (+agent-api--matches-p scope body)
+                    (not (+agent-session-private-p
+                          (or (and (buffer-live-p buffer) (+agent-session-snapshot buffer)) scope))))))
+           +agent-requests--records))
+         (total (length records)))
+    `((ok . t) (total . ,total)
+      (tasks . ,(vconcat (mapcar #'+agent-requests-summary
+                                 (seq-subseq records (min offset total) (min total (+ offset limit))))))
+      (nextOffset . ,(when (< (+ offset limit) total) (+ offset limit))))))
+
+(defun +agent-api--create-in-workspace (root agent directory &optional body)
   "Start AGENT in ROOT's workspace DIRECTORY, without a prompt."
   (let* (;; Provider packages are Emacs client code, even for remote work.
          (config (let ((default-directory temporary-file-directory))
                    (+agent-acp-config-for agent))))
     (unless config (user-error "Agent %s has no available ACP configuration" agent))
-    (let ((buffer (+agent-acp-start :config config :directory directory :focus nil :origin 'manual)))
-      (+agent-acp-adopt buffer :agent agent :origin 'manual :root root)
+    (let* ((name (+agent-api--string body "name"))
+           (background (eq (+agent-api--value body "background") t))
+           (origin (if background 'subagent 'manual))
+           (buffer (+agent-acp-start :config config :directory directory :focus nil
+                                     :background background :origin origin)))
+      (+agent-acp-adopt buffer :agent agent :origin origin :root root
+                        :name (and name (+agent-acp--unique-name name root)))
       `((ok . t) (accepted . t) (session . ,(+agent-api--describe (+agent-session-snapshot buffer)))))))
 
 (defun +agent-api--create (body)
@@ -134,7 +162,7 @@ as zero."
         (user-error "Project workspace does not belong to the requested execution target"))
       (if (+agent-api--string body "worktree")
           (+agent-api--create-in-worktree root agent body)
-        (+agent-api--create-in-workspace root agent directory)))))
+        (+agent-api--create-in-workspace root agent directory body)))))
 
 (defun +agent-api-identified (body)
   "Return BODY's session row, proven by its buffer and native ID."
@@ -149,15 +177,11 @@ as zero."
       (user-error "Session identity no longer matches; list sessions again"))
     snapshot))
 
-(defun +agent-api--send (snapshot body)
-  "Deliver BODY's prompt and file references to SNAPSHOT's session."
+(defun +agent-api--content (snapshot body)
+  "Validate BODY and build references for SNAPSHOT without submitting work."
   (let ((buffer (plist-get snapshot :buffer))
         (prompt (+agent-api--string body "prompt"))
         (files (+agent-api--value body "files")))
-    (unless (and (eq (plist-get snapshot :process-state) 'live)
-                 (not (plist-get snapshot :retired))
-                 (eq (+agent-acp-state-value buffer '(:init-finished)) t))
-      (user-error "Session is not ready; explicitly resume it before sending"))
     (unless (and prompt (not (string-empty-p (string-trim prompt))))
       (user-error "send requires a prompt"))
     (unless (or (null files) (and (sequencep files) (not (stringp files))))
@@ -169,7 +193,64 @@ as zero."
                        (user-error "Unreadable file reference: %s" file))
                      (+agent-context--reference file (plist-get snapshot :root) nil nil buffer))
                    (append files nil))))
-      (+agent-context--deliver buffer (+agent-context-content-blocks prompt references) nil t))))
+      (+agent-context-content-blocks prompt references))))
+
+(defun +agent-api--recipient (body)
+  "Validate BODY's optional notification recipient before dispatch."
+  (when-let* ((given (+agent-api--value body "notify"))
+              ((not (memq given '(nil :null :json-false :false)))))
+    (let* ((snapshot (+agent-api-identified given))
+           (buffer (plist-get snapshot :buffer)))
+      (unless (eq (plist-get snapshot :process-state) 'live)
+        (user-error "Notification recipient is not connected"))
+      (list :buffer buffer :native (plist-get snapshot :native-session-id)
+            :client (+agent-acp-state-value buffer '(:client))))))
+
+(defun +agent-api--send (snapshot body)
+  "Deliver BODY and return a receipt for this exact task."
+  (let ((buffer (plist-get snapshot :buffer)))
+    (unless (and (eq (plist-get snapshot :process-state) 'live)
+                 (not (plist-get snapshot :retired))
+                 (eq (+agent-acp-state-value buffer '(:init-finished)) t))
+      (user-error "Session is not ready; explicitly resume it before sending"))
+    (+agent-requests-submit buffer (+agent-api--content snapshot body) (+agent-api--recipient body))))
+
+(defun +agent-api--spawn (body)
+  "Create a background child and submit its task after ACP initialization."
+  (+agent-requests-check-capacity)
+  (let* ((notify (+agent-api--recipient body))
+         (prompt (+agent-api--string body "prompt"))
+         (files (+agent-api--value body "files")))
+    (unless (and prompt (not (string-empty-p (string-trim prompt))))
+      (user-error "spawn requires a prompt"))
+    (unless (or (null files) (and (sequencep files) (not (stringp files))))
+      (user-error "files must be an array of absolute saved file references"))
+    (dolist (file (append files nil))
+      (unless (and (stringp file) (file-name-absolute-p file) (file-readable-p file))
+        (user-error "Unreadable file reference: %s" file)))
+    (let* ((copy (if (hash-table-p body) (copy-hash-table body) (copy-tree body)))
+           (_ (if (hash-table-p copy) (puthash "background" t copy)
+                (push '(background . t) copy)))
+           (response (+agent-api--create copy))
+           (buffer (get-buffer (alist-get 'buffer (alist-get 'session response))))
+           record)
+      (with-current-buffer buffer
+        (setq-local +agent-acp-background t
+                    +agent-acp-parent-session
+                    (and notify `((buffer . ,(buffer-name (plist-get notify :buffer)))
+                                  (nativeSessionId . ,(plist-get notify :native))))))
+      (condition-case err
+          (setq record (+agent-requests-submit
+                        buffer (+agent-api--content (+agent-session-snapshot buffer) body) notify))
+        (error
+         ;; This newly created client has received no task.  Do not leak it
+         ;; when reference construction or a reentrant capacity check fails.
+         (+agent-acp-kill buffer)
+         (signal (car err) (cdr err))))
+      (append `((requestId . ,(plist-get record :id))
+                (state . ,(symbol-name (plist-get record :status))))
+              (when (alist-get 'worktree response) (list (assq 'worktree response)))
+              (+agent-api--acknowledge buffer "spawn")))))
 
 (defun +agent-api--acknowledge (buffer action &optional snapshot)
   "Return ACTION's reply with BUFFER's resulting state.
@@ -182,24 +263,31 @@ Read-only status may reuse its already validated SNAPSHOT."
 ;;;###autoload
 (defun +agent/api (body)
   "Query or explicitly operate on existing Agent sessions with JSON BODY.
-All operations other than list/create require a buffer and its native ID.
-Sending is asynchronous; status and bounded read report actual progress."
+Existing-session operations require a buffer and native ID.  Spawn returns a
+requestId before initialization; result uses that receipt even after exit."
   (let* ((action (or (+agent-api--string body "action") "list"))
          (offset (or (+agent-api--value body "offset") 0))
-         (limit (or (+agent-api--value body "limit") (if (equal action "read") 12000 20))))
+         (limit (or (+agent-api--value body "limit") (if (member action '("read" "result")) 12000 20))))
     (when-let* ((root (+agent-api--string body "root")))
       (unless (file-name-absolute-p root) (user-error "root must be absolute")))
     (pcase action
       ("list" (+agent-api--list body offset limit))
+      ("tasks" (+agent-api--tasks body offset limit))
       ("create" (+agent-api--create body))
+      ("spawn" (+agent-api--spawn body))
+      ("result" (+agent-requests-result (+agent-api--string body "requestId") offset limit))
       ((or "status" "send" "read" "stop" "show")
        (let* ((snapshot (+agent-api-identified body))
               (buffer (plist-get snapshot :buffer)))
          (pcase action
+           ("send"
+            (let ((record (+agent-api--send snapshot body)))
+              (append `((requestId . ,(plist-get record :id))
+                        (state . ,(symbol-name (plist-get record :status))))
+                      (+agent-api--acknowledge buffer action))))
            ("read" (append `((ok . t) (session . ,(+agent-api--describe snapshot)))
                            (+agent-acp-read-transcript buffer offset limit)))
            (_ (pcase action
-                ("send" (+agent-api--send snapshot body))
                 ("stop" (+agent-acp-stop buffer))
                 ("show" (+agent-acp-show-buffer buffer)))
               (+agent-api--acknowledge buffer action (and (equal action "status") snapshot))))))

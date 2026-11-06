@@ -549,10 +549,17 @@
      (encode-coding-string (json-serialize request) 'utf-8) t))
    :object-type 'alist :array-type 'list))
 
+(defun +noema-agent-bridge-test--execution (id directory)
+  "Make an initialized legacy bridge target with a live client."
+  (let ((buffer (+agent-shell-test--execution id directory)))
+    (with-current-buffer buffer
+      (setf (map-elt agent-shell--state :init-finished) t))
+    buffer))
+
 (ert-deftest noema-agent-bridge-lists-only-live-target-scoped-sessions ()
   (let* ((+noema-agent-bridge-enabled t)
-         (live (+agent-shell-test--execution "task-a" "/tmp/"))
-         (dead (+agent-shell-test--execution "task-b" "/tmp/")))
+         (live (+noema-agent-bridge-test--execution "task-a" "/tmp/"))
+         (dead (+noema-agent-bridge-test--execution "task-b" "/tmp/")))
     (unwind-protect
         (progn
           (delete-process (+agent-acp-state-value dead '(:client :process)))
@@ -568,7 +575,7 @@
 
 (ert-deftest noema-agent-bridge-sends-to-exact-session-and-queues-when-busy ()
   (let* ((+noema-agent-bridge-enabled t)
-         (buffer (+agent-shell-test--execution "task-a" "/tmp/"))
+         (buffer (+noema-agent-bridge-test--execution "task-a" "/tmp/"))
          (request `((action . "send") (sessionId . "task-a")
                     (agent . "codex")
                     (workspace . ,(+agent-shell--session-context "/tmp/"))
@@ -576,7 +583,10 @@
          queued submitted first queued-response)
     (unwind-protect
         (cl-letf (((symbol-function '+agent-acp-enqueue)
-                   (lambda (_buffer text) (setq queued text)))
+                   (lambda (target text)
+                     (setq queued text)
+                     (with-current-buffer target
+                       (setf (map-elt agent-shell--state :pending-prompts) (list text)))))
                   ((symbol-function '+agent-acp-prompt)
                    (lambda (&rest args) (setq submitted args)))
                   ((symbol-function 'agent-shell--start)
@@ -586,7 +596,7 @@
           (should (equal (map-elt (car (plist-get submitted :content)) 'text)
                          "Mobile update"))
           (with-current-buffer buffer
-            (+noema-agent-bridge--event
+            (+agent-requests--event
              '((:event . agent-message-chunk)
                (:data . ((:text-chunk . "Received"))))))
           (should (equal (alist-get 'text
@@ -609,13 +619,12 @@
           (should (equal (alist-get 'state queued-response) "queued"))
           (should (equal queued "Mobile update"))
           (with-current-buffer buffer
-            (+noema-agent-bridge--event
-             '((:event . input-submitted)
-               (:data . ((:prompt . "Mobile update")))))
-            (+noema-agent-bridge--event
+            (setq-local shell-maker--busy nil)
+            (+agent-requests--dispatch-head buffer queued)
+            (+agent-requests--event
              '((:event . agent-message-chunk)
                (:data . ((:text-chunk . "Queued reply")))))
-            (+noema-agent-bridge--event '((:event . turn-complete))))
+            (funcall (plist-get submitted :on-success) '((stopReason . "end_turn"))))
           (let ((reply (+noema-agent-bridge-test--request
                         `((action . "read") (sessionId . "task-a")
                           (agent . "codex")
@@ -633,7 +642,7 @@
       (+agent-shell-test--close buffer))))
 
 (ert-deftest noema-agent-bridge-requires-enabling-and-explicit-interrupt ()
-  (let* ((buffer (+agent-shell-test--execution "task-a" "/tmp/"))
+  (let* ((buffer (+noema-agent-bridge-test--execution "task-a" "/tmp/"))
          (request `((action . "interrupt") (sessionId . "task-a")
                     (agent . "codex")
                     (workspace . ,(+agent-shell--session-context "/tmp/"))))
@@ -654,9 +663,28 @@
               (should (eq stopped buffer)))))
       (+agent-shell-test--close buffer))))
 
+(ert-deftest noema-agent-bridge-keeps-native-workspaces-and-full-bounded-reads ()
+  (let* ((+noema-agent-bridge-enabled t)
+         (+agent-requests--records nil)
+         (buffer (+noema-agent-bridge-test--execution "legacy-long" "/tmp/"))
+         (identity '((sessionId . "legacy-long") (agent . "codex") (workspace . "/tmp/")))
+         (text (make-string 70000 ?x)) submitted)
+    (unwind-protect
+        (cl-letf (((symbol-function '+agent-acp-prompt) (lambda (&rest args) (setq submitted args))))
+          (let ((reply (+noema-agent-bridge-test--request `((action . "send") (message . "read pages") ,@identity))))
+            (should (equal (alist-get 'state reply) "submitted"))
+            (with-current-buffer buffer
+              (+agent-requests--event `((:event . agent-message-chunk) (:data . ((:text-chunk . ,text))))))
+            (funcall (plist-get submitted :on-success) '((stopReason . "end_turn")))
+            (let ((result (+noema-agent-bridge-test--request
+                           `((action . "read") (requestId . ,(alist-get 'requestId reply)) ,@identity))))
+              (should (equal (alist-get 'text result) text))
+              (should (equal (alist-get 'state result) "completed")))))
+      (+agent-shell-test--close buffer))))
+
 (ert-deftest noema-agent-bridge-does-not-queue-behind-structured-run ()
   (let* ((+noema-agent-bridge-enabled t)
-         (buffer (+agent-shell-test--execution "task-a" "/tmp/"))
+         (buffer (+noema-agent-bridge-test--execution "task-a" "/tmp/"))
          (request `((action . "send") (sessionId . "task-a")
                     (agent . "codex")
                     (workspace . ,(+agent-shell--session-context "/tmp/"))

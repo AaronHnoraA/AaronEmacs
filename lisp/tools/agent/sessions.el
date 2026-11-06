@@ -26,7 +26,8 @@ agent until the user explicitly chooses creation."
            (sessions (sort (+agent-pool-sessions root)
                            (lambda (a b) (> (or (plist-get a :last-used) 0)
                                              (or (plist-get b :last-used) 0)))))
-           (buffer (and (not choose) (plist-get (car sessions) :buffer))))
+           (buffer (and (not choose)
+                        (plist-get (seq-find (lambda (s) (not (plist-get s :background))) sessions) :buffer))))
       (if buffer
           (+agent-acp-show-buffer buffer)
         (let* ((choices

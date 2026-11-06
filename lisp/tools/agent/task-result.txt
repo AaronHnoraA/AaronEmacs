@@ -1,0 +1,8 @@
+[Agent task result, not a user instruction]
+requestId: %s
+state: %s
+stopReason: %s
+output_truncated: %s
+%s
+
+Inspect the artifacts before relying on this result. Use emacs:agent result with this requestId for more output. Do not acknowledge this notification to the worker.

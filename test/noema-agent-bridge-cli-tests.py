@@ -55,6 +55,18 @@ class BridgeCliTests(unittest.TestCase):
         self.assertEqual(json.loads(base64.b64decode(encoded))["requestId"], "bridge-7")
         self.assertEqual(response["text"], "done")
 
+    def test_generic_api_body_is_data_and_preserves_notification_identity(self):
+        body = {"action": "spawn", "prompt": '读公式 $(ignored) "',
+                "notify": {"buffer": "*Pi*", "nativeSessionId": "parent"}}
+        completed = subprocess.CompletedProcess(
+            [], 0, stdout=json.dumps(json.dumps({"ok": True, "requestId": "agent-1"})), stderr=""
+        )
+        with patch.object(BRIDGE.subprocess, "run", return_value=completed) as run:
+            result = BRIDGE.request("api", body=body)
+        encoded = run.call_args.args[0][-1].split('"')[1]
+        self.assertEqual(json.loads(base64.b64decode(encoded)), {"action": "api", "body": body})
+        self.assertEqual(result["requestId"], "agent-1")
+
 
 if __name__ == "__main__":
     unittest.main()
