@@ -915,6 +915,7 @@ The window manager places the frame; this only opens it."
   ;; Command uses Meta in this Emacs, so use the same commands as other buffers.
   (dolist (entry `(("C-x" . ,ctl-x-map)
                    ("s-t" . +portal/terminal-selector)
+                   ("s-A" . +agent/switcher)
                    ("s-T" . +agent/switcher)
                    ("C-c e" . +portal-popup/toggle)
                    ("C-c C-e" . +portal-popup/toggle)
