@@ -1615,7 +1615,7 @@ machine's HOME, because agent-shell's caches expand `~' there."
                            '("shared" "own" "outer")))
             (should-not (+agent-acp-saved-home got "own"))
             (should (equal (+agent-acp-saved-home got "outer") outer))
-            (should (string-suffix-p (abbreviate-file-name outer)
+            (should (string-suffix-p (concat (file-name-nondirectory (directory-file-name outer)) "/")
                                      (caar (+agent-acp-saved-session-choices (last got)))))
             ;; A repository nobody encloses asks exactly once.
             (setq listed nil)
@@ -1623,6 +1623,48 @@ machine's HOME, because agent-shell's caches expand `~' there."
             (should (equal listed (list outer)))
             (should-not (+agent-acp-saved-home got "outer"))))
       (delete-directory outer t))))
+
+(ert-deftest agent-c55-resume-lists-the-session-s-project-root ()
+  "A session working below its project (a vault) still sees the project's conversations."
+  (let* ((root (file-name-as-directory (make-temp-file "agent-c55-root-" t)))
+         (work (file-name-as-directory (make-temp-file "agent-c55-work-" t)))
+         (buffer (generate-new-buffer " *c55-root*"))
+         listed got)
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer (setq-local +agent-acp-session-root root))
+          (cl-letf (((symbol-function 'agent-shell--resolve-path) #'identity)
+                    ((symbol-function 'agent-shell--list-sessions)
+                     (lambda (&rest args)
+                       (let ((cwd (plist-get args :cwd)))
+                         (push cwd listed)
+                         (funcall (plist-get args :on-success)
+                                  (if (equal cwd work)
+                                      '(((sessionId . "current")))
+                                    '(((sessionId . "current")) ((sessionId . "project")))))))))
+            (+agent-acp-list-saved nil work buffer (lambda (rows) (setq got rows)) #'ignore)
+            (should (equal (reverse listed) (list work root)))
+            (should (equal (mapcar (lambda (row) (map-elt row 'sessionId)) got)
+                           '("current" "project")))
+            (should (equal (+agent-acp-saved-home got "project") root))
+            ;; The root is the folder itself: asked once, not twice.
+            (setq listed nil)
+            (+agent-acp-list-saved nil root buffer #'ignore #'ignore)
+            (should (equal listed (list root)))))
+      (kill-buffer buffer)
+      (delete-directory root t)
+      (delete-directory work t))))
+
+(ert-deftest agent-c55-labels-name-a-short-id-and-an-open-session ()
+  (cl-letf (((symbol-function 'agent-shell--session-title) (lambda (s) (map-elt s 'title)))
+            ((symbol-function 'agent-shell--format-session-date) (lambda (_) "Today, 21:32"))
+            ((symbol-function '+agent-acp--session-open-p) (lambda (id) (equal id "854bf7e2-aaaa"))))
+    (let ((choices (+agent-acp-saved-session-choices
+                    '(((sessionId . "854bf7e2-aaaa") (title . "连接iPad"))
+                      ((sessionId . "11112222-bbbb") (title . "Other"))))))
+      (should (equal (caar choices) "连接iPad  ·  Today, 21:32  ·  854bf7e2  ● open"))
+      (should (equal (cdar choices) "854bf7e2-aaaa"))
+      (should-not (string-match-p "open" (car (nth 1 choices)))))))
 
 (ert-deftest agent-c55-outer-failure-keeps-the-folder-s-own-list ()
   (let* ((outer (file-name-as-directory (make-temp-file "agent-c55-" t)))

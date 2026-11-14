@@ -773,7 +773,10 @@ when present; the exact Codex message is the isolated compatibility fallback."
                           (buffer-local-value '+agent-acp-session-root source))
                      directory)))
       (unless choices
-        (user-error "This agent has no other saved sessions in the current workspace"))
+        (user-error "No other saved conversations in %s"
+                    (mapconcat #'abbreviate-file-name
+                               (cons directory (+agent-acp--saved-homes directory source))
+                               ", ")))
       (let* ((id (+agent-acp-read-saved "Resume session: " choices))
              (home (+agent-acp-saved-home sessions id))
              (live (+agent-shell--find-execution id config (or home directory))))

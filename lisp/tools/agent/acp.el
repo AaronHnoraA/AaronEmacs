@@ -9,6 +9,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'map)
 (require 'json)
 (require 'project)
@@ -125,18 +126,30 @@ this hook when a full snapshot is unnecessary for the privacy decision.")
 (defvar-local +agent-acp--choose-saved nil
   "Non-nil makes this starting client ask which saved conversation to restore.")
 
+(defun +agent-acp--session-open-p (id)
+  "Return non-nil when a live agent buffer already shows native session ID."
+  (seq-some (lambda (buffer)
+              (and (+agent-acp-agent-buffer-p buffer)
+                   (equal id (+agent-acp-state-value buffer '(:session :id)))
+                   (not (+agent-acp-client-exited-p buffer))))
+            (buffer-list)))
+
 (defun +agent-acp-saved-session-choices (sessions &optional exclude)
-  "Return (LABEL . ID) for provider-listed SESSIONS, newest first, except EXCLUDE."
+  "Return (LABEL . ID) for provider-listed SESSIONS, newest first, except EXCLUDE.
+A label reads TITLE · WHEN · short ID, then ● open when another session shows
+it, then the name of the folder it belongs to when that is not this one."
   (mapcar (lambda (session)
             (let ((id (map-elt session 'sessionId)))
-              (cons (format "%s  %s · %s%s"
+              (cons (format "%s  ·  %s  ·  %s%s%s"
                             (agent-shell--session-title session)
                             (agent-shell--format-session-date
                              (or (map-elt session 'updatedAt)
                                  (map-elt session 'createdAt) ""))
-                            id
+                            (substring id 0 (min 8 (length id)))
+                            (if (+agent-acp--session-open-p id) "  ● open" "")
                             (if-let* ((home (map-elt session '+agent-acp-home)))
-                                (format " · %s" (abbreviate-file-name home))
+                                (format "  ·  %s/" (file-name-nondirectory
+                                                    (directory-file-name home)))
                               ""))
                     id)))
           (seq-filter (lambda (session)
@@ -152,26 +165,48 @@ A repository nested in another shares that folder's conversations."
     (locate-dominating-file
      (file-name-directory (directory-file-name (expand-file-name own))) ".git")))
 
+(defun +agent-acp--saved-homes (directory buffer)
+  "Return the folders besides DIRECTORY whose conversations BUFFER may resume.
+They are BUFFER's project root, which a session started in a vault or a
+workspace below it does not share, and the project enclosing DIRECTORY's own
+repository; each once, and never DIRECTORY itself."
+  (let* ((own (file-name-as-directory (expand-file-name directory)))
+         (root (and (buffer-live-p buffer)
+                    (buffer-local-value '+agent-acp-session-root buffer)))
+         (outer (+agent-acp--outer-project directory))
+         homes)
+    (dolist (home (list root outer))
+      (when (stringp home)
+        (let ((home (file-name-as-directory (expand-file-name home))))
+          (unless (or (equal home own) (member home homes))
+            (push home homes)))))
+    (nreverse homes)))
+
 (defun +agent-acp-list-saved (state directory buffer on-success on-failure)
-  "List saved conversations of DIRECTORY and of the project enclosing it (C55).
-The provider's own session/list answers both.  One from the enclosing project
-carries `+agent-acp-home', where it must be resumed.  ON-SUCCESS gets the list;
-ON-FAILURE gets (ERROR RAW) when DIRECTORY's own listing fails.  A failed outer
-listing only omits those conversations."
-  (let ((outer (+agent-acp--outer-project directory)))
+  "List saved conversations of DIRECTORY and of the folders it belongs to (C55).
+The provider's own session/list answers each: DIRECTORY, then BUFFER's project
+root and the project enclosing DIRECTORY's repository (`+agent-acp--saved-homes').
+A conversation from one of those carries `+agent-acp-home', where it must be
+resumed.  ON-SUCCESS gets the list; ON-FAILURE gets (ERROR RAW) when
+DIRECTORY's own listing fails.  A failed extra listing only omits its rows."
+  (let ((homes (+agent-acp--saved-homes directory buffer)))
     (agent-shell--list-sessions
      :state state :cwd (agent-shell--resolve-path directory) :buffer buffer
      :on-failure on-failure
      :on-success
      (lambda (own)
-       (if (null outer)
-           (funcall on-success own)
-         (agent-shell--list-sessions
-          :state state :cwd (agent-shell--resolve-path outer) :buffer buffer
-          :on-failure (lambda (_error _raw) (funcall on-success own))
-          :on-success
-          (lambda (sessions)
-            (funcall on-success (+agent-acp--merge-saved own sessions outer)))))))))
+       (cl-labels ((next (rows remaining)
+                     (if (null remaining)
+                         (funcall on-success rows)
+                       (let ((home (car remaining)))
+                         (agent-shell--list-sessions
+                          :state state :cwd (agent-shell--resolve-path home) :buffer buffer
+                          :on-failure (lambda (_error _raw) (next rows (cdr remaining)))
+                          :on-success
+                          (lambda (sessions)
+                            (next (+agent-acp--merge-saved rows sessions home)
+                                  (cdr remaining))))))))
+         (next own homes))))))
 
 (defun +agent-acp--merge-saved (own sessions outer)
   "Return OWN followed by those of SESSIONS it lacks, marked as living in OUTER."
@@ -226,7 +261,12 @@ Without this a completion UI sorts them by length and history."
              (home (and id (+agent-acp-saved-home sessions id)))
              (live (and id (+agent-acp--live-session id (or home default-directory)))))
         (cond ((null choices)
-               (+agent-acp--abandon-saved buffer "This agent has no saved conversations here"))
+               (+agent-acp--abandon-saved
+                buffer (format "No saved conversations in %s"
+                               (mapconcat #'abbreviate-file-name
+                                          (cons default-directory
+                                                (+agent-acp--saved-homes default-directory buffer))
+                                          ", "))))
               ((null id) (+agent-acp--abandon-saved buffer "Resume cancelled"))
               (live (+agent-acp--abandon-saved buffer "That conversation is already open")
                     (+agent-acp-show-buffer live))
@@ -3242,6 +3282,17 @@ the running turn finishes."
     (agent-shell--config-option-set-mode-id
      :mode-id mode-id :on-success on-success :on-failure on-failure)))
 
+(defun +agent-acp--recent-agent ()
+  "Return the agent of the most recently used session, as a string.
+The current buffer's session counts first; without any, \"codex\"."
+  (or (seq-some (lambda (buffer)
+                  (and (+agent-acp-agent-buffer-p buffer)
+                       (member (buffer-local-value '+agent-acp-session-agent buffer)
+                               '("codex" "claude" "opencode"))
+                       (buffer-local-value '+agent-acp-session-agent buffer)))
+                (cons (current-buffer) (buffer-list)))
+      "codex"))
+
 ;;;###autoload
 (defun +agent/resume-saved (&optional agent)
   "Choose a saved conversation of AGENT in this workspace and restore it.
@@ -3249,8 +3300,8 @@ This needs no live session: a new client lists the provider's own record.
 Cancelling, or finding nothing to restore, ends that client."
   (interactive
    (list (intern (completing-read "Resume with agent: " '("codex" "claude" "opencode")
-                                  nil t nil nil "codex"))))
-  (let* ((agent (or agent 'codex))
+                                  nil t nil nil (+agent-acp--recent-agent)))))
+  (let* ((agent (or agent (intern (+agent-acp--recent-agent))))
          (source (+agent-acp-agent-buffer-p (current-buffer)))
          (root (or (and source +agent-acp-session-root) (+agent-acp-project-root)))
          (config (or (+agent-acp-config-for agent)

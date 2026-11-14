@@ -262,7 +262,7 @@
             (let (submitted)
               (cl-letf (((symbol-function 'shell-maker--eval-input-on-buffer-v2)
                          (lambda (&rest args) (setq submitted (plist-get args :input)))))
-                (call-interactively (key-binding (kbd "S-RET"))))
+                (call-interactively (key-binding (kbd "M-RET"))))
               (should (equal submitted "Please explain the second point.")))
             (shell-maker-finish-output :config shell-maker--config :success t)
             ;; Successful, cancelled and failed ACP replies must all restore
