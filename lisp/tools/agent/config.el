@@ -335,6 +335,22 @@ agent sends must resolve against the session's target."
 
 (defvar agent-shell--transcript-file)
 (defvar agent-shell--state)
+(defvar agent-shell--project-files-cache)
+(defvar vertico-sort-override-function)
+(declare-function vertico-exit "vertico" (&optional arg))
+(declare-function +agent-view-embed "tools/agent/views" (buffer window))
+(declare-function +agent-acp-touch "tools/agent/acp" (buffer))
+(declare-function +agent-acp-clear-attention "tools/agent/acp" (buffer))
+(declare-function +agent-render-flush "tools/agent/render" (&optional buffer))
+(declare-function +agent-pool-sessions "tools/agent/acp" (&optional root target kind))
+(declare-function +agent-acp-project-root "tools/agent/acp" (&optional directory))
+(defvar projectile-mode)
+(declare-function projectile-project-p "projectile" (&optional dir))
+(declare-function projectile-project-root "projectile" (&optional dir))
+(declare-function agent-shell-completion--source-buffer "agent-shell-completion" ())
+(declare-function agent-shell--clear-project-files-cache "agent-shell-completion" ())
+(declare-function agent-shell--capf-exit-with-file-mention "agent-shell-completion" (string status))
+(declare-function agent-shell--project-files "agent-shell-project" ())
 (defvar agent-shell-transcript-file-path-function)
 (defvar shell-maker-prompt-before-killing-buffer)
 (defvar shell-maker--config)
@@ -740,6 +756,82 @@ when present; the exact Codex message is the isolated compatibility fallback."
       (company-manual-begin)
     (agent-shell--trigger-completion-at-point)))
 
+(defconst +agent-shell--mention-chars "[:alnum:]/_.~()+,=-"
+  "Characters of an unquoted @ file mention being completed.
+Wider than agent-shell's own set, so names like `LCE(202610)' complete.")
+
+(defun +agent-shell--project-root ()
+  "Return the root agent-shell lists project files from, as a directory."
+  (when-let* ((root (cond
+                     ((and (bound-and-true-p projectile-mode)
+                           (fboundp 'projectile-project-p) (projectile-project-p))
+                      (projectile-project-root))
+                     ((fboundp 'project-current)
+                      (when-let* ((project (project-current))) (project-root project))))))
+    (file-name-as-directory (expand-file-name root))))
+
+(defun +agent-shell--session-files-a (original)
+  "Return ORIGINAL's project files relative to the session's folder.
+A mention is resolved against the session's folder (`agent-shell-cwd'), but
+agent-shell lists files relative to the repository root, which can be above
+it (a Noema Project inside a vault): `@project/x.md' then names no file.  List
+the files under the session's folder by their path from there; when none is,
+every file by its relative path."
+  (let ((files (funcall original))
+        (root (+agent-shell--project-root))
+        (cwd (file-name-as-directory (expand-file-name default-directory))))
+    (if (or (null root) (equal root cwd))
+        files
+      (let (inside)
+        (dolist (file files)
+          (let ((absolute (concat root file)))
+            (when (string-prefix-p cwd absolute)
+              (push (substring absolute (length cwd)) inside))))
+        (or (nreverse inside)
+            (mapcar (lambda (file) (file-relative-name (concat root file) cwd)) files))))))
+
+(defun +agent-shell--mention-path-exit (string status)
+  "Finish a path mention STRING: a folder continues completing inside it."
+  (if (and (eq status 'finished) (string-suffix-p "/" string))
+      (let ((buffer (current-buffer)))
+        (run-at-time 0 nil (lambda ()
+                             (when (buffer-live-p buffer)
+                               (with-current-buffer buffer (completion-at-point))))))
+    (agent-shell--capf-exit-with-file-mention string status)))
+
+(defun +agent-shell--file-completion-a (original)
+  "Complete @ mentions, by path when they start like one; else ORIGINAL.
+`@./', `@../', `@~/' and `@/' walk folders from the session's folder, as
+file name completion does; any other `@' searches the session's files.  Both
+accept parentheses and the other characters of ordinary names."
+  (if-let* ((bounds (agent-shell--completion-bounds +agent-shell--mention-chars ?@))
+            (start (map-elt bounds :start))
+            (source (agent-shell-completion--source-buffer)))
+      (let ((directory (file-name-as-directory
+                        (expand-file-name (buffer-local-value 'default-directory source)))))
+        (if (save-excursion (goto-char start) (looking-at-p "\\(?:\\.\\.?\\|~\\)?/"))
+            (list start (map-elt bounds :end)
+                  (lambda (string predicate action)
+                    (let ((default-directory directory))
+                      (completion-file-name-table string predicate action)))
+                  :category 'file
+                  :exclusive 'no
+                  :company-prefix-length t
+                  :company-kind (lambda (f) (if (string-suffix-p "/" f) 'folder 'file))
+                  :exit-function #'+agent-shell--mention-path-exit)
+          (with-current-buffer source
+            (unless agent-shell--project-files-cache
+              (setq agent-shell--project-files-cache (agent-shell--project-files))
+              (add-hook 'completion-in-region-mode-hook
+                        #'agent-shell--clear-project-files-cache nil t)))
+          (list start (map-elt bounds :end)
+                (buffer-local-value 'agent-shell--project-files-cache source)
+                :exclusive 'no
+                :company-prefix-length t
+                :company-kind (lambda (f) (if (string-suffix-p "/" f) 'folder 'file))
+                :exit-function #'agent-shell--capf-exit-with-file-mention)))
+    (funcall original)))
+
 (defun +agent-shell--resume-command-completion-a (original &rest args)
   "Add the local commands of `+agent-actions' to ORIGINAL's slash completion."
   (let* ((capf (apply original args))
@@ -817,6 +909,99 @@ Emacs owns which frontend shows a conversation."
                              :root noema-root)
       (+agent-view-embed buffer window)
       buffer)))
+
+;; Cmd-Shift-T is to agents what Cmd-T (`terminal-switcher') is to terminals:
+;; one list of the sessions not on screen and of new ones, and Return,
+;; Shift-Return or Command-Return choose where the chosen one goes.
+
+(defvar +agent-switcher--placement 'current
+  "Where `+agent/switcher' puts its choice: current, right or below.")
+
+(defun +agent-switcher--exit (placement)
+  "Accept the highlighted choice and put it at PLACEMENT."
+  (setq +agent-switcher--placement placement)
+  (if (and (fboundp 'vertico-exit) (bound-and-true-p vertico--input))
+      (vertico-exit)
+    (exit-minibuffer)))
+
+(defun +agent-switcher--setup ()
+  "Add the placement keys to the switcher's minibuffer."
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map (current-local-map))
+    (dolist (entry '(("S-RET" . right) ("S-<return>" . right)
+                     ("M-RET" . below) ("M-<return>" . below)
+                     ("s-RET" . below) ("s-<return>" . below)))
+      (let ((placement (cdr entry)))
+        (keymap-set map (car entry) (lambda () (interactive) (+agent-switcher--exit placement)))))
+    (use-local-map map)))
+
+(defun +agent-switcher-candidates ()
+  "Return (LABEL . CHOICE): sessions not on screen, newest first, then new ones.
+A CHOICE is a buffer, (new . AGENT) or `history'.  Background workers stay out,
+as they do from ordinary recall."
+  (require 'tools/agent/acp)
+  (let* ((root (ignore-errors (+agent-acp-project-root)))
+         (sessions (seq-remove (lambda (session)
+                                 (or (plist-get session :background)
+                                     (not (buffer-live-p (plist-get session :buffer)))
+                                     (get-buffer-window (plist-get session :buffer) 'visible)))
+                               (+agent-pool-sessions)))
+         (sessions (sort sessions
+                         (lambda (a b)
+                           (let ((here-a (equal (plist-get a :root) root))
+                                 (here-b (equal (plist-get b :root) root)))
+                             (if (eq here-a here-b)
+                                 (> (or (plist-get a :last-used) 0) (or (plist-get b :last-used) 0))
+                               here-a))))))
+    (append
+     (mapcar (lambda (session)
+               (let ((buffer (plist-get session :buffer)))
+                 (cons (format "%s · %s%s"
+                               (plist-get session :agent)
+                               (or (plist-get session :name) (buffer-name buffer))
+                               (if (plist-get session :busy) "  ● working" ""))
+                       buffer)))
+             sessions)
+     (mapcar (lambda (agent)
+               (cons (format "＋ New %s" (car agent)) (cons 'new (car agent))))
+             +agent-shell-agents)
+     (list (cons "↺ History…" 'history)))))
+
+(defun +agent/switcher ()
+  "Switch to an agent session or start one, choosing the window with Return.
+Return uses this window, Shift-Return splits right and Command-Return splits
+below.  Sessions already on screen are left out."
+  (interactive)
+  (let* ((candidates (+agent-switcher-candidates))
+         (+agent-switcher--placement 'current)
+         (vertico-sort-override-function #'identity)
+         (choice (cdr (assoc (minibuffer-with-setup-hook #'+agent-switcher--setup
+                               (completing-read
+                                "Agent (RET here / S-RET right / Cmd-RET below): "
+                                candidates nil t))
+                             candidates))))
+    (unless choice (user-error "No agent selected"))
+    (if (eq choice 'history)
+        (call-interactively #'+agent/history)
+      (let* ((origin (selected-window))
+             (target (pcase +agent-switcher--placement
+                       ('right (split-window origin nil 'right))
+                       ('below (split-window origin nil 'below))
+                       (_ origin))))
+        (select-window target)
+        (if (bufferp choice)
+            (progn
+              (+agent-view-embed choice target)
+              (+agent-acp-touch choice)
+              (+agent-acp-clear-attention choice)
+              (+agent-render-flush choice)
+              choice)
+          (+agent-shell/here (cdr choice)))))))
+
+(defalias 'agent-switcher #'+agent/switcher
+  "Choose an agent session or start one, like `terminal-switcher'.")
+
+(general-define-key :keymaps 'global "M-T" #'+agent/switcher)
 
 (defun +agent-shell--managed-entry-a (_original &optional arg)
   "Make `agent-shell' open a new managed session in the invoking window.
@@ -964,6 +1149,9 @@ picture after a screenshot."
   (advice-add 'agent-shell :around #'+agent-shell--managed-entry-a)
   (advice-add 'agent-shell--command-completion-at-point :around
               #'+agent-shell--resume-command-completion-a)
+  (advice-add 'agent-shell--file-completion-at-point :around
+              #'+agent-shell--file-completion-a)
+  (advice-add 'agent-shell--project-files :around #'+agent-shell--session-files-a)
   ;; Every client (and agent-shell's early executable check) is made in the
   ;; agent's own buffer; give that buffer its workspace environment first.
   (advice-add 'agent-shell--make-acp-client :before
@@ -1373,16 +1561,6 @@ is `+config-ask-model', registered with native Config Customize."
   :type 'file
   :group 'ai)
 
-(config-defvar claude-code-ide-window-side nil
-  "Side used for the Claude Code IDE window."
-  :type 'symbol
-  :group 'ai)
-
-(config-defvar claude-code-ide-window-width nil
-  "Width used for the Claude Code IDE window."
-  :type 'integer
-  :group 'ai)
-
 ;; Claude Code compatibility source remains vendored for ACP adapter work, but
 ;; its standalone IDE UI is deliberately not autoloaded or globally bound.
 
@@ -1391,21 +1569,6 @@ is `+config-ask-model', registered with native Config Customize."
 (config-defvar codex-cli-executable nil
   "Executable used by codex-cli."
   :type 'string
-  :group 'ai)
-
-(config-defvar codex-cli-terminal-backend nil
-  "Terminal backend used by codex-cli."
-  :type 'symbol
-  :group 'ai)
-
-(config-defvar codex-cli-side nil
-  "Side used for the codex-cli window."
-  :type 'symbol
-  :group 'ai)
-
-(config-defvar codex-cli-width nil
-  "Width used for the codex-cli window."
-  :type 'integer
   :group 'ai)
 
 ;; Codex CLI compatibility source likewise stays vendored without a separate

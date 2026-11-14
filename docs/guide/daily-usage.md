@@ -1792,6 +1792,7 @@ Emacs 通用 agent 层统一管理轻量模型交互与结构化 coding-agent �
 | 键 | 功能 |
 |----|------|
 | `H-A` / `SPC a a` / `C-c A RET` | Agent Manager 浮窗；再次调用隐藏返回 |
+| `M-T`（`Cmd-Shift-T`）/ `M-x agent-switcher` | 像 `Cmd-T` 选终端一样选 agent：列出不在屏幕上的会话、新建 Claude/Codex/OpenCode 和历史；`RET` 当前窗口，`S-RET` 右侧，`Cmd-RET` 下方 |
 | `C-c A W` | 打开当前项目 Pi |
 | `C-c A g` | 当前项目的 Agent cache：缓存、任务图谱、问题和日志（`noema-project-graph`） |
 | `C-c A n` | 编辑区新建执行 Agent；Pi 中新建同作用域的对话 |
@@ -2049,6 +2050,10 @@ Claude Code、Codex、OpenCode 三家的已保存对话，像它们的 CLI 一�
 沿用 Noema 登记的会话名）；另一 agent 的对话（例如在 Codex 里选 Claude Code 的）
 会开一个新会话，只告诉它 transcript 的位置，需要时它自己去查。原生恢复失败时也自动走这条路。
 各家历史仍由它们自己保存，Emacs 只读取，不复制 transcript。
+
+输入区的 `@` 补全文件：直接输入在会话目录（agent 的工作目录）下的文件里搜索，补全出的路径
+相对会话目录，发送时能找到文件；`@./`、`@../`、`@~/`、`@/` 改为按文件夹一级级补全，
+从会话目录、上一级、家目录或根目录开始，选中文件夹后接着补全里面的内容。
 
 `M-x agent-shell` 从当前工作 buffer 启动 Noema 管理的 agent，并显示在当前窗口；
 顶部 `+Agent` 和 `M-x +portal/agent-shell` 才在全局 popup 中打开。两条入口使用同一套

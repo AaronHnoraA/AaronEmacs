@@ -35,6 +35,7 @@ Research 的逻辑 Session 和 Run ID 不可互换。关闭视图只改变显示
 | 新建 | `agent-shell` | 总是在当前窗口新建，不是开关 |
 | 选择 | `C-u C-u agent-shell`、`C-u C-c a` | 选池成员、新建或已保存对话 |
 | 召回 | `C-c a` | 回到本项目最近的会话；空池时选择新建或恢复 |
+| 切换 | `Cmd-Shift-T`（`M-T`） | 像 `Cmd-T` 选终端：不在屏幕上的会话、新建或历史，`RET`/`S-RET`/`Cmd-RET` 选窗口 |
 | 返回 | 在聊天里 `C-c a` | 收起聊天，回到来源窗口；agent 继续工作 |
 
 进入聊天之后，所有操作都在 agent-shell 自己的工作方式里：

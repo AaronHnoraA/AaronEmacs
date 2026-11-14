@@ -252,7 +252,7 @@ agent-shell、acp.el、shell-maker 使用固定版本的 package-vc 依赖，可
 1. 主题和字体是否正常
 2. `C-x C-f` / `C-x b` / `C-s` 是否符合预期
 3. `M-x +portal/ssh` 是否能读到 SSH 主机
-4. `C-c C-'` 是否能打开 claude-code-ide 菜单（需要 claude CLI 已安装）
+4. `SPC a a` 是否能打开 Agent Manager，`M-x agent-shell` 是否能开一个会话
 5. `C-x g` 是否能打开 Magit
 
 ## 8. 下一步看什么

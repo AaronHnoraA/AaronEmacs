@@ -312,4 +312,90 @@
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (provide 'init-agent-shell-ux-tests)
+(ert-deftest agent-shell-ux-mentions-are-relative-to-the-session-folder ()
+  (let* ((root (file-name-as-directory (make-temp-file "vault-" t)))
+         (cwd (file-name-as-directory (expand-file-name "project/LCE(1)" root))))
+    (unwind-protect
+        (with-temp-buffer
+          (setq default-directory cwd)
+          (cl-letf (((symbol-function '+agent-shell--project-root) (lambda () root)))
+            ;; Files under the session's folder, by their path from there.
+            (should (equal (+agent-shell--session-files-a
+                            (lambda () '(".gitignore" "project/LCE(1)/SAI.md" "project/LCE(1)/a/b.md")))
+                           '("SAI.md" "a/b.md")))
+            ;; None under it: every file, relative.
+            (should (equal (+agent-shell--session-files-a (lambda () '("x.md")))
+                           '("../../x.md")))))
+      (delete-directory root t))))
+
+(ert-deftest agent-shell-ux-dot-mentions-walk-folders ()
+  (let ((root (file-name-as-directory (make-temp-file "mention-" t))))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name "LCE(1)/meeting" root) t)
+          (write-region "" nil (expand-file-name "LCE(1)/SAI.md" root))
+          (write-region "" nil (expand-file-name "top.md" root))
+          (with-temp-buffer
+            (setq default-directory (expand-file-name "LCE(1)/" root))
+            (cl-letf (((symbol-function 'agent-shell-completion--source-buffer)
+                       (lambda () (current-buffer))))
+              (insert "see @./")
+              (let* ((capf (+agent-shell--file-completion-a (lambda () (error "Not a path"))))
+                     (table (nth 2 capf)))
+                (should (= (nth 0 capf) 6))
+                (should (eq (plist-get (nthcdr 3 capf) :category) 'file))
+                (should (member "meeting/" (all-completions "./" table)))
+                (should (member "SAI.md" (all-completions "./" table)))
+                (should (member "top.md" (all-completions "../" table))))
+              ;; A folder keeps completing; a file becomes a mention.
+              (let (again)
+                (cl-letf (((symbol-function 'run-at-time) (lambda (_ _ fn) (funcall fn)))
+                          ((symbol-function 'completion-at-point) (lambda () (setq again t))))
+                  (+agent-shell--mention-path-exit "./meeting/" 'finished))
+                (should again))
+              ;; Parentheses stay inside a plain mention.
+              (erase-buffer)
+              (insert "@LCE(1")
+              (let ((agent-shell--project-files-cache '("LCE(1)/SAI.md")))
+                (should (= (nth 0 (+agent-shell--file-completion-a #'ignore)) 2))))))
+      (delete-directory root t))))
+
+(ert-deftest agent-shell-ux-cmd-shift-t-switches-like-cmd-t ()
+  (should (eq (lookup-key global-map (kbd "M-T")) #'+agent/switcher))
+  (let ((shown (generate-new-buffer " *agent-a*"))
+        (hidden (generate-new-buffer " *agent-b*"))
+        (worker (generate-new-buffer " *agent-w*")))
+    (unwind-protect
+        (save-window-excursion
+          (set-window-buffer (selected-window) shown)
+          (cl-letf (((symbol-function '+agent-acp-project-root) (lambda (&rest _) "/p/"))
+                    ((symbol-function '+agent-pool-sessions)
+                     (lambda (&rest _)
+                       (list (list :buffer shown :agent "claude" :root "/p/" :last-used 3)
+                             (list :buffer hidden :agent "codex" :root "/p/" :last-used 2 :busy t)
+                             (list :buffer worker :agent "codex" :root "/p/" :background t)))))
+            (let ((candidates (+agent-switcher-candidates)))
+              ;; On screen and background sessions are left out; new ones and history follow.
+              (should (equal (cdar candidates) hidden))
+              (should (string-match-p "codex · .*● working" (caar candidates)))
+              (should-not (rassq shown candidates))
+              (should-not (rassq worker candidates))
+              (should (rassoc '(new . claude) candidates))
+              (should (eq (cdar (last candidates)) 'history)))
+            ;; Shift-Return splits right and embeds the chosen session there.
+            (let (embedded)
+              (cl-letf (((symbol-function 'completing-read)
+                         (lambda (&rest _) (setq +agent-switcher--placement 'right)
+                           (caar (+agent-switcher-candidates))))
+                        ((symbol-function '+agent-view-embed)
+                         (lambda (buffer window) (setq embedded (list buffer window))))
+                        ((symbol-function '+agent-acp-touch) #'ignore)
+                        ((symbol-function '+agent-acp-clear-attention) #'ignore)
+                        ((symbol-function '+agent-render-flush) #'ignore))
+                (let ((windows (length (window-list))))
+                  (+agent/switcher)
+                  (should (= (length (window-list)) (1+ windows)))
+                  (should (eq (car embedded) hidden)))))))
+      (mapc #'kill-buffer (list shown hidden worker)))))
+
 ;;; init-agent-shell-ux-tests.el ends here

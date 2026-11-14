@@ -137,9 +137,9 @@ Noema 的上下文、Markdown 提案和 Pi 不依赖 gptel。Pi 配置与独立 
 变量：
 
 - `codex-cli-executable`      — Codex 可执行文件名（默认 `"codex"`）
-- 本地 override：Codex buffer 用底部普通窗口打开，高度约 18 行，可继续分屏
 
-键位前缀 `C-c c`；参见文件顶部注释。
+旧的独立 Codex 终端界面已退役；这个路径由 Noema 的 agent/export 工作流读取，
+Codex 会话走 agent-shell。
 
 ### Noema LaTeX 导出（CMD+P）
 
