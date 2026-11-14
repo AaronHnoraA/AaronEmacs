@@ -70,10 +70,10 @@
                 ((+agent-acp-client-exited-p buffer) " Client exited · /restart to reconnect")
                 ((not (map-elt agent-shell--state :init-finished)) " Connecting · draft stays editable")
                 (busy
-                 (format " S-RET %s · M-RET %s · C-c C-c stop"
+                 (format " Cmd-RET %s · Cmd-S-RET %s · C-c C-c stop"
                          (+agent-input--submission agent-shell-busy-submit-default-function)
                          (+agent-input--submission agent-shell-busy-submit-override-function)))
-                (t " S-RET send · RET newline · / commands · C-c C-z actions"))))
+                (t " Cmd-RET send · RET newline · / commands · C-c C-z actions"))))
     (concat
      (propertize hint 'face 'agent-shell-secondary)
      (when (> count 0)

@@ -1937,7 +1937,7 @@ renders.  Return non-nil when a prompt was written now."
        "Agent window
 
 Each tab is one live agent session of this project.  The buffer is the real
-agent-shell: type at its prompt and press S-RET to send, also during a turn.
+agent-shell: type at its prompt and press Cmd-RET to send, also during a turn.
 
 M-x agent-shell\topen a new session in this window
   with C-u C-u\tpick a session, a new one or a saved conversation

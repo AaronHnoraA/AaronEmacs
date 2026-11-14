@@ -912,11 +912,15 @@ double prefix ARG picks among the pool, new and saved conversations."
 
 (declare-function agent-shell--prompt-input-start "agent-shell-prompt" ())
 (declare-function agent-shell-list-edit-newline "agent-shell-list-edit" ())
+(declare-function agent-shell--save-clipboard-image "agent-shell" (&rest arguments))
+(declare-function agent-shell--dot-subdir "agent-shell" (subdir))
+(declare-function agent-shell--get-files-context "agent-shell" (&rest arguments))
+(declare-function agent-shell-insert "agent-shell" (&rest arguments))
 
 (defun +agent-shell/newline ()
   "Break the line in the input; outside it, keep RET's native action.
-In the input RET only writes: `S-RET' sends (steering a running turn) and
-`M-RET' sends or queues behind it.  Markdown lists continue as usual."
+In the input RET only writes: `M-RET' (Cmd-RET) sends, steering a running
+turn, and `M-S-RET' sends or queues behind it.  Markdown lists continue."
   (interactive)
   (let ((start (agent-shell--prompt-input-start)))
     (cond ((not (and start (>= (point) start))) (call-interactively #'agent-shell-submit))
@@ -926,14 +930,59 @@ In the input RET only writes: `S-RET' sends (steering a running turn) and
 ;; The chat is edited: Escape leaves insert for normal-state Vim movement.
 (set-evil-initial-state! 'agent-shell-mode 'insert)
 
+(defun +agent-shell--clipboard-kind (targets)
+  "Return `text', `image' or nil for the clipboard TARGETS vector.
+Text wins: an application that copies text often adds a picture of it."
+  (let ((names (mapcar (lambda (target) (format "%s" target))
+                       (and (vectorp targets) targets))))
+    (cond ((seq-some (lambda (name)
+                       (string-match-p
+                        "\\`\\(?:STRING\\|UTF8_STRING\\|TEXT\\|text/plain.*\\|public\\.utf8-plain-text\\)\\'"
+                        name))
+                     names)
+           'text)
+          ((seq-some (lambda (name)
+                       (string-match-p "\\`image/\\|\\`public\\.\\(?:png\\|tiff\\|jpeg\\)\\'" name))
+                     names)
+           'image))))
+
+(defun +agent-shell/insert-clipboard-image ()
+  "Insert the clipboard image into this chat's input as a file reference.
+The image is captured on the client and saved under the session's
+`.agent-shell/screenshots/'."
+  (interactive)
+  (let ((image (agent-shell--save-clipboard-image
+                :destination-dir (agent-shell--dot-subdir "screenshots"))))
+    (agent-shell-insert :text (agent-shell--get-files-context :files (list image))
+                        :shell-buffer (current-buffer))))
+
+(put '+agent-shell/paste 'delete-selection 'yank)
+(defun +agent-shell/paste ()
+  "Paste what the clipboard holds now: its text, or else its image.
+Cmd-V in the chat.  The clipboard carries the most recent copy, so this
+pastes text after a text copy and the picture after a screenshot."
+  (interactive "*")
+  (if (eq (+agent-shell--clipboard-kind
+           (ignore-errors (gui-get-selection 'CLIPBOARD 'TARGETS)))
+          'image)
+      (+agent-shell/insert-clipboard-image)
+    (call-interactively #'clipboard-yank)))
+
 (after! agent-shell
   (require 'agent-shell-list-edit nil t)
+  ;; Command is Meta: M-RET is Cmd-RET, M-v is Cmd-V.
   (map! :map agent-shell-mode-map
         "RET" #'+agent-shell/newline
         "<return>" #'+agent-shell/newline
-        :desc "Send / steer" "S-RET" #'agent-shell-submit
-        :desc "Send / steer" "S-<return>" #'agent-shell-submit
-        :desc "Paste image" "M-V" #'agent-shell-send-clipboard-image))
+        :desc "Send / steer" "M-RET" #'agent-shell-submit
+        :desc "Send / steer" "M-<return>" #'agent-shell-submit
+        :desc "Send / queue" "M-S-RET" #'agent-shell-submit-override
+        :desc "Send / queue" "M-S-<return>" #'agent-shell-submit-override
+        :desc "Paste text or image" "M-v" #'+agent-shell/paste
+        :desc "Paste image" "C-v" #'+agent-shell/insert-clipboard-image)
+  ;; S-RET no longer sends; drop it so it types a newline like RET.
+  (dolist (key '("S-RET" "S-<return>" "M-V"))
+    (keymap-unset agent-shell-mode-map key t)))
 
 (with-eval-after-load 'agent-shell
   (setq agent-shell-markdown-render-function #'+agent-shell-render-markdown))

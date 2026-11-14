@@ -41,7 +41,7 @@ Research 的逻辑 Session 和 Run ID 不可互换。关闭视图只改变显示
 
 | 想做的事 | 方式 |
 | --- | --- |
-| 说话、排队、steering | 输入区 `RET` 换行；`S-RET` 发送（生成中 steer），`M-RET` 发送（生成中排队） |
+| 说话、排队、steering | 输入区 `RET` 换行；`Cmd-RET` 发送（生成中 steer），`Cmd-S-RET` 发送（生成中排队） |
 | 不离开输入区操作会话 | 本地斜杠命令 `/queue`、`/next`、`/changes`、`/resume`、`/fork`、`/rename`、`/restart`、`/new`、`/side`、`/agents`、`/page`、`/file`，在 `/` 补全里列出 |
 | 读公式多的回复 | `C-c A o`／`/page` 把上一条回复作为 Noema Markdown 页面在旁边打开；聊天本身不渲染公式 |
 | 留下值得保存的回答 | `C-c A F`／`/file` 把上一条回复交给新建节点工作台，改好标题和位置后成为 Wiki 页面 |
@@ -111,7 +111,7 @@ popup / dock / embedded 类型返回，Portal 保留用户调整后的高度。
 用户标签和原生提示符使用 Aaron 的青色强调，角色标签没有背景徽章，用户正文
 保持正文字体，思考和摘要降低对比度；
 工具的完成、运行和失败分别使用语义色，Wave、Dragon、Lotus 切换后同步更新。
-输入上方显示当前 `S-RET`／`M-RET` 的真实提交路径，有队列时显示数量、挂起数和
+输入上方显示当前 `Cmd-RET`／`Cmd-S-RET` 的真实提交路径，有队列时显示数量、挂起数和
 一小段待发内容；`/queue` 仍是唯一管理入口。连接中和 client 退出分别显示明确提示。
 提示只属于显示，不进入复制文本、草稿、协议或撤销历史。`C-a` 在输入首行停在
 提示符之后，续行和历史正文保留普通行首移动。`+agent-input-mode` 可在当前聊天关闭提示。
@@ -402,10 +402,12 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   只发一次请求。外层仓库不反向列出嵌套仓库的对话。选择器保持从新到旧，不交给补全
   界面排序。Claude 终端自带的 `/resume` 不显示 ACP 启动的 SDK 会话，这由 CLI 决定，
   按 ID 用 `claude --resume` 打开或在这里恢复。测试：`agent-c55-*`。
-- **C56 输入区回车只写字。** 输入区内 `RET` 换行（Markdown 列表照常续写），`S-RET`
-  发送，生成中 steer（不能 steer 的 provider 与 Run 改为排队），`M-RET` 发送，生成中
-  排队；空闲时两者都直接发送。输入区外 `RET` 保留原生动作，表单、按钮和补全菜单的
-  `RET` 不受影响。`M-V` 粘贴剪贴板图片；图片与截图始终从客户端采集，保存到
+- **C56 输入区回车只写字。** 输入区内 `RET`、`S-RET` 换行（Markdown 列表照常续写），
+  `Cmd-RET`（`M-RET`）发送，生成中 steer（不能 steer 的 provider 与 Run 改为排队），
+  `Cmd-S-RET` 发送，生成中排队；空闲时两者都直接发送。输入区外 `RET` 保留原生动作，
+  表单、按钮和补全菜单的 `RET` 不受影响。`C-v` 粘贴剪贴板图片；`Cmd-V`（`M-v`）看
+  剪贴板此刻的内容：有文本粘文本，只有图片时粘图片（剪贴板只保存最近一次复制，
+  应用复制文本时常附带一张图，所以文本优先）。图片与截图始终从客户端采集，保存到
   会话 target 的 `.agent-shell/screenshots/` 时经过 Remote 文件 API，本机工具不接收
   逻辑远端路径。提示行写出同样的键。测试：`agent-c56-*`、`agent-remote-c56-*`。
 - **C57 回复作为页面阅读。** 聊天 buffer 不渲染公式；`o`（`/page`）取上一条回复的
