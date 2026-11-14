@@ -29,6 +29,9 @@
 (declare-function +agent-context-content-blocks "tools/agent/context" (prompt references))
 (declare-function +agent-context--deliver "tools/agent/context" (buffer blocks &optional instructions no-focus))
 (declare-function consult--read "consult" (table &rest options))
+(declare-function posframe-show "posframe" (buffer-or-name &rest args))
+(declare-function posframe-delete "posframe" (buffer-or-name))
+(declare-function posframe-workable-p "posframe" ())
 (declare-function consult--lookup-cdr "consult" (selected candidates &rest _))
 (declare-function noema-sessions-native-binding "noema-sessions" (id root))
 (declare-function +agent-acp-mark-session-buffer "tools/agent/acp" (buffer name agent directory))
@@ -443,8 +446,42 @@ ORDER BY p.time_created DESC LIMIT 8"
                 (truncate-string-to-width (string-trim (cdr exchange)) 700 nil nil "…")
                 "\n\n")))
       (goto-char (point-min))
-      (special-mode))
+      (special-mode)
+      (setq-local truncate-lines nil word-wrap t mode-line-format nil
+                  fringe-indicator-alist '((continuation nil nil))))
     (current-buffer)))
+
+(defun +agent-history--preview-poshandler (info)
+  "Place the preview like an LSP hover: right-aligned, just above the minibuffer."
+  (let* ((frame (plist-get info :parent-frame))
+         (mini (minibuffer-window frame))
+         (top (if (eq (window-frame mini) frame)
+                  (nth 1 (window-pixel-edges mini))
+                (plist-get info :parent-frame-height))))
+    (cons (max 0 (- (plist-get info :parent-frame-width)
+                    (plist-get info :posframe-width)
+                    (* 2 (frame-char-width frame))))
+          (max 0 (- top (plist-get info :posframe-height)
+                    (frame-char-height frame))))))
+
+(defun +agent-history--show-preview (buffer)
+  "Show preview BUFFER in a hover child frame, or a window without a GUI."
+  (if (and (require 'posframe nil t) (posframe-workable-p))
+      (posframe-show buffer
+                     :poshandler #'+agent-history--preview-poshandler
+                     :min-width 60 :max-width 84 :max-height 24
+                     :left-fringe 8 :right-fringe 8
+                     :border-width 1
+                     :border-color (face-background 'child-frame-border nil t)
+                     :background-color (face-background
+                                        (if (facep 'lsp-ui-doc-background)
+                                            'lsp-ui-doc-background
+                                          'default)
+                                        nil t)
+                     :accept-focus nil)
+    (display-buffer buffer '((display-buffer-reuse-window display-buffer-use-some-window
+                                                          display-buffer-pop-up-window)
+                             (inhibit-same-window . t)))))
 
 (defun +agent-history--preview-state ()
   "Return a consult state function previewing the conversation at point."
@@ -453,14 +490,15 @@ ORDER BY p.time_created DESC LIMIT 8"
       (pcase action
         ('preview
          (when row
-           (display-buffer (+agent-history--render-preview row)
-                           '((display-buffer-reuse-window display-buffer-use-some-window
-                                                          display-buffer-pop-up-window)
-                             (inhibit-same-window . t)))))
+           (+agent-history--show-preview (+agent-history--render-preview row))))
         ('exit
-         (set-window-configuration windows)
+         (when-let* ((buffer (get-buffer +agent-history-preview-buffer)))
+           (if (fboundp 'posframe-delete)
+               (posframe-delete buffer)
+             (kill-buffer buffer)))
          (when (get-buffer +agent-history-preview-buffer)
-           (kill-buffer +agent-history-preview-buffer)))))))
+           (kill-buffer +agent-history-preview-buffer))
+         (set-window-configuration windows))))))
 
 (defun +agent-history-read (rows &optional prompt)
   "Read one of ROWS with PROMPT, newest first, previewing the one at point."

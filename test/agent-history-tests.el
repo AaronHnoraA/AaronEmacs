@@ -159,4 +159,24 @@
       (should (string-match-p "\\`codex +now +3↵ +main +proj +Fix it" label))
       (should (string-match-p "● open" label)))))
 
+(ert-deftest agent-c63-preview-floats-like-an-lsp-hover ()
+  (require 'posframe nil t)
+  (skip-unless (fboundp 'posframe-show))
+  (let (shown deleted)
+    (cl-letf (((symbol-function 'posframe-workable-p) (lambda () t))
+              ((symbol-function 'posframe-show)
+               (lambda (buffer &rest args) (setq shown (list buffer (plist-get args :poshandler)))))
+              ((symbol-function 'posframe-delete) (lambda (buffer) (setq deleted buffer)))
+              ((symbol-function 'display-buffer) (lambda (&rest _) (error "No window preview"))))
+      (let ((state (+agent-history--preview-state))
+            (layout (length (window-list))))
+        (funcall state 'preview (list :agent "codex" :id "p1" :title "Plan" :prompt "plan it"
+                                      :updated (float-time)))
+        (should (equal (buffer-name (car shown)) +agent-history-preview-buffer))
+        (should (eq (cadr shown) #'+agent-history--preview-poshandler))
+        (should (= layout (length (window-list))))
+        (funcall state 'exit nil)
+        (should (eq deleted (car shown)))
+        (should-not (get-buffer +agent-history-preview-buffer))))))
+
 ;;; agent-history-tests.el ends here

@@ -459,7 +459,8 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   C55 的目录（当前目录、会话项目根、外层项目及其子目录），`C-u` 列出全部目录，本项目
   没有对话时自动列全部；临时目录（tmp、`var/noema/tmp`）里的会话和 Codex 的 `exec`、
   子 agent 线程不列出。选择器按新到旧列出 agent、时间、轮数、分支、目录与标题，别处
-  已打开的标 `● open`，移动时在旁边预览最后几轮对话。打开规则：在会话里用该会话的
+  已打开的标 `● open`，移动时在 minibuffer 上方的悬浮框（与 LSP
+  悬浮文档同样的 child frame）预览最后几轮对话。打开规则：在会话里用该会话的
   agent，否则用对话自己的 agent。同一 agent 走原生恢复（会话里原地恢复，保留窗口、
   popup 与 Noema 名字；否则新会话），并开启严格恢复；另一 agent 的对话，或原生恢复
   失败（`+agent-acp-restore-failed-functions`），开一个新会话并自动发送
