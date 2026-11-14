@@ -13,7 +13,7 @@
 (require 'aaron-ui-etaf)
 (require 'tools/agent/ui)
 
-(autoload '+agent-shell/resume "tools/agent/config" nil t)
+(autoload '+agent/history "tools/agent/history" nil t)
 (autoload '+agent-top "tools/agent/top" nil t)
 (declare-function aaron-ui-float-show "aaron-ui-float" (buffer &rest options))
 (declare-function aaron-ui-float-panel-for-buffer "aaron-ui-float" (buffer))
@@ -280,9 +280,9 @@ Without a live selection a new client lists the provider's saved conversations."
     (+agent-manager-hide)
     (if (+agent-acp-agent-buffer-p buffer)
         (progn (+agent-acp-show-buffer buffer)
-               (with-current-buffer buffer (call-interactively #'+agent-shell/resume)))
+               (with-current-buffer buffer (call-interactively #'+agent/history)))
       (let ((default-directory directory))
-        (call-interactively #'+agent/resume-saved)))))
+        (call-interactively #'+agent/history)))))
 
 (defun +agent-manager-queue ()
   "Manage the selected session's queued prompts."

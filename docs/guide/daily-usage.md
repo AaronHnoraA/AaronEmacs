@@ -2039,11 +2039,14 @@ agent-shell 自己写引用的格式），每个文件再附一个 `resource_lin
 设为 nil。会话还在初始化就先排队；正在回答时走 agent-shell 自己的
 pending 队列。
 
-在 agent-shell 输入 `/resume` 并回车，会读取当前 agent、当前工作目录的原生
-ACP 会话列表，排除当前会话并按最近使用排序，然后选择要恢复的会话。已有活动 buffer 会直接
-切换到它；未打开的历史会话会替换当前 Agent 或 popup 窗口中的 buffer，不增加新 tab。
-Noema 已登记的原生 session ID 会沿用原会话名。Codex 与 Claude 的会话
-历史由各自的官方后端保存，Noema 只登记名字与原生 ID，不复制 transcript。
+在 agent-shell 输入 `/resume` 并回车（或 `C-c A h`、Manager 的 `h`），会列出本项目
+Claude Code、Codex、OpenCode 三家的已保存对话，像它们的 CLI 一样一行一个：agent、
+多久以前、轮数、分支、目录、标题，别处已打开的标 `● open`；上下移动时旁边预览最后
+几轮。`C-u` 列出所有目录。在会话里选择时用该会话的 agent：同一 agent 的对话原地
+恢复（已有活动 buffer 直接切过去，否则替换当前 Agent 或 popup 窗口中的 buffer，
+沿用 Noema 登记的会话名）；另一 agent 的对话（例如在 Codex 里选 Claude Code 的）
+会开一个新会话，让它先读那份 transcript 并概括进度。原生恢复失败时也自动走这条路。
+各家历史仍由它们自己保存，Emacs 只读取，不复制 transcript。
 
 `M-x agent-shell` 从当前工作 buffer 启动 Noema 管理的 agent，并显示在当前窗口；
 顶部 `+Agent` 和 `M-x +portal/agent-shell` 才在全局 popup 中打开。两条入口使用同一套

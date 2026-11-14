@@ -45,7 +45,7 @@ agent until the user explicitly chooses creation."
                                    choices))))
           (cond ((bufferp choice) (+agent-acp-show-buffer choice))
                 ((eq choice :new) (call-interactively #'+agent-shell/here))
-                ((eq choice :resume) (call-interactively #'+agent/resume-saved))
+                ((eq choice :resume) (call-interactively #'+agent/history))
                 (t (user-error "No agent session selected"))))))))
 
 (defun +agent/pool-switch ()

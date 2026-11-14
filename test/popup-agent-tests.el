@@ -1,6 +1,7 @@
 ;;; popup-agent-tests.el --- Shared terminal/ACP popup regressions -*- lexical-binding: t; -*-
 
 (require 'ert)
+(require 'tools/agent/history)
 (require 'cl-lib)
 (require 'term/portal/popup)
 (require 'tools/agent/acp)
@@ -742,35 +743,22 @@
         (should resumed)
         (should-not submitted)))))
 
-(ert-deftest agent-shell-resume-chooses-official-id-in-current-workspace ()
+;;; In-session restore through the conversation history (C63)
+
+(ert-deftest agent-c63-restore-in-session-keeps-the-noema-binding ()
   (let ((source (generate-new-buffer " *resume-source*"))
         (target (generate-new-buffer " *resume-target*"))
-        listed-cwd resumed-id binding-name)
+        resumed-id binding-name)
     (unwind-protect
         (with-current-buffer source
           (setq major-mode 'agent-shell-mode
                 default-directory "/tmp/")
-          (setq-local agent-shell--state
-                      '((:supports-session-list . t)
-                        (:supports-session-resume . t)
-                        (:agent-config . ((:identifier . codex)))
+          (setq-local +agent-acp-session-agent "codex"
+                      agent-shell--state
+                      '((:agent-config . ((:identifier . codex)))
                         (:session . ((:id . "current")))))
-          (cl-letf (((symbol-function 'agent-shell-cwd) (lambda () "/tmp/"))
-                    ((symbol-function 'agent-shell--resolve-path) #'identity)
-                    ((symbol-function 'agent-shell--list-sessions)
-                     (lambda (&rest args)
-                       (setq listed-cwd (plist-get args :cwd))
-                       (funcall (plist-get args :on-success)
-                                '(((sessionId . "current")
-                                   (title . "Current conversation")
-                                   (updatedAt . "2026-10-01T00:00:00Z"))
-                                  ((sessionId . "saved-native-id")
-                                   (title . "Saved conversation")
-                                   (updatedAt . "2026-09-30T00:00:00Z"))))))
-                    ((symbol-function 'completing-read)
-                     (lambda (_prompt choices &rest _) (caar choices)))
-                    ((symbol-function '+agent-shell--find-execution)
-                     (lambda (&rest _) nil))
+          (cl-letf (((symbol-function '+agent-history--live-buffer) (lambda (_) nil))
+                    ((symbol-function '+agent-history--directory) (lambda (_ fallback) fallback))
                     ((symbol-function 'noema-sessions-native-binding)
                      (lambda (&rest _) '(:name "research" :session-id "logical-id")))
                     ((symbol-function '+agent-acp-mark-session-buffer)
@@ -788,8 +776,7 @@
                            (rename-buffer name t)))))
                     ((symbol-function '+agent-acp-show-buffer)
                      (lambda (buffer) (should (eq buffer target)))))
-            (+agent-shell/resume)
-            (should (equal listed-cwd "/tmp/"))
+            (+agent-history-open '(:agent "codex" :id "saved-native-id") "codex" source)
             (should (equal resumed-id "saved-native-id"))
             (should (equal binding-name "research"))
             (should (equal (buffer-local-value 'noema-agent-promote--session-id target)
@@ -797,39 +784,26 @@
             (should-not (buffer-live-p source))))
       (mapc #'kill-buffer (list source target)))))
 
-(ert-deftest agent-shell-resume-reuses-live-session-buffer ()
+(ert-deftest agent-c63-restore-reuses-live-session-buffer ()
   (let ((source (generate-new-buffer " *resume-source*"))
         (target (generate-new-buffer " *resume-target*"))
         shown)
     (unwind-protect
         (with-current-buffer source
           (setq major-mode 'agent-shell-mode)
-          (setq-local agent-shell--state
-                      '((:agent-config . ((:identifier . codex)))
-                        (:session . ((:id . "current")))))
-          (cl-letf (((symbol-function 'agent-shell--sort-sessions-by-recency) #'identity)
-                    ((symbol-function 'agent-shell--session-title)
-                     (lambda (_) "Saved conversation"))
-                    ((symbol-function 'agent-shell--format-session-date)
-                     (lambda (_) "today"))
-                    ((symbol-function 'completing-read)
-                     (lambda (_prompt choices &rest _) (caar choices)))
-                    ((symbol-function '+agent-shell--find-execution)
-                     (lambda (&rest _) target))
-                    ((symbol-function 'agent-shell--prompt-input)
-                     (lambda () nil))
+          (setq-local +agent-acp-session-agent "codex")
+          (cl-letf (((symbol-function '+agent-history--live-buffer) (lambda (_) target))
+                    ((symbol-function '+agent-history--directory) (lambda (_ fallback) fallback))
                     ((symbol-function 'agent-shell-restart)
                      (lambda (&rest _) (ert-fail "Restarted an already live session")))
-                    ((symbol-function 'agent-shell--display-buffer)
+                    ((symbol-function '+agent-acp-show-buffer)
                      (lambda (buffer) (setq shown buffer))))
-            (+agent-shell--resume-from-list
-             source '(((sessionId . "saved-native-id")
-                       (updatedAt . "2026-09-30T00:00:00Z"))))
+            (+agent-history-open '(:agent "codex" :id "saved-native-id") "codex" source)
             (should (eq shown target))
             (should (buffer-live-p source))))
       (mapc #'kill-buffer (list source target)))))
 
-(ert-deftest agent-shell-resume-keeps-popup-session-in-popup-pool ()
+(ert-deftest agent-c63-restore-keeps-popup-session-in-popup-pool ()
   (save-window-excursion
     (let ((source (generate-new-buffer " *resume-popup-source*"))
           (target (generate-new-buffer " *resume-popup-target*"))
@@ -843,19 +817,13 @@
               (setq major-mode 'agent-shell-mode
                     default-directory "/tmp/")
               (setq-local +portal-popup-workspace-id "local-work"
+                          +agent-acp-session-agent "claude"
                           agent-shell--state
                           '((:agent-config . ((:identifier . claude)))
                             (:session . ((:id . "current"))))))
             (+portal-popup-display-buffer source)
-            (cl-letf (((symbol-function 'agent-shell--sort-sessions-by-recency) #'identity)
-                      ((symbol-function 'agent-shell--session-title)
-                       (lambda (_) "Saved conversation"))
-                      ((symbol-function 'agent-shell--format-session-date)
-                       (lambda (_) "today"))
-                      ((symbol-function 'completing-read)
-                       (lambda (_prompt choices &rest _) (caar choices)))
-                      ((symbol-function '+agent-shell--find-execution)
-                       (lambda (&rest _) nil))
+            (cl-letf (((symbol-function '+agent-history--live-buffer) (lambda (_) nil))
+                      ((symbol-function '+agent-history--directory) (lambda (_ fallback) fallback))
                       ((symbol-function 'agent-shell--prompt-input) (lambda () nil))
                       ((symbol-function 'noema-sessions-native-binding)
                        (lambda (&rest _) nil))
@@ -870,9 +838,7 @@
                              (rename-buffer name t)))))
                       ((symbol-function '+agent-acp-adopt) #'ignore)
                       ((symbol-function '+agent-acp-tabs-mode) #'ignore))
-              (+agent-shell--resume-from-list
-               source '(((sessionId . "saved-native-id")
-                         (updatedAt . "2026-09-30T00:00:00Z")))))
+              (+agent-history-open '(:agent "claude" :id "saved-native-id") "claude" source))
             (should (equal resumed-id "saved-native-id"))
             (should-not (buffer-live-p source))
             (should (eq (window-buffer (+portal-popup--window)) target))
@@ -883,7 +849,7 @@
         (mapc (lambda (buffer) (when (buffer-live-p buffer) (kill-buffer buffer)))
               (list source target))))))
 
-(ert-deftest agent-shell-resume-keeps-manual-session-in-its-window ()
+(ert-deftest agent-c63-restore-keeps-manual-session-in-its-window ()
   (save-window-excursion
     (let ((source (generate-new-buffer " *resume-manual-source*"))
           (target (generate-new-buffer " *resume-manual-target*"))
@@ -895,18 +861,12 @@
               (setq major-mode 'agent-shell-mode
                     default-directory "/tmp/")
               (setq-local +agent-acp-session-origin 'manual
+                          +agent-acp-session-agent "codex"
                           agent-shell--state
                           '((:agent-config . ((:identifier . codex)))
                             (:session . ((:id . "current"))))))
-            (cl-letf (((symbol-function 'agent-shell--sort-sessions-by-recency) #'identity)
-                      ((symbol-function 'agent-shell--session-title)
-                       (lambda (_) "Saved conversation"))
-                      ((symbol-function 'agent-shell--format-session-date)
-                       (lambda (_) "today"))
-                      ((symbol-function 'completing-read)
-                       (lambda (_prompt choices &rest _) (caar choices)))
-                      ((symbol-function '+agent-shell--find-execution)
-                       (lambda (&rest _) nil))
+            (cl-letf (((symbol-function '+agent-history--live-buffer) (lambda (_) nil))
+                      ((symbol-function '+agent-history--directory) (lambda (_ fallback) fallback))
                       ((symbol-function 'agent-shell--prompt-input) (lambda () nil))
                       ((symbol-function 'noema-sessions-native-binding)
                        (lambda (&rest _) nil))
@@ -920,9 +880,7 @@
                              (setq-local agent-shell--state (agent-shell--make-state :buffer target))
                              (rename-buffer name t)))))
                       ((symbol-function '+agent-acp-adopt) #'ignore))
-              (+agent-shell--resume-from-list
-               source '(((sessionId . "saved-native-id")
-                         (updatedAt . "2026-09-30T00:00:00Z")))))
+              (+agent-history-open '(:agent "codex" :id "saved-native-id") "codex" source))
             (should (equal (plist-get started :session-id) "saved-native-id"))
             (should (eq (buffer-local-value '+agent-acp-session-origin target) 'manual))
             (should (eq (window-buffer window) target))

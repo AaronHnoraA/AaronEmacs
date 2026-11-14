@@ -101,15 +101,21 @@ this hook when a full snapshot is unnecessary for the privacy decision.")
   "When non-nil, a failed native restore must not create another conversation.")
 (put '+agent-acp-strict-restore 'permanent-local t)
 
+(defvar +agent-acp-restore-failed-functions nil
+  "Called with (BUFFER SESSION-ID) when BUFFER could not restore SESSION-ID.
+The conversation history continues it from its transcript (C63).")
+
 (defun +agent-acp--restore-failed (buffer session-id)
-  "Keep failed SESSION-ID visible without manufacturing a new conversation."
+  "Keep failed SESSION-ID visible without manufacturing a new conversation.
+A function of `+agent-acp-restore-failed-functions' may continue it instead."
   (with-current-buffer buffer
     (setq-local +agent-acp-last-error (format "Could not restore native session %s" session-id)
                 +agent-acp-attention 'failed)
     (agent-shell--update-bootstrapping-fragment
      :state (agent-shell--state) :block-id "restore_failed"
      :body (concat +agent-acp-last-error ". The reference and history were preserved. Choose an existing session or explicitly create a new one."))
-    (+agent-acp--changed)))
+    (+agent-acp--changed))
+  (run-hook-with-args-until-success '+agent-acp-restore-failed-functions buffer session-id))
 
 (defun +agent-acp--strict-restore-arguments (arguments)
   "Use upstream's failure callback instead of its new-session fallback."

@@ -761,65 +761,9 @@ when present; the exact Codex message is the isolated compatibility fallback."
                           :exit-function #'agent-shell--capf-exit-with-space))))
       capf)))
 
-(defun +agent-shell--resume-from-list (source sessions)
-  "Pick one native conversation from SESSIONS and replace SOURCE with it."
-  (when (buffer-live-p source)
-    (let* ((state (buffer-local-value 'agent-shell--state source))
-           (current-id (map-nested-elt state '(:session :id)))
-           (choices (+agent-acp-saved-session-choices sessions current-id))
-           (config (map-elt state :agent-config))
-           (directory (buffer-local-value 'default-directory source))
-           (root (or (and (boundp '+agent-acp-session-root)
-                          (buffer-local-value '+agent-acp-session-root source))
-                     directory)))
-      (unless choices
-        (user-error "No other saved conversations in %s"
-                    (mapconcat #'abbreviate-file-name
-                               (cons directory (+agent-acp--saved-homes directory source))
-                               ", ")))
-      (let* ((id (+agent-acp-read-saved "Resume session: " choices))
-             (home (+agent-acp-saved-home sessions id))
-             (live (+agent-shell--find-execution id config (or home directory))))
-        (with-current-buffer source
-          (when (equal (agent-shell--prompt-input) "/resume")
-            (agent-shell--clear-prompt-input)))
-        (if live
-            (progn (agent-shell--display-buffer live) live)
-          (let* ((root (or home root))
-                 (binding (and (fboundp 'noema-sessions-native-binding)
-                               (noema-sessions-native-binding id root)))
-                 (target (progn
-                           (when home (+agent-acp-move-to-saved-home source home))
-                           (+agent-acp-restart-native source id))))
-            (when (and binding (fboundp '+agent-acp-mark-session-buffer))
-              (+agent-acp-mark-session-buffer
-               target (plist-get binding :name)
-               (format "%s" (map-elt config :identifier)) root)
-              (with-current-buffer target
-                (setq-local noema-agent-promote--session-id
-                            (plist-get binding :session-id))))
-            target))))))
-
-(defun +agent-shell/resume ()
-  "Choose an official ACP session of this agent and workspace to resume."
-  (interactive)
-  (unless (derived-mode-p 'agent-shell-mode)
-    (user-error "Open an agent-shell buffer before using /resume"))
-  (unless (map-elt agent-shell--state :supports-session-list)
-    (user-error "This agent does not support listing saved sessions"))
-  (unless (or (map-elt agent-shell--state :supports-session-load)
-              (map-elt agent-shell--state :supports-session-resume))
-    (user-error "This agent does not support resuming saved sessions"))
-  (let ((source (current-buffer)))
-    (+agent-acp-list-saved
-     agent-shell--state (agent-shell-cwd) source
-     (lambda (sessions)
-       (+agent-shell--resume-from-list source sessions))
-     (lambda (error-object _raw)
-       (message "Could not list saved sessions: %s"
-                (or (and (listp error-object)
-                         (map-elt error-object 'message))
-                    error-object))))))
+;; One picker lists every agent's saved conversations (C63).
+(defalias '+agent-shell/resume #'+agent/history
+  "Choose a saved conversation of any agent to resume or continue.")
 
 (defun +agent-shell--local-slash (input)
   "Return the local command INPUT names, or nil.
@@ -1272,6 +1216,7 @@ is `+config-ask-model', registered with native Config Customize."
 (autoload '+agent/changes "tools/agent/sessions" nil t)
 (autoload '+agent/queue "tools/agent/queue" nil t)
 (autoload '+agent/resume-saved "tools/agent/acp" nil t)
+(autoload '+agent/history "tools/agent/history" nil t)
 (autoload '+agent/pool "tools/agent/sessions" nil t)
 (autoload '+agent/pool-switch "tools/agent/sessions" nil t)
 (autoload '+agent/usage "tools/agent/manager" nil t)

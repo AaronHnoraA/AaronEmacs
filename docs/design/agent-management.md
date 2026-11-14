@@ -57,7 +57,7 @@ Research 的逻辑 Session 和 Run ID 不可互换。关闭视图只改变显示
 
 `/next`（`C-c A j`）跳到下一个等待你的会话，待审批和问答直接落在原生控件上，
 按其上的 `y`/`n` 决定；`/queue`（`q`）管理排队的 prompt；`/changes`（`l`）打开这个
-会话改过的文件；`/resume`（`h`）恢复已保存对话，没有活动会话时也可用，列表按时间从新到旧（C55）。
+会话改过的文件；`/resume`（`h`）从 Claude Code、Codex、OpenCode 的统一历史恢复或接续对话，没有活动会话时也可用，列表按时间从新到旧（C55、C63）。
 `H-A`（macOS Option-Shift-A）、`SPC a a` 和 `M-x agent-manager` 打开项目池管理器，
 加前缀查看所有项目；从管理器里再次执行返回。`C-c A S/G/U` 分别选择同一浮窗的
 All、Inbox、Usage 页签。GUI 使用 Aaron ETAF，按 target/workspace 分组；
@@ -395,8 +395,9 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   隐藏与返回保持 C12、C18。队列滚动不丢失条目或改变顺序，原生表格的列标题
   不作为工作实体，操作仍按行身份定位。主题切换使用 Aaron 语义色，字体覆盖在
   major mode 结束时释放。测试：`agent-pages-c54-*` 与管理器／队列 GUI 测试。
-- **C55 恢复列表覆盖所属项目。** 保存的对话归 provider，Emacs 不读取其存储，也不
-  维护索引：`+agent-acp-list-saved` 用官方 `session/list` 列出当前目录，再列出会话
+- **C55 恢复列表覆盖所属项目。** 保存的对话归 provider，Emacs 不复制也不另建索引。
+  恢复选择器读各 provider 的本地存储（C63）；`+agent/resume-saved` 保留官方
+  `session/list` 路径：`+agent-acp-list-saved` 列出当前目录，再列出会话
   所属的项目根（`+agent-acp-session-root`，会话在 vault 或其下工作目录启动时与当前
   目录不同）和当前仓库外层的项目（当前仓库嵌套在另一个仓库里时），每个目录只问一次。
   其他目录的对话带上所在目录，恢复时切到该目录，已在运行的对话按该目录识别；其他目录
@@ -450,6 +451,21 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   `/delegate` 派工，`agent-open-worker`／`C-c A B`／`/workers` 打开已有 worker。
   `C-c A E`／`/butler` 召回全局 Pi；Pi 与其他 Agent 共用同一运行时。
   旧 local bridge 只翻译为公共 API，不另存回执或管理队列。
+- **C63 一份跨 agent 的对话历史。** `/resume`（`h`）、Manager 的历史、项目池的恢复项
+  都打开 `+agent/history`（`tools/agent/history`）。它只读 Claude Code
+  （`~/.claude/projects/<目录>/<id>.jsonl`）、Codex（`~/.codex/state_5.sqlite` 的
+  `threads`）和 OpenCode（`~/.local/share/opencode/opencode.db`）各自的存储，不复制、
+  不另建索引；存储在 agent 运行的 target 上，经 Remote 文件与进程接口读取。范围是
+  C55 的目录（当前目录、会话项目根、外层项目及其子目录），`C-u` 列出全部目录，本项目
+  没有对话时自动列全部；临时目录（tmp、`var/noema/tmp`）里的会话和 Codex 的 `exec`、
+  子 agent 线程不列出。选择器按新到旧列出 agent、时间、轮数、分支、目录与标题，别处
+  已打开的标 `● open`，移动时在旁边预览最后几轮对话。打开规则：在会话里用该会话的
+  agent，否则用对话自己的 agent。同一 agent 走原生恢复（会话里原地恢复，保留窗口、
+  popup 与 Noema 名字；否则新会话），并开启严格恢复；另一 agent 的对话，或原生恢复
+  失败（`+agent-acp-restore-failed-functions`），开一个新会话并自动发送
+  `resources/agent/resume-transcript.md`：读 transcript（文件路径，或
+  `opencode session export <id>`），概括目标、已做、未完成和约束后等待，不执行旧请求。
+  已在运行的对话直接切过去。测试：`agent-c63-*`。
 
 ## 实现位置
 

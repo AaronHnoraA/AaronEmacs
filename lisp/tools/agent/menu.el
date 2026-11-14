@@ -77,7 +77,7 @@
   (let ((snapshot (+agent-session-snapshot buffer)))
     (+agent-pool-stop (plist-get snapshot :root) (plist-get snapshot :target))))
 
-(autoload '+agent/resume-saved "tools/agent/acp" nil t)
+(autoload '+agent/history "tools/agent/history" nil t)
 
 (defun +agent-menu-new ()
   "Create a conversation through its management owner, or an execution agent."
@@ -95,21 +95,18 @@
   (+agent-acp-show-buffer buffer))
 
 (defun +agent-menu-history ()
-  "Pick a saved conversation, in this session when it can list them."
+  "Pick a saved conversation of any agent (C63), in this session when there is one."
   (interactive)
   (let ((buffer (+agent-menu--scope)))
     (cond
      ((and buffer (eq (+agent-session-kind buffer) 'pi))
       (with-current-buffer buffer (call-interactively #'+agent-acp-session-manager)))
-     ((and buffer (+agent-menu--ready-p)
-             (+agent-session-capability-p buffer :list)
-             (or (+agent-session-capability-p buffer :load)
-                 (+agent-session-capability-p buffer :resume)))
-        (progn (+agent-menu--show buffer)
-               (with-current-buffer buffer (call-interactively #'+agent-shell/resume))))
+     (buffer
+      (+agent-menu--show buffer)
+      (with-current-buffer buffer (call-interactively #'+agent/history)))
      (t
       (when (bound-and-true-p +agent-manager--model) (+agent-manager-hide))
-      (call-interactively #'+agent/resume-saved)))))
+      (call-interactively #'+agent/history)))))
 
 (defun +agent-menu-next (&optional project)
   "Go to the next waiting session, from any surface; PROJECT limits the pool."
