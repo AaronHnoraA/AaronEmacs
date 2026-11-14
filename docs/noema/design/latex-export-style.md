@@ -255,7 +255,11 @@ list/environment changes, paragraph wrappers, mathematical layout environments,
 and justified break opportunities remain available to the agent; their content
 constraints live in the prompt/review contract rather than an exact-structure
 host comparison. Final `.tex`/PDF/shared
-files are committed only after two compiler passes and log linting succeed. See
+files are committed only after two compiler passes and log linting succeed.
+The PDF is always committed; "Keep .tex" in the scope dialog (request field
+`keepTex`) decides whether the `.tex` and its shared files are committed beside
+it.  The last explicit choice is remembered globally in the export state and
+returned by the export defaults; a request that omits the field keeps the `.tex`. See
 `agents/latex-export/AGENTS.md` for the repair contract and the (rare) tool
 maintenance workflow.
 
