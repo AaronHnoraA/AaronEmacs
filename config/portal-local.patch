@@ -108,7 +108,7 @@ index 50d9f66..7443b2d 100644
          case PORTAL_KEY_HOLD:
              if trigger == nil {
 diff --git a/native/Terminal.swift b/native/Terminal.swift
-index 46ea4a7..41c8aaa 100644
+index 46ea4a7..de4fe53 100644
 --- a/native/Terminal.swift
 +++ b/native/Terminal.swift
 @@ -144,19 +144,39 @@ private final class HostedTerminal: TerminalView, TerminalSurfaceTitleDelegate,
@@ -163,17 +163,22 @@ index 46ea4a7..41c8aaa 100644
          }
      }
  
-@@ -538,7 +560,8 @@ final class TerminalSession: PortalView {
+@@ -537,8 +559,13 @@ final class TerminalSession: PortalView {
+     /// Ghostty copies only a selection, and does nothing without one.
      func copy() throws { terminal.performBindingAction("copy_to_clipboard") }
  
++    /// Command-V pastes as the context menu's Paste does: Ghostty reads the
++    /// pasteboard (a copied file as its path, a link, then text) and applies
++    /// bracketed paste.  Plain text is the fallback when it takes nothing.
      func paste() throws {
 -        guard terminal.performBindingAction("paste_from_clipboard") else {
++        if terminal.performBindingAction("paste_from_clipboard") { return }
 +        guard let text = NSPasteboard.general.string(forType: .string),
 +              terminal.paste(text: text) else {
              throw NativeError.message("No terminal accepting input")
          }
      }
-@@ -587,7 +610,11 @@ enum Terminals {
+@@ -587,7 +614,11 @@ enum Terminals {
      /// The theme NAME, which the core has checked, or the default for nil,
      /// which follows the system's appearance.
      static func theme(named name: String?) throws -> TerminalTheme {

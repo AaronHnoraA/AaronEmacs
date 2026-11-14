@@ -28,6 +28,7 @@ make emacs-binary-verify   # 检查 Emacs、emacsclient、NS、模块与 xwidget
 `portal-terminal-text-size-follows-emacs` 因此不适用）。终端命令写进该终端自己的
 Ghostty 配置（`command = shell:…`），不放进 surface 选项：libghostty 对 surface
 命令强制 `wait-after-command`，退出后会停在 “Press any key”，Emacs 收不到退出。
+终端里 Cmd-V 与右键菜单的 Paste 走同一条 Ghostty `paste_from_clipboard`（复制的文件粘成路径，带 bracketed paste），取不到内容时才退回纯文本。
 单独重建 Portal 时运行：
 
 ```sh
