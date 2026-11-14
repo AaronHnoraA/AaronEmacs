@@ -30,7 +30,7 @@
 (declare-function +agent-context--deliver "tools/agent/context" (buffer blocks &optional instructions no-focus))
 (declare-function consult--read "consult" (table &rest options))
 (declare-function posframe-show "posframe" (buffer-or-name &rest args))
-(declare-function posframe-delete "posframe" (buffer-or-name))
+(declare-function posframe-hide "posframe" (buffer-or-name))
 (declare-function posframe-workable-p "posframe" ())
 (declare-function consult--lookup-cdr "consult" (selected candidates &rest _))
 (declare-function noema-sessions-native-binding "noema-sessions" (id root))
@@ -423,82 +423,214 @@ WHERE p.session_id = %s AND json_extract(p.data, '$.type') = 'text'
 ORDER BY p.time_created DESC LIMIT 8"
                        (+agent-history--sql-string (plist-get row :id)))))))))
 
-(defconst +agent-history-preview-buffer "*Agent history*")
+;; The preview is one hidden buffer shown in one reused child frame, like an LSP
+;; hover: it never takes a window, never takes the keyboard, and is hidden (not
+;; deleted) when the picker ends, so the next picker opens it without building a
+;; frame.  Moving through the list is debounced and each conversation is read
+;; once per picker.
+
+(defconst +agent-history-preview-buffer " *agent-history-preview*")
+
+(defconst +agent-history--preview-width 84
+  "Columns of the preview box.")
+
+(defconst +agent-history--label-width 132
+  "Columns a picker line takes before its `● open' mark, from `+agent-history-label'.")
+
+(declare-function +agent-history--preview-wheel "tools/agent/history" (event))
+
+(defvar +agent-history--preview-mouse-map
+  (let ((map (make-sparse-keymap)))
+    (dolist (key '([wheel-down] [wheel-up] [mouse-4] [mouse-5]))
+      (define-key map key #'+agent-history--preview-wheel))
+    ;; A click must not select the box's window and take the picker's keyboard.
+    (dolist (key '([down-mouse-1] [mouse-1] [drag-mouse-1] [double-mouse-1]
+                   [down-mouse-2] [mouse-2] [down-mouse-3] [mouse-3]))
+      (define-key map key #'ignore))
+    map)
+  "Mouse keys of the preview box: the wheel scrolls it in place.")
+
+(defun +agent-history--preview-render (row exchanges)
+  "Fill the preview buffer with ROW's header and EXCHANGES; return the buffer."
+  (let ((width (- +agent-history--preview-width 2)))
+    (with-current-buffer (get-buffer-create +agent-history-preview-buffer)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (propertize (truncate-string-to-width
+                             (replace-regexp-in-string
+                              "[\n\t ]+" " " (or (plist-get row :title) "(untitled)"))
+                             width nil nil "…")
+                            'face 'bold)
+                "\n"
+                (propertize (format "%s · %s · %s\n%s\n\n"
+                                    (plist-get row :agent) (plist-get row :id)
+                                    (+agent-history--when (plist-get row :updated))
+                                    (truncate-string-to-width
+                                     (or (plist-get row :cwd) "") width nil nil "…"))
+                            'face 'font-lock-comment-face))
+        (dolist (exchange exchanges)
+          (let ((user (equal (car exchange) "user")))
+            (insert (propertize (if user "You" "Agent")
+                                'face (if user 'font-lock-keyword-face 'success))
+                    "\n"
+                    (truncate-string-to-width (string-trim (cdr exchange)) 700 nil nil "…")
+                    "\n\n")))
+        (goto-char (point-min)))
+      (unless (eq major-mode 'special-mode)
+        (special-mode)
+        (setq-local truncate-lines nil word-wrap t mode-line-format nil
+                    cursor-type nil
+                    fringe-indicator-alist '((continuation nil nil)))
+        (use-local-map (make-composed-keymap +agent-history--preview-mouse-map
+                                             special-mode-map)))
+      (current-buffer))))
 
 (defun +agent-history--render-preview (row)
-  "Show ROW's header and last exchanges in the preview buffer."
-  (with-current-buffer (get-buffer-create +agent-history-preview-buffer)
-    (let ((inhibit-read-only t))
-      (erase-buffer)
-      (insert (propertize (or (plist-get row :title) "(untitled)") 'face 'bold) "\n"
-              (propertize (format "%s · %s · %s\n%s\n\n"
-                                  (plist-get row :agent) (plist-get row :id)
-                                  (+agent-history--when (plist-get row :updated))
-                                  (or (plist-get row :cwd) ""))
-                          'face 'font-lock-comment-face))
-      (let ((exchanges (last (+agent-history--exchanges row) 6)))
-        (when (and (null exchanges) (plist-get row :prompt))
-          (setq exchanges (list (cons "user" (plist-get row :prompt)))))
-        (dolist (exchange exchanges)
-        (insert (propertize (if (equal (car exchange) "user") "You" "Agent")
-                            'face (if (equal (car exchange) "user") 'font-lock-keyword-face 'success))
-                "\n"
-                (truncate-string-to-width (string-trim (cdr exchange)) 700 nil nil "…")
-                "\n\n")))
-      (goto-char (point-min))
-      (special-mode)
-      (setq-local truncate-lines nil word-wrap t mode-line-format nil
-                  fringe-indicator-alist '((continuation nil nil))))
-    (current-buffer)))
+  "Fill the preview buffer for ROW, reading its last exchanges; return the buffer."
+  (+agent-history--preview-render row (+agent-history--preview-exchanges row)))
 
-(defun +agent-history--preview-poshandler (info)
-  "Place the preview like an LSP hover: right-aligned, just above the minibuffer."
-  (let* ((frame (plist-get info :parent-frame))
-         (mini (minibuffer-window frame))
-         (top (if (eq (window-frame mini) frame)
-                  (nth 1 (window-pixel-edges mini))
-                (plist-get info :parent-frame-height))))
-    (cons (max 0 (- (plist-get info :parent-frame-width)
-                    (plist-get info :posframe-width)
-                    (* 2 (frame-char-width frame))))
-          (max 0 (- top (plist-get info :posframe-height)
-                    (frame-char-height frame))))))
+(defun +agent-history--preview-exchanges (row)
+  "Return ROW's last exchanges for the preview, or its first prompt."
+  (or (last (ignore-errors (+agent-history--exchanges row)) 6)
+      (and (plist-get row :prompt) (list (cons "user" (plist-get row :prompt))))))
+
+(defun +agent-history--preview-window ()
+  "Return the window of the preview box while it is shown."
+  (when-let* ((buffer (get-buffer +agent-history-preview-buffer))
+              (window (get-buffer-window buffer t)))
+    (and (frame-visible-p (window-frame window)) window)))
+
+(defun +agent-history--preview-scroll-window (window lines)
+  "Scroll WINDOW by LINES without selecting it, so the picker keeps the keyboard."
+  (when (window-live-p window)
+    (with-current-buffer (window-buffer window)
+      (let ((start (save-excursion
+                     (goto-char (window-start window))
+                     (vertical-motion lines window)
+                     (point))))
+        (set-window-start window (min start (max (point-min) (1- (point-max)))) t)))))
+
+(defun +agent-history/preview-scroll-up (&optional lines)
+  "Scroll the preview box forward by LINES, or most of its height."
+  (interactive "P")
+  (when-let* ((window (+agent-history--preview-window)))
+    (+agent-history--preview-scroll-window
+     window (if lines (prefix-numeric-value lines) (max 1 (- (window-body-height window) 2))))))
+
+(defun +agent-history/preview-scroll-down (&optional lines)
+  "Scroll the preview box back by LINES, or most of its height."
+  (interactive "P")
+  (when-let* ((window (+agent-history--preview-window)))
+    (+agent-history--preview-scroll-window
+     window (- (if lines (prefix-numeric-value lines) (max 1 (- (window-body-height window) 2)))))))
+
+(defun +agent-history--preview-wheel (event)
+  "Scroll the preview box under the wheel EVENT, leaving selection alone."
+  (interactive (list last-input-event))
+  (let ((window (posn-window (event-start event))))
+    (+agent-history--preview-scroll-window
+     window (if (memq (event-basic-type event) '(wheel-up mouse-4)) -3 3))))
+
+(defvar +agent-history-picker-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-M-v") #'+agent-history/preview-scroll-up)
+    (define-key map (kbd "C-M-S-v") #'+agent-history/preview-scroll-down)
+    (define-key map (kbd "M-<next>") #'+agent-history/preview-scroll-up)
+    (define-key map (kbd "M-<prior>") #'+agent-history/preview-scroll-down)
+    map)
+  "Picker keys: the other-window scroll keys scroll the preview.")
+
+(defun +agent-history--preview-geometry (frame)
+  "Return (X Y WIDTH HEIGHT) in pixels and lines for the preview on FRAME.
+Beside the candidates inside the minibuffer area when the list is tall and the
+frame wide enough, otherwise right-aligned just above the minibuffer."
+  (let* ((mini (minibuffer-window frame))
+         (cw (frame-char-width frame))
+         (ch (frame-char-height frame))
+         (frame-w (frame-pixel-width frame))
+         (mini-top (if (eq (window-frame mini) frame)
+                       (nth 1 (window-pixel-edges mini))
+                     (frame-pixel-height frame)))
+         (mini-lines (if (eq (window-frame mini) frame) (window-total-height mini) 1))
+         (box-w (* cw (+ +agent-history--preview-width 2)))
+         (beside (and (>= mini-lines 8)
+                      (>= (- frame-w box-w (* 2 cw))
+                          (* cw (+ +agent-history--label-width 4))))))
+    (if beside
+        (list (- frame-w box-w (* 2 cw)) mini-top
+              +agent-history--preview-width (max 4 (- mini-lines 1)))
+      (let ((lines (max 4 (min 20 (- (/ mini-top ch) 3)))))
+        (list (- frame-w box-w (* 2 cw))
+              (max 0 (- mini-top (* ch (1+ lines)) (/ ch 2)))
+              +agent-history--preview-width lines)))))
+
+(defvar +agent-history--preview-geometry nil
+  "Geometry of the preview being shown, from `+agent-history--preview-geometry'.")
+
+(defun +agent-history--preview-poshandler (_info)
+  "Place the preview box where `+agent-history--preview-geometry' says."
+  (cons (nth 0 +agent-history--preview-geometry)
+        (nth 1 +agent-history--preview-geometry)))
 
 (defun +agent-history--show-preview (buffer)
-  "Show preview BUFFER in a hover child frame, or a window without a GUI."
+  "Show preview BUFFER in the hover box, or in a window without a GUI.
+Return non-nil when it is the box, which leaves the window layout alone."
   (if (and (require 'posframe nil t) (posframe-workable-p))
-      (posframe-show buffer
-                     :poshandler #'+agent-history--preview-poshandler
-                     :min-width 60 :max-width 84 :max-height 24
-                     :left-fringe 8 :right-fringe 8
-                     :border-width 1
-                     :border-color (face-background 'child-frame-border nil t)
-                     :background-color (face-background
-                                        (if (facep 'lsp-ui-doc-background)
-                                            'lsp-ui-doc-background
-                                          'default)
-                                        nil t)
-                     :accept-focus nil)
+      (let* ((frame (window-frame (minibuffer-selected-window)))
+             (geometry (+agent-history--preview-geometry
+                        (or (frame-parent frame) frame))))
+        (setq +agent-history--preview-geometry geometry)
+        (posframe-show buffer
+                       :poshandler #'+agent-history--preview-poshandler
+                       :width (nth 2 geometry) :height (nth 3 geometry)
+                       :left-fringe 8 :right-fringe 8
+                       :border-width 1
+                       :border-color (face-background 'child-frame-border nil t)
+                       :background-color (face-background
+                                          (if (facep 'lsp-ui-doc-background)
+                                              'lsp-ui-doc-background
+                                            'default)
+                                          nil t)
+                       :accept-focus nil)
+        t)
     (display-buffer buffer '((display-buffer-reuse-window display-buffer-use-some-window
                                                           display-buffer-pop-up-window)
-                             (inhibit-same-window . t)))))
+                             (inhibit-same-window . t)))
+    nil))
+
+(defun +agent-history--hide-preview ()
+  "Hide the preview box and empty its buffer, keeping the frame for reuse."
+  (when-let* ((buffer (get-buffer +agent-history-preview-buffer)))
+    (when (fboundp 'posframe-hide)
+      (posframe-hide buffer))
+    (dolist (window (get-buffer-window-list buffer nil t))
+      (unless (frame-parameter (window-frame window) 'posframe-buffer)
+        (ignore-errors (quit-restore-window window 'bury))))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t)) (erase-buffer)))))
 
 (defun +agent-history--preview-state ()
-  "Return a consult state function previewing the conversation at point."
-  (let ((windows (current-window-configuration)))
+  "Return a consult state function previewing the conversation at point.
+Each conversation is read once per picker; the box is hidden on exit."
+  (let ((windows (current-window-configuration))
+        (cache (make-hash-table :test #'equal))
+        windowed)
     (lambda (action row)
       (pcase action
         ('preview
          (when row
-           (+agent-history--show-preview (+agent-history--render-preview row))))
+           (let* ((key (cons (plist-get row :agent) (plist-get row :id)))
+                  (exchanges (or (gethash key cache)
+                                 (puthash key (+agent-history--preview-exchanges row) cache))))
+             (unless (+agent-history--show-preview
+                      (+agent-history--preview-render row exchanges))
+               (setq windowed t)))))
         ('exit
-         (when-let* ((buffer (get-buffer +agent-history-preview-buffer)))
-           (if (fboundp 'posframe-delete)
-               (posframe-delete buffer)
-             (kill-buffer buffer)))
-         (when (get-buffer +agent-history-preview-buffer)
-           (kill-buffer +agent-history-preview-buffer))
-         (set-window-configuration windows))))))
+         (clrhash cache)
+         (+agent-history--hide-preview)
+         ;; Only the window fallback changed the layout.
+         (when windowed
+           (set-window-configuration windows)))))))
 
 (defun +agent-history-read (rows &optional prompt)
   "Read one of ROWS with PROMPT, newest first, previewing the one at point."
@@ -509,6 +641,8 @@ ORDER BY p.time_created DESC LIMIT 8"
                        :prompt (or prompt "Resume conversation: ")
                        :require-match t :sort nil
                        :lookup #'consult--lookup-cdr
+                       :keymap +agent-history-picker-map
+                       :preview-key '(:debounce 0.08 any)
                        :state (+agent-history--preview-state))
       (cdr (assoc (completing-read (or prompt "Resume conversation: ")
                                    (lambda (string predicate action)
