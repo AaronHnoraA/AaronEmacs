@@ -462,12 +462,17 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   已打开的标 `● open`，移动时在悬浮框（与 LSP 悬浮文档同样的
   child frame，候选右侧或 minibuffer 正上方）预览最后几轮对话；它不取窗口也不取键盘，
   滚轮与 `C-M-v` / `C-M-S-v` 原地滚动，每个对话在一次选择中只读一次，移动去抖，选择结束
-  时隐藏并清空，下次复用同一个 frame。打开规则：在会话里用该会话的
+  时隐藏并清空，下次复用同一个 frame。预览与查看都从 transcript 末尾按固定大小的字节窗
+  往前分页读取（只解码像消息的行，单条消息有字数上限），从不读整个文件：悬浮框最新的在上，
+  滚到底再加载更早的一页，一个对话最多保留 60 条，一次选择最多缓存 24 个对话。`Cmd-RET`
+  在只读 Markdown buffer 中查看该对话（按时间顺序，先载入最近 20 条，`<` 加载更早，`r`
+  恢复，`o` 打开原始 transcript）。打开规则：在会话里用该会话的
   agent，否则用对话自己的 agent。同一 agent 走原生恢复（会话里原地恢复，保留窗口、
   popup 与 Noema 名字；否则新会话），并开启严格恢复；另一 agent 的对话，或原生恢复
   失败（`+agent-acp-restore-failed-functions`），开一个新会话并自动发送
-  `resources/agent/resume-transcript.md`：读 transcript（文件路径，或
-  `opencode session export <id>`），概括目标、已做、未完成和约束后等待，不执行旧请求。
+  `resources/agent/resume-transcript.md`：只给 transcript 的链接（文件路径，或
+  `opencode session export <id>`）和一行标题，不嵌入内容，也不要求先读或概括；之后的请求
+  需要时由 agent 自己在文件里查找所需部分，以免占满长会话的上下文。
   已在运行的对话直接切过去。测试：`agent-c63-*`。
 
 ## 实现位置

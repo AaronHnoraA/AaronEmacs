@@ -28,6 +28,9 @@
 (declare-function +agent-shell-emacs-file-name "tools/agent/config" (logical))
 (declare-function +agent-context-content-blocks "tools/agent/context" (prompt references))
 (declare-function +agent-context--deliver "tools/agent/context" (buffer blocks &optional instructions no-focus))
+(defvar +programmatic-file-visit)
+(declare-function vertico-exit "vertico" (&optional arg))
+(declare-function markdown-view-mode "markdown-mode" ())
 (declare-function consult--read "consult" (table &rest options))
 (declare-function posframe-show "posframe" (buffer-or-name &rest args))
 (declare-function posframe-hide "posframe" (buffer-or-name))
@@ -57,7 +60,11 @@
   :type 'integer)
 
 (defcustom +agent-history-preview-bytes 262144
-  "Bytes read from the end of a transcript file for its preview."
+  "Bytes read from the end of a transcript file to describe it."
+  :type 'integer)
+
+(defcustom +agent-history-page-bytes 131072
+  "Bytes of a transcript read per preview page, walking back from its end."
   :type 'integer)
 
 ;;;; ── Where the stores are ─────────────────────────────────────────────────
@@ -373,55 +380,130 @@ conversations in throwaway folders are left out (`+agent-history--scratch-p')."
 
 ;;;; ── Preview ──────────────────────────────────────────────────────────────
 
+(defconst +agent-history--page-messages 6
+  "Messages one preview page asks for.")
+
+(defconst +agent-history--page-windows 4
+  "Most byte windows one page reads looking for messages; bounds a page's cost
+when the end of a transcript is all tool output.")
+
+(defvar +agent-history--message-chars 2000
+  "Characters of one message kept: the preview's cap; the view binds more.")
+
+(defun +agent-history--read-bytes (file start end)
+  "Return FILE's raw bytes START to END as a unibyte string, or nil."
+  (ignore-errors
+    (with-temp-buffer
+      (set-buffer-multibyte nil)
+      (insert-file-contents-literally file nil start end)
+      (buffer-string))))
+
+(defun +agent-history--message (agent line)
+  "Return the (ROLE . TEXT) a person or agent wrote on transcript LINE of AGENT.
+LINE is raw bytes; lines that cannot be a message are skipped before decoding."
+  (when (pcase agent
+          ("claude" (or (string-search "\"type\":\"user\"" line)
+                        (string-search "\"type\":\"assistant\"" line)))
+          ("codex" (or (string-search "\"type\":\"message\"" line)
+                       (string-search "item_completed" line))))
+    (when-let* ((object (ignore-errors
+                          (json-parse-string (decode-coding-string line 'utf-8)
+                                             :object-type 'alist :array-type 'list
+                                             :null-object nil :false-object nil)))
+                (message
+                 (pcase agent
+                   ("claude"
+                    (let ((type (map-elt object 'type)))
+                      (and (member type '("user" "assistant"))
+                           (not (map-elt object 'isMeta))
+                           (cons type (+agent-history--text
+                                       (map-nested-elt object '(message content)))))))
+                   ("codex"
+                    ;; A message is recorded as a response item and, in newer
+                    ;; files, again as a completed item.
+                    (let* ((payload (map-elt object 'payload))
+                           (item (map-elt payload 'item)))
+                      (cond
+                       ((and (equal (map-elt object 'type) "response_item")
+                             (equal (map-elt payload 'type) "message")
+                             (member (map-elt payload 'role) '("user" "assistant")))
+                        (cons (map-elt payload 'role)
+                              (+agent-history--text (map-elt payload 'content))))
+                       ((and (equal (map-elt payload 'type) "item_completed")
+                             (member (map-elt item 'type) '("UserMessage" "AgentMessage")))
+                        (cons (if (equal (map-elt item 'type) "UserMessage") "user" "assistant")
+                              (+agent-history--text (map-elt item 'content))))))))))
+      (when (+agent-history--prompt-p (cdr message))
+        (cons (car message)
+              (truncate-string-to-width (string-trim (cdr message))
+                                        +agent-history--message-chars nil nil "…"))))))
+
+(defun +agent-history--file-page (row end)
+  "Return (MESSAGES . NEXT) from ROW's transcript before byte END, newest first.
+END nil means the end of the file.  NEXT is the END of the following page, or
+nil at the start of the file.  Only fixed-size windows are read, never the
+whole file."
+  (let* ((file (plist-get row :file))
+         (agent (plist-get row :agent))
+         (end (or end (and file (file-attribute-size (file-attributes file)))))
+         messages (windows 0))
+    (while (and end (> end 0)
+                (< (length messages) +agent-history--page-messages)
+                (< windows +agent-history--page-windows))
+      (cl-incf windows)
+      (let* ((start (max 0 (- end +agent-history-page-bytes)))
+             (bytes (or (+agent-history--read-bytes file start end) ""))
+             (newline (and (> start 0)
+                           (let ((index (string-search "\n" bytes)))
+                             ;; A newline that ends the window starts no line in it.
+                             (and index (< (1+ index) (length bytes)) index)))))
+        ;; Before the first newline is a partial line, read with the next page.
+        ;; A window inside one long line holds no whole line: step over it.
+        (unless (and (> start 0) (null newline))
+          (dolist (line (nreverse (split-string (substring bytes (if newline (1+ newline) 0))
+                                                "\n" t)))
+            (when-let* ((message (+agent-history--message agent line)))
+              (unless (equal message (car (last messages)))
+                (setq messages (append messages (list message)))))))
+        (setq end (and (> start 0) (if newline (+ start newline 1) start)))))
+    (cons messages end)))
+
+(defun +agent-history--opencode-page (row before)
+  "Return (MESSAGES . NEXT) of ROW's OpenCode session before time BEFORE."
+  (let* ((rows (+agent-history--sqlite
+                (plist-get row :db)
+                (format "SELECT json_extract(m.data, '$.role') AS role,
+ substr(json_extract(p.data, '$.text'), 1, %d) AS text, p.time_created AS t
+FROM part p JOIN message m ON m.id = p.message_id
+WHERE p.session_id = %s AND json_extract(p.data, '$.type') = 'text'%s
+ORDER BY p.time_created DESC LIMIT %d"
+                        (1+ +agent-history--message-chars)
+                        (+agent-history--sql-string (plist-get row :id))
+                        (if before (format " AND p.time_created < %d" before) "")
+                        +agent-history--page-messages)))
+         (messages (delq nil (mapcar (lambda (part)
+                                       (let ((text (map-elt part 'text)))
+                                         (when (+agent-history--prompt-p text)
+                                           (cons (map-elt part 'role)
+                                                 (truncate-string-to-width
+                                                  (string-trim text)
+                                                  +agent-history--message-chars nil nil "…")))))
+                                     rows))))
+    (cons messages
+          (and (= (length rows) +agent-history--page-messages)
+               (map-elt (car (last rows)) 't)))))
+
+(defun +agent-history--page (row &optional next)
+  "Return (MESSAGES . NEXT) of ROW, newest first, starting at NEXT."
+  (or (ignore-errors
+        (pcase (plist-get row :agent)
+          ((or "claude" "codex") (and (plist-get row :file) (+agent-history--file-page row next)))
+          ("opencode" (+agent-history--opencode-page row next))))
+      (list nil)))
+
 (defun +agent-history--exchanges (row)
   "Return ROW's last messages as (ROLE . TEXT), oldest first."
-  (pcase (plist-get row :agent)
-    ("claude"
-     (delq nil (mapcar (lambda (line)
-                         (let ((type (map-elt line 'type)))
-                           (when (and (member type '("user" "assistant"))
-                                      (not (map-elt line 'isMeta)))
-                             (let ((text (+agent-history--text
-                                          (map-nested-elt line '(message content)))))
-                               (when (+agent-history--prompt-p text)
-                                 (cons type text))))))
-                       (+agent-history--json-lines
-                        (or (+agent-history--file-tail (plist-get row :file)) "")))))
-    ("codex"
-     ;; A message is recorded as a response item and, in newer files, again as
-     ;; a completed item; keep one of each.
-     (let (messages)
-       (dolist (line (+agent-history--json-lines
-                      (or (and (plist-get row :file)
-                               (+agent-history--file-tail (plist-get row :file)))
-                          "")))
-         (let* ((payload (map-elt line 'payload))
-                (item (map-elt payload 'item))
-                (message
-                 (cond
-                  ((and (equal (map-elt line 'type) "response_item")
-                        (equal (map-elt payload 'type) "message")
-                        (member (map-elt payload 'role) '("user" "assistant")))
-                   (cons (map-elt payload 'role) (+agent-history--text (map-elt payload 'content))))
-                  ((and (equal (map-elt payload 'type) "item_completed")
-                        (member (map-elt item 'type) '("UserMessage" "AgentMessage")))
-                   (cons (if (equal (map-elt item 'type) "UserMessage") "user" "assistant")
-                         (+agent-history--text (map-elt item 'content)))))))
-           (when (and message (+agent-history--prompt-p (cdr message))
-                      (not (member message messages)))
-             (push message messages))))
-       (nreverse messages)))
-    ("opencode"
-     (nreverse
-      (mapcar (lambda (part) (cons (map-elt part 'role) (map-elt part 'text)))
-              (+agent-history--sqlite
-               (plist-get row :db)
-               (format "SELECT json_extract(m.data, '$.role') AS role,
- json_extract(p.data, '$.text') AS text
-FROM part p JOIN message m ON m.id = p.message_id
-WHERE p.session_id = %s AND json_extract(p.data, '$.type') = 'text'
-ORDER BY p.time_created DESC LIMIT 8"
-                       (+agent-history--sql-string (plist-get row :id)))))))))
+  (reverse (car (+agent-history--page row))))
 
 ;; The preview is one hidden buffer shown in one reused child frame, like an LSP
 ;; hover: it never takes a window, never takes the keyboard, and is hidden (not
@@ -450,10 +532,43 @@ ORDER BY p.time_created DESC LIMIT 8"
     map)
   "Mouse keys of the preview box: the wheel scrolls it in place.")
 
-(defun +agent-history--preview-render (row exchanges)
-  "Fill the preview buffer with ROW's header and EXCHANGES; return the buffer."
+(defconst +agent-history--preview-max-messages 60
+  "Most messages the preview holds for one conversation; open it for the rest.")
+
+(defvar-local +agent-history--preview-entry nil
+  "The conversation in the preview: a cons (ROW . PAGES).
+PAGES is (MESSAGES . NEXT) as `+agent-history--page' returns, accumulated; it is
+the same object the picker caches, so a revisit keeps what was loaded.")
+
+(defun +agent-history--preview-insert-messages (messages)
+  "Insert MESSAGES, newest first, at point."
+  (dolist (message messages)
+    (let ((user (equal (car message) "user")))
+      (insert (propertize (if user "You" "Agent")
+                          'face (if user 'font-lock-keyword-face 'success))
+              "\n" (cdr message) "\n\n"))))
+
+(defun +agent-history--preview-footer (pages)
+  "Insert the line that ends the preview of PAGES."
+  (insert (propertize (cond ((null (cdr pages)) "— start of conversation —")
+                            ((>= (length (car pages)) +agent-history--preview-max-messages)
+                             "— earlier messages: open the conversation —")
+                            (t "↓ earlier messages load as you scroll"))
+                      'face 'font-lock-comment-face
+                      '+agent-history-footer t)))
+
+(defun +agent-history--preview-render (row pages)
+  "Fill the preview buffer with ROW's header and PAGES; return the buffer.
+PAGES is (MESSAGES . NEXT), newest first."
   (let ((width (- +agent-history--preview-width 2)))
     (with-current-buffer (get-buffer-create +agent-history-preview-buffer)
+      (unless (eq major-mode 'special-mode)
+        (special-mode)
+        (setq-local truncate-lines nil word-wrap t mode-line-format nil
+                    cursor-type nil
+                    fringe-indicator-alist '((continuation nil nil)))
+        (use-local-map (make-composed-keymap +agent-history--preview-mouse-map
+                                             special-mode-map)))
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert (propertize (truncate-string-to-width
@@ -462,37 +577,55 @@ ORDER BY p.time_created DESC LIMIT 8"
                              width nil nil "…")
                             'face 'bold)
                 "\n"
-                (propertize (format "%s · %s · %s\n%s\n\n"
+                (propertize (format "%s · %s · %s · newest first\n%s\n\n"
                                     (plist-get row :agent) (plist-get row :id)
                                     (+agent-history--when (plist-get row :updated))
                                     (truncate-string-to-width
                                      (or (plist-get row :cwd) "") width nil nil "…"))
                             'face 'font-lock-comment-face))
-        (dolist (exchange exchanges)
-          (let ((user (equal (car exchange) "user")))
-            (insert (propertize (if user "You" "Agent")
-                                'face (if user 'font-lock-keyword-face 'success))
-                    "\n"
-                    (truncate-string-to-width (string-trim (cdr exchange)) 700 nil nil "…")
-                    "\n\n")))
+        (+agent-history--preview-insert-messages
+         (or (car pages)
+             (and (plist-get row :prompt)
+                  (list (cons "user" (truncate-string-to-width
+                                      (plist-get row :prompt)
+                                      +agent-history--message-chars nil nil "…"))))))
+        (+agent-history--preview-footer pages)
         (goto-char (point-min)))
-      (unless (eq major-mode 'special-mode)
-        (special-mode)
-        (setq-local truncate-lines nil word-wrap t mode-line-format nil
-                    cursor-type nil
-                    fringe-indicator-alist '((continuation nil nil)))
-        (use-local-map (make-composed-keymap +agent-history--preview-mouse-map
-                                             special-mode-map)))
+      (setq +agent-history--preview-entry (cons row pages))
+      (dolist (window (get-buffer-window-list (current-buffer) nil t))
+        (set-window-start window (point-min))
+        (set-window-point window (point-min)))
       (current-buffer))))
 
-(defun +agent-history--render-preview (row)
-  "Fill the preview buffer for ROW, reading its last exchanges; return the buffer."
-  (+agent-history--preview-render row (+agent-history--preview-exchanges row)))
+(defun +agent-history--preview-more ()
+  "Append the next older page to the preview; return non-nil when it did.
+The page is added to the cached entry, so the picker keeps it."
+  (with-current-buffer +agent-history-preview-buffer
+    (pcase-let* ((`(,row . ,pages) +agent-history--preview-entry))
+      (when (and pages (cdr pages)
+                 (< (length (car pages)) +agent-history--preview-max-messages))
+        (pcase-let ((`(,messages . ,next) (+agent-history--page row (cdr pages))))
+          (setcar pages (append (car pages) messages))
+          (setcdr pages next)
+          (let ((inhibit-read-only t))
+            (save-excursion
+              (goto-char (or (text-property-any (point-min) (point-max)
+                                                '+agent-history-footer t)
+                             (point-max)))
+              (delete-region (point) (point-max))
+              (+agent-history--preview-insert-messages messages)
+              (+agent-history--preview-footer pages)))
+          t)))))
 
-(defun +agent-history--preview-exchanges (row)
-  "Return ROW's last exchanges for the preview, or its first prompt."
-  (or (last (ignore-errors (+agent-history--exchanges row)) 6)
-      (and (plist-get row :prompt) (list (cons "user" (plist-get row :prompt))))))
+(defun +agent-history--preview-maybe-more (window)
+  "Load an older page when WINDOW shows the end of the preview."
+  (when (and (window-live-p window)
+             (>= (window-end window t)
+                 (with-current-buffer (window-buffer window)
+                   (or (text-property-any (point-min) (point-max)
+                                          '+agent-history-footer t)
+                       (point-max)))))
+    (+agent-history--preview-more)))
 
 (defun +agent-history--preview-window ()
   "Return the window of the preview box while it is shown."
@@ -512,7 +645,9 @@ ORDER BY p.time_created DESC LIMIT 8"
         ;; the box's point at the top.
         (setq start (min start (max (point-min) (1- (point-max)))))
         (set-window-point window start)
-        (set-window-start window start)))))
+        (set-window-start window start))
+      (when (> lines 0)
+        (+agent-history--preview-maybe-more window)))))
 
 (defun +agent-history/preview-scroll-up (&optional lines)
   "Scroll the preview box forward by LINES, or most of its height."
@@ -563,12 +698,26 @@ into the box ignored, its wheel events are looked up in the picker's keymaps."
     (dolist (key '([wheel-down] [wheel-up] [mouse-4] [mouse-5]))
       (define-key map key '(menu-item "" +agent-history--preview-wheel
                                       :filter +agent-history--wheel-filter)))
+    (dolist (key '("M-RET" "M-<return>" "s-RET" "s-<return>"))
+      (define-key map (kbd key) #'+agent-history/picker-view))
     (define-key map (kbd "C-M-v") #'+agent-history/preview-scroll-up)
     (define-key map (kbd "C-M-S-v") #'+agent-history/preview-scroll-down)
     (define-key map (kbd "M-<next>") #'+agent-history/preview-scroll-up)
     (define-key map (kbd "M-<prior>") #'+agent-history/preview-scroll-down)
     map)
-  "Picker keys: the wheel over the box and the other-window scroll keys scroll it.")
+  "Picker keys: Cmd-RET views the conversation as a buffer; the wheel over the
+box and the other-window scroll keys scroll the preview.")
+
+(defvar +agent-history--picker-action nil
+  "What the picker's caller does with the chosen row: nil opens it, `view' views it.")
+
+(defun +agent-history/picker-view ()
+  "Accept the selected conversation to view it as a buffer instead of opening it."
+  (interactive)
+  (setq +agent-history--picker-action 'view)
+  (if (and (fboundp 'vertico-exit) (bound-and-true-p vertico--input))
+      (vertico-exit)
+    (exit-minibuffer)))
 
 (defun +agent-history--preview-geometry (frame)
   "Return (X Y WIDTH HEIGHT) in pixels and lines for the preview on FRAME.
@@ -637,11 +786,17 @@ Return non-nil when it is the box, which leaves the window layout alone."
       (unless (frame-parameter (window-frame window) 'posframe-buffer)
         (ignore-errors (quit-restore-window window 'bury))))
     (with-current-buffer buffer
+      (setq +agent-history--preview-entry nil)
       (let ((inhibit-read-only t)) (erase-buffer)))))
+
+(defconst +agent-history--preview-cache-size 24
+  "Conversations whose loaded pages one picker keeps.")
 
 (defun +agent-history--preview-state ()
   "Return a consult state function previewing the conversation at point.
-Each conversation is read once per picker; the box is hidden on exit."
+A conversation's first page is read once per picker and older pages only as the
+box is scrolled; at most `+agent-history--preview-cache-size' conversations are
+kept.  The box is hidden on exit."
   (let ((windows (current-window-configuration))
         (cache (make-hash-table :test #'equal))
         windowed)
@@ -650,10 +805,14 @@ Each conversation is read once per picker; the box is hidden on exit."
         ('preview
          (when row
            (let* ((key (cons (plist-get row :agent) (plist-get row :id)))
-                  (exchanges (or (gethash key cache)
-                                 (puthash key (+agent-history--preview-exchanges row) cache))))
+                  (pages (or (gethash key cache)
+                             (progn
+                               (when (>= (hash-table-count cache)
+                                         +agent-history--preview-cache-size)
+                                 (clrhash cache))
+                               (puthash key (+agent-history--page row) cache)))))
              (unless (+agent-history--show-preview
-                      (+agent-history--preview-render row exchanges))
+                      (+agent-history--preview-render row pages))
                (setq windowed t)))))
         ('exit
          (clrhash cache)
@@ -703,17 +862,21 @@ Each conversation is read once per picker; the box is hidden on exit."
     (if (and dir (file-directory-p dir)) dir fallback)))
 
 (defun +agent-history-transcript-prompt (row)
-  "Return the prompt asking a session to read ROW's transcript."
+  "Return the short prompt pointing a session at ROW's transcript.
+It carries a link and a one-line title, never the transcript or its first
+message: the session looks up only what a later request needs."
   (noema-agent-text
    "resume-transcript"
    :agent (plist-get row :agent)
    :id (plist-get row :id)
    :cwd (or (plist-get row :cwd) "")
-   :title (or (plist-get row :title) "")
+   :title (truncate-string-to-width
+           (replace-regexp-in-string "[\n\t ]+" " " (or (plist-get row :title) ""))
+           80 nil nil "…")
    :read (if (plist-get row :file)
-             (format "Its transcript is the JSON-lines file %s."
+             (format "transcript (JSON lines): %s"
                      (+agent-history--native (plist-get row :file)))
-           (format "Run `opencode session export %s` to read it as JSON."
+           (format "transcript: `opencode session export %s` (JSON)"
                    (plist-get row :id)))))
 
 (defun +agent-history-continue (row agent directory)
@@ -814,6 +977,147 @@ agent, or else in a new one.  Another agent continues it from its transcript."
 (add-hook '+agent-acp-restore-failed-functions #'+agent-history-restore-failed-h)
 
 ;;;###autoload
+;;;; ── Viewing a conversation ───────────────────────────────────────────────
+
+;; A conversation read as a document, oldest at the top: it holds the newest
+;; pages first and earlier ones only when asked, so a long session is never
+;; read whole.  The buffer is an ordinary one; killing it frees everything.
+
+(defconst +agent-history--view-chars 20000
+  "Characters of one message the view keeps.")
+
+(defconst +agent-history--view-initial 20
+  "Messages the view loads when it opens.")
+
+(defconst +agent-history--view-pages 24
+  "Most pages one load of the view reads.")
+
+(defvar-local +agent-history--view-row nil
+  "The conversation this view shows.")
+
+(defvar-local +agent-history--view-next nil
+  "Where the view's earlier messages start, for `+agent-history--page'; nil at the start.")
+
+(defvar-local +agent-history--view-top nil
+  "Marker after the view's header, where earlier messages are inserted.")
+
+(defvar +agent-history-view-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "<") #'+agent-history/view-earlier)
+    (define-key map (kbd "r") #'+agent-history/view-resume)
+    (define-key map (kbd "o") #'+agent-history/view-transcript)
+    (define-key map (kbd "q") #'quit-window)
+    map)
+  "Keys of a conversation view.")
+
+(define-minor-mode +agent-history-view-mode
+  "A saved agent conversation, read only: `<' earlier, `r' resume, `o' raw transcript."
+  :lighter " History" :keymap +agent-history-view-mode-map)
+
+(defun +agent-history--view-insert (messages)
+  "Insert MESSAGES, given newest first, oldest at point first."
+  (dolist (message (reverse messages))
+    (insert (if (equal (car message) "user") "## You\n\n" "## Agent\n\n")
+            (cdr message) "\n\n")))
+
+(defun +agent-history--view-banner ()
+  "Insert the line saying whether earlier messages remain."
+  (insert (propertize (if +agent-history--view-next
+                          "<!-- earlier messages: press < -->\n\n"
+                        "<!-- start of conversation -->\n\n")
+                      'face 'font-lock-comment-face
+                      '+agent-history-banner t)))
+
+(defun +agent-history--view-load (count)
+  "Insert about COUNT earlier messages at the top; return how many came."
+  (let ((+agent-history--message-chars +agent-history--view-chars)
+        (inhibit-read-only t)
+        messages)
+    ;; A stretch of tool output yields empty pages; a bounded number of pages
+    ;; per load keeps one keypress from walking a huge file.
+    (let ((pages 0))
+      (while (and +agent-history--view-next (< (length messages) count)
+                  (< pages +agent-history--view-pages))
+        (cl-incf pages)
+        (pcase-let ((`(,page . ,next)
+                     (+agent-history--page +agent-history--view-row
+                                           (and (not (eq +agent-history--view-next t))
+                                                +agent-history--view-next))))
+          (setq messages (append messages page)
+                +agent-history--view-next next))))
+    (save-excursion
+      (goto-char +agent-history--view-top)
+      (let ((end (text-property-any (point) (point-max) '+agent-history-banner t)))
+        (when end
+          (delete-region end (or (next-single-property-change end '+agent-history-banner)
+                                 (point-max)))))
+      (+agent-history--view-banner)
+      (+agent-history--view-insert messages))
+    (length messages)))
+
+(defun +agent-history-view (row)
+  "Show ROW as a read-only Markdown buffer, its newest messages loaded."
+  (let* ((name (format "*History: %s*"
+                       (truncate-string-to-width
+                        (replace-regexp-in-string
+                         "[\n\t ]+" " " (or (plist-get row :title) (plist-get row :id)))
+                        48 nil nil "…")))
+         (buffer (get-buffer-create name)))
+    (with-current-buffer buffer
+      (unless (equal (plist-get +agent-history--view-row :id) (plist-get row :id))
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (if (fboundp 'markdown-view-mode) (markdown-view-mode) (special-mode))
+          (+agent-history-view-mode 1)
+          (setq-local +agent-history--view-row row
+                      +agent-history--view-next t
+                      default-directory (or (and (plist-get row :cwd)
+                                                 (file-directory-p (plist-get row :cwd))
+                                                 (file-name-as-directory (plist-get row :cwd)))
+                                            default-directory))
+          (insert "# " (replace-regexp-in-string
+                        "[\n\t ]+" " " (or (plist-get row :title) "(untitled)"))
+                  "\n\n"
+                  (format "%s · `%s` · %s · %s\n\n"
+                          (plist-get row :agent) (plist-get row :id)
+                          (+agent-history--when (plist-get row :updated))
+                          (or (plist-get row :cwd) ""))
+                  (if (plist-get row :file)
+                      (format "Transcript: %s\n\n" (+agent-history--native (plist-get row :file)))
+                    "")
+                  "`<` earlier · `r` resume · `o` raw transcript · `q` close\n\n")
+          (setq-local +agent-history--view-top (point-marker))
+          (+agent-history--view-load +agent-history--view-initial)
+          (set-buffer-modified-p nil)
+          (goto-char (point-max)))))
+    (pop-to-buffer buffer)
+    buffer))
+
+(defun +agent-history/view-earlier (&optional count)
+  "Load COUNT (default 20) earlier messages above the ones shown."
+  (interactive "P")
+  (if (not +agent-history--view-next)
+      (message "This is the start of the conversation")
+    (let ((from-end (- (point-max) (point))))
+      (message "Loaded %d earlier messages"
+               (+agent-history--view-load (if count (prefix-numeric-value count)
+                                            +agent-history--view-initial)))
+      (goto-char (- (point-max) from-end)))))
+
+(defun +agent-history/view-resume ()
+  "Open the viewed conversation as `+agent/history' would."
+  (interactive)
+  (+agent-history-open +agent-history--view-row))
+
+(defun +agent-history/view-transcript ()
+  "Visit the viewed conversation's raw transcript, read only."
+  (interactive)
+  (if-let* ((file (plist-get +agent-history--view-row :file)))
+      (let ((+programmatic-file-visit t))
+        (view-file file))
+    (user-error "This conversation is in a database: opencode session export %s"
+                (plist-get +agent-history--view-row :id))))
+
 (defun +agent/history (&optional all)
   "Choose any saved conversation of Claude Code, Codex or OpenCode and open it.
 In an agent session the conversation opens with that session's agent: its own
@@ -835,9 +1139,12 @@ folder rather than this project's."
          (rows (or rows (and (not all)
                              (progn (message "Nothing saved in this project; listing every folder")
                                     (+agent-history-list directory t source)))))
+         (+agent-history--picker-action nil)
          (row (+agent-history-read rows)))
-    (+agent-history-open
-     row (and source (buffer-local-value '+agent-acp-session-agent source)) source)))
+    (if (eq +agent-history--picker-action 'view)
+        (+agent-history-view row)
+      (+agent-history-open
+       row (and source (buffer-local-value '+agent-acp-session-agent source)) source))))
 
 (provide 'tools/agent/history)
 ;;; tools/agent/history.el ends here

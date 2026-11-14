@@ -109,10 +109,16 @@
                       (list :agent "claude" :id "abc" :cwd "/w" :title "T" :file "/h/.claude/x.jsonl")))
         (db-prompt (+agent-history-transcript-prompt
                     (list :agent "opencode" :id "ses_1" :cwd "/w" :title "T"))))
-    (should (string-match-p "claude session, ID abc" file-prompt))
+    (should (string-match-p "claude conversation (abc" file-prompt))
     (should (string-match-p "/h/\\.claude/x\\.jsonl" file-prompt))
     (should (string-match-p "opencode session export ses_1" db-prompt))
-    (should-not (string-match-p "{" db-prompt))))
+    (should-not (string-match-p "{" db-prompt)))
+  ;; A long first message as title stays one short line: a link, not content.
+  (let ((prompt (+agent-history-transcript-prompt
+                 (list :agent "codex" :id "x" :cwd "/w" :file "/r/x.jsonl"
+                       :title (concat "task:\n" (make-string 3000 ?y))))))
+    (should (< (length prompt) 600))
+    (should-not (string-match-p "\n.*\n.*\n.*\n" prompt))))
 
 (ert-deftest agent-c63-open-routes-by-agent ()
   (let (calls)
@@ -168,8 +174,9 @@
                (lambda (buffer &rest args)
                  (setq shown (list buffer (plist-get args :poshandler) (plist-get args :accept-focus)))))
               ((symbol-function 'posframe-hide) (lambda (buffer) (setq hidden buffer)))
-              ((symbol-function '+agent-history--exchanges)
-               (lambda (_) (cl-incf reads) '(("user" . "plan it") ("assistant" . "planned"))))
+              ((symbol-function '+agent-history--page)
+               (lambda (_ &optional _next)
+                 (cl-incf reads) (list '(("assistant" . "planned") ("user" . "plan it")))))
               ((symbol-function 'display-buffer) (lambda (&rest _) (error "No window preview"))))
       (let ((state (+agent-history--preview-state))
             (row (list :agent "codex" :id "p1" :title "Plan\nwith a newline" :updated (float-time)))
@@ -195,7 +202,7 @@
 (ert-deftest agent-c63-preview-scrolls-without-taking-the-keyboard ()
   (let ((buffer (+agent-history--preview-render
                  (list :agent "claude" :id "s" :title "T" :updated (float-time))
-                 (cl-loop for i below 40 collect (cons "user" (format "line %d" i))))))
+                 (list (cl-loop for i below 40 collect (cons "user" (format "line %d" i)))))))
     (save-window-excursion
       (let ((selected (selected-window))
             (window (split-window)))
@@ -255,5 +262,99 @@
         (should (= lines 20))
         (should (<= (+ y (* 20 21)) 1300))))))
 
+
+(ert-deftest agent-c63-long-transcripts-are-read-a-page-at-a-time ()
+  (agent-history-tests--home
+    (let* ((file (expand-file-name "t.jsonl" home))
+           (row (list :agent "claude" :id "t" :file file))
+           (+agent-history-page-bytes 4096))
+      (apply #'agent-history-tests--write file
+             (cl-loop for i below 40
+                      append (list `((type . "user") (message . ((content . ,(format "q%d" i)))))
+                                   ;; Tool output between turns, larger than a window.
+                                   `((type . "user") (message . ((content . [((type . "tool_result") (content . ,(make-string 5000 ?x)))]))))
+                                   `((type . "assistant") (message . ((content . [((type . "text") (text . ,(format "a%d" i)))])))))))
+      (let ((reads 0) (seen nil) (page (list nil)) next)
+        (cl-letf* ((read (symbol-function '+agent-history--read-bytes))
+                   ((symbol-function '+agent-history--read-bytes)
+                    (lambda (file start end)
+                      (cl-incf reads)
+                      (should (<= (- end start) 4096))
+                      (funcall read file start end))))
+          (setq page (+agent-history--page row))
+          ;; The newest first, a page's worth, from bounded windows.
+          (should (equal (car (car page)) '("assistant" . "a39")))
+          (should (<= (length (car page)) +agent-history--page-messages))
+          (should (<= reads +agent-history--page-windows))
+          (setq next (cdr page))
+          (should (integerp next))
+          ;; Walking on reaches the first message and stops.
+          (setq seen (car page))
+          (while next
+            (let ((older (+agent-history--page row next)))
+              (should (or (null (cdr older)) (< (cdr older) next)))
+              (setq seen (append seen (car older)) next (cdr older))))
+          (should (equal (car (last seen)) '("user" . "q0")))
+          (should (= (length seen) 80)))))))
+
+(ert-deftest agent-c63-preview-loads-older-pages-as-it-scrolls ()
+  (let* ((row (list :agent "claude" :id "s" :title "T" :updated (float-time)))
+         (pages (cons (cl-loop for i below 6 collect (cons "user" (format "new %d" i))) 100))
+         (asked nil))
+    (cl-letf (((symbol-function '+agent-history--page)
+               (lambda (_ next)
+                 (push next asked)
+                 (cons (list (cons "assistant" "older")) nil))))
+      (with-current-buffer (+agent-history--preview-render row pages)
+        (should (string-match-p "earlier messages load" (buffer-string)))
+        (should (+agent-history--preview-more))
+        (should (equal asked '(100)))
+        ;; Appended to the cached pages, footer now the start.
+        (should (equal (car (last (car pages))) '("assistant" . "older")))
+        (should (null (cdr pages)))
+        (should (string-match-p "older\n\n— start of conversation —\\'" (buffer-string)))
+        (should-not (+agent-history--preview-more))))))
+
+(ert-deftest agent-c63-view-reads-a-conversation-like-a-file ()
+  (agent-history-tests--home
+    (let* ((file (expand-file-name "v.jsonl" home))
+           (row (list :agent "claude" :id "v" :file file :title "Long one"
+                      :updated (float-time)))
+           (+agent-history-page-bytes 2048))
+      (apply #'agent-history-tests--write file
+             (cl-loop for i below 50
+                      append (list `((type . "user") (message . ((content . ,(format "q%d" i)))))
+                                   `((type . "assistant") (message . ((content . [((type . "text") (text . ,(format "a%d" i)))])))))))
+      (let ((buffer (+agent-history-view row)))
+        (unwind-protect
+            (with-current-buffer buffer
+              (should buffer-read-only)
+              (should +agent-history-view-mode)
+              ;; Newest loaded, oldest not yet; in reading order.
+              (should (string-match-p "## You\n\nq49\n\n## Agent\n\na49\n\n\\'" (buffer-string)))
+              (should-not (string-match-p "\nq0\n" (buffer-string)))
+              (should (string-match-p "earlier messages: press <" (buffer-string)))
+              (while +agent-history--view-next
+                (+agent-history/view-earlier))
+              (should (string-match-p "start of conversation -->\n\n## You\n\nq0\n" (buffer-string)))
+              (should (= 1 (agent-history-tests--count "^## You\n\nq25$"))))
+          (kill-buffer buffer))))))
+
+(defun agent-history-tests--count (regexp)
+  "Count REGEXP in the current buffer."
+  (save-excursion (goto-char (point-min)) (how-many regexp)))
+
+(ert-deftest agent-c63-cmd-return-views-instead-of-opening ()
+  (let (viewed opened)
+    (cl-letf (((symbol-function '+agent-history-list) (lambda (&rest _) (list (list :agent "codex" :id "r"))))
+              ((symbol-function '+agent-history-read)
+               (lambda (rows &rest _) (setq +agent-history--picker-action 'view) (car rows)))
+              ((symbol-function '+agent-history-view) (lambda (row) (setq viewed row)))
+              ((symbol-function '+agent-history-open) (lambda (&rest args) (setq opened args))))
+      (with-temp-buffer (+agent/history))
+      (should (equal (plist-get viewed :id) "r"))
+      (should-not opened)
+      (should-not +agent-history--picker-action))
+    (should (eq (lookup-key +agent-history-picker-map (kbd "M-RET")) #'+agent-history/picker-view))))
 
 ;;; agent-history-tests.el ends here

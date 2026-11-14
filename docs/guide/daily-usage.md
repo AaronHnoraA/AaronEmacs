@@ -2043,10 +2043,11 @@ pending 队列。
 Claude Code、Codex、OpenCode 三家的已保存对话，像它们的 CLI 一样一行一个：agent、
 多久以前、轮数、分支、目录、标题，别处已打开的标 `● open`；上下移动时在悬浮框里预览最后
 几轮（列表够高、窗口够宽时在候选右侧，否则在 minibuffer 正上方）；滚轮或 `C-M-v` /
-`C-M-S-v` 滚动它，不会离开选择器。`C-u` 列出所有目录。在会话里选择时用该会话的 agent：同一 agent 的对话原地
+`C-M-S-v` 滚动它，不会离开选择器；长会话分块加载，滚到底再读更早的。`Cmd-RET` 不恢复，
+而是在只读 buffer 里像文件一样查看这段对话（`<` 加载更早，`r` 恢复，`o` 原始 transcript）。`C-u` 列出所有目录。在会话里选择时用该会话的 agent：同一 agent 的对话原地
 恢复（已有活动 buffer 直接切过去，否则替换当前 Agent 或 popup 窗口中的 buffer，
 沿用 Noema 登记的会话名）；另一 agent 的对话（例如在 Codex 里选 Claude Code 的）
-会开一个新会话，让它先读那份 transcript 并概括进度。原生恢复失败时也自动走这条路。
+会开一个新会话，只告诉它 transcript 的位置，需要时它自己去查。原生恢复失败时也自动走这条路。
 各家历史仍由它们自己保存，Emacs 只读取，不复制 transcript。
 
 `M-x agent-shell` 从当前工作 buffer 启动 Noema 管理的 agent，并显示在当前窗口；
