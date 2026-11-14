@@ -959,8 +959,9 @@ The image is captured on the client and saved under the session's
 (put '+agent-shell/paste 'delete-selection 'yank)
 (defun +agent-shell/paste ()
   "Paste what the clipboard holds now: its text, or else its image.
-Cmd-V in the chat.  The clipboard carries the most recent copy, so this
-pastes text after a text copy and the picture after a screenshot."
+C-v in the chat; Cmd-V keeps the ordinary paste.  The clipboard carries
+the most recent copy, so this pastes text after a text copy and the
+picture after a screenshot."
   (interactive "*")
   (if (eq (+agent-shell--clipboard-kind
            (ignore-errors (gui-get-selection 'CLIPBOARD 'TARGETS)))
@@ -970,7 +971,7 @@ pastes text after a text copy and the picture after a screenshot."
 
 (after! agent-shell
   (require 'agent-shell-list-edit nil t)
-  ;; Command is Meta: M-RET is Cmd-RET, M-v is Cmd-V.
+  ;; Command is Meta: M-RET is Cmd-RET.  Cmd-V (M-v) stays the global paste.
   (map! :map agent-shell-mode-map
         "RET" #'+agent-shell/newline
         "<return>" #'+agent-shell/newline
@@ -978,10 +979,9 @@ pastes text after a text copy and the picture after a screenshot."
         :desc "Send / steer" "M-<return>" #'agent-shell-submit
         :desc "Send / queue" "M-S-RET" #'agent-shell-submit-override
         :desc "Send / queue" "M-S-<return>" #'agent-shell-submit-override
-        :desc "Paste text or image" "M-v" #'+agent-shell/paste
-        :desc "Paste image" "C-v" #'+agent-shell/insert-clipboard-image)
+        :desc "Paste text or image" "C-v" #'+agent-shell/paste)
   ;; S-RET no longer sends; drop it so it types a newline like RET.
-  (dolist (key '("S-RET" "S-<return>" "M-V"))
+  (dolist (key '("S-RET" "S-<return>" "M-V" "M-v"))
     (keymap-unset agent-shell-mode-map key t)))
 
 (with-eval-after-load 'agent-shell
