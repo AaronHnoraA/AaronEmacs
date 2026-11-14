@@ -24,6 +24,10 @@ make emacs-binary-verify   # 检查 Emacs、emacsclient、NS、模块与 xwidget
 原生桥接改动放在 `config/portal-local.patch`，并登记在
 `config/package-patches.el`。`package-vc` 安装时自动应用补丁；统一包升级先撤销补丁，
 升级后再应用。新版源码若与补丁冲突，升级会明确报错，需调整补丁后重试。
+补丁让终端读取这份 Ghostty 配置，字号以它为准，不跟随 Emacs 默认字体（上游
+`portal-terminal-text-size-follows-emacs` 因此不适用）。终端命令写进该终端自己的
+Ghostty 配置（`command = shell:…`），不放进 surface 选项：libghostty 对 surface
+命令强制 `wait-after-command`，退出后会停在 “Press any key”，Emacs 收不到退出。
 单独重建 Portal 时运行：
 
 ```sh
