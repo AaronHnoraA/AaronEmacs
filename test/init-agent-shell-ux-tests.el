@@ -360,8 +360,8 @@
                 (should (= (nth 0 (+agent-shell--file-completion-a #'ignore)) 2))))))
       (delete-directory root t))))
 
-(ert-deftest agent-shell-ux-cmd-shift-a-switches-like-cmd-t ()
-  (should (eq (lookup-key global-map (kbd "M-A")) #'+agent/switcher))
+(ert-deftest agent-shell-ux-ctrl-shift-t-switches-like-cmd-t ()
+  (should (eq (lookup-key global-map (kbd "C-S-t")) #'+agent/switcher))
   (should (eq (lookup-key global-map (kbd "M-T")) #'+agent/switcher))
   (let ((shown (generate-new-buffer " *agent-a*"))
         (hidden (generate-new-buffer " *agent-b*"))
