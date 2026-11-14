@@ -203,13 +203,40 @@
         (set-window-start window 1)
         (+agent-history--preview-wheel `(wheel-down (,window 1 (0 . 0) 0)))
         (should (> (window-start window) 1))
+        ;; Point follows, so redisplay keeps the scroll.
+        (should (= (window-point window) (window-start window)))
         (should (eq (selected-window) selected))
         (+agent-history--preview-wheel `(wheel-up (,window 1 (0 . 0) 0)))
         (should (= (window-start window) 1))
         (should (eq (lookup-key (with-current-buffer buffer (current-local-map)) [mouse-1])
                     #'ignore))))
     (should (eq (lookup-key +agent-history-picker-map (kbd "C-M-v"))
-                #'+agent-history/preview-scroll-up))))
+                #'+agent-history/preview-scroll-up))
+    ;; The picker sends the wheel over the box to it, and leaves others alone.
+    (cl-letf (((symbol-function '+agent-history--preview-frame-p) (lambda (f) (eq f (selected-frame)))))
+      (let ((last-input-event `(wheel-down (,(selected-window) 1 (0 . 0) 0))))
+        (should (eq (+agent-history--wheel-filter 'cmd) 'cmd)))
+      (let ((last-input-event ?a))
+        (should-not (+agent-history--wheel-filter 'cmd))))
+    ;; macOS sends a frame switch before a wheel event over the box: ignored,
+    ;; and only while a picker is open.
+    (cl-letf (((symbol-function '+agent-history--preview-frame-p) (lambda (f) (eq f 'box))))
+      (should (+agent-history--switch-frame-a '(switch-frame box)))
+      (should-not (+agent-history--switch-frame-a '(switch-frame other))))
+    (let (during)
+      (cl-letf (((symbol-function 'require)
+                 (let ((require (symbol-function 'require)))
+                   (lambda (feature &rest args)
+                     (or (eq feature 'consult) (apply require feature args)))))
+                ((symbol-function 'consult--read)
+                 (lambda (&rest _)
+                   (setq during (advice-member-p #'+agent-history--switch-frame-a
+                                                 'handle-switch-frame))
+                   nil)))
+        (+agent-history-read (list (list :agent "codex" :id "x" :updated 1.0)))
+        (should during)
+        (should-not (advice-member-p #'+agent-history--switch-frame-a
+                                     'handle-switch-frame))))))
 
 (ert-deftest agent-c63-preview-sits-beside-a-tall-list ()
   (cl-letf (((symbol-function 'frame-char-width) (lambda (&rest _) 10))
@@ -227,5 +254,6 @@
       (pcase-let ((`(,_ ,y ,_ ,lines) (+agent-history--preview-geometry (selected-frame))))
         (should (= lines 20))
         (should (<= (+ y (* 20 21)) 1300))))))
+
 
 ;;; agent-history-tests.el ends here

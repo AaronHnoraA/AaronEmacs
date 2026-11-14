@@ -508,7 +508,11 @@ ORDER BY p.time_created DESC LIMIT 8"
                      (goto-char (window-start window))
                      (vertical-motion lines window)
                      (point))))
-        (set-window-start window (min start (max (point-min) (1- (point-max)))) t)))))
+        ;; Point goes with the start: redisplay would otherwise scroll back to
+        ;; the box's point at the top.
+        (setq start (min start (max (point-min) (1- (point-max)))))
+        (set-window-point window start)
+        (set-window-start window start)))))
 
 (defun +agent-history/preview-scroll-up (&optional lines)
   "Scroll the preview box forward by LINES, or most of its height."
@@ -531,14 +535,40 @@ ORDER BY p.time_created DESC LIMIT 8"
     (+agent-history--preview-scroll-window
      window (if (memq (event-basic-type event) '(wheel-up mouse-4)) -3 3))))
 
+(defun +agent-history--preview-frame-p (frame)
+  "Return non-nil when FRAME is the frame of the preview box."
+  (and (frame-live-p frame)
+       (eq (window-buffer (frame-root-window frame))
+           (get-buffer +agent-history-preview-buffer))))
+
+(defun +agent-history--switch-frame-a (event)
+  "Ignore the frame switch EVENT when it goes into the preview box.
+macOS precedes a wheel event over the box with a switch to its frame; taking it
+would move the picker's keyboard into the box.  Installed only while a picker
+is open (`+agent-history-read')."
+  (+agent-history--preview-frame-p (and (consp event) (cadr event))))
+
+(defun +agent-history--wheel-filter (command)
+  "Return COMMAND when the wheel event being read is over the preview box.
+Otherwise nil, so the picker's own wheel binding applies.  With the frame switch
+into the box ignored, its wheel events are looked up in the picker's keymaps."
+  (let ((window (and (consp last-input-event)
+                     (posn-window (event-start last-input-event)))))
+    (and (windowp window)
+         (+agent-history--preview-frame-p (window-frame window))
+         command)))
+
 (defvar +agent-history-picker-map
   (let ((map (make-sparse-keymap)))
+    (dolist (key '([wheel-down] [wheel-up] [mouse-4] [mouse-5]))
+      (define-key map key '(menu-item "" +agent-history--preview-wheel
+                                      :filter +agent-history--wheel-filter)))
     (define-key map (kbd "C-M-v") #'+agent-history/preview-scroll-up)
     (define-key map (kbd "C-M-S-v") #'+agent-history/preview-scroll-down)
     (define-key map (kbd "M-<next>") #'+agent-history/preview-scroll-up)
     (define-key map (kbd "M-<prior>") #'+agent-history/preview-scroll-down)
     map)
-  "Picker keys: the other-window scroll keys scroll the preview.")
+  "Picker keys: the wheel over the box and the other-window scroll keys scroll it.")
 
 (defun +agent-history--preview-geometry (frame)
   "Return (X Y WIDTH HEIGHT) in pixels and lines for the preview on FRAME.
@@ -637,13 +667,23 @@ Each conversation is read once per picker; the box is hidden on exit."
   (unless rows (user-error "No saved conversations here; C-u lists every folder"))
   (let ((candidates (mapcar (lambda (row) (cons (+agent-history-label row) row)) rows)))
     (if (require 'consult nil t)
-        (consult--read candidates
-                       :prompt (or prompt "Resume conversation: ")
-                       :require-match t :sort nil
-                       :lookup #'consult--lookup-cdr
-                       :keymap +agent-history-picker-map
-                       :preview-key '(:debounce 0.08 any)
-                       :state (+agent-history--preview-state))
+        (let ((owner (not (advice-member-p #'+agent-history--switch-frame-a
+                                           'handle-switch-frame))))
+          (unwind-protect
+              (progn
+                (when owner
+                  (advice-add 'handle-switch-frame :before-until
+                              #'+agent-history--switch-frame-a))
+                (consult--read candidates
+                               :prompt (or prompt "Resume conversation: ")
+                               :require-match t :sort nil
+                               :lookup #'consult--lookup-cdr
+                               :keymap +agent-history-picker-map
+                               :preview-key '(:debounce 0.08 any)
+                               :state (+agent-history--preview-state)))
+            ;; The outermost picker removes it, so the advice never outlives one.
+            (when owner
+              (advice-remove 'handle-switch-frame #'+agent-history--switch-frame-a))))
       (cdr (assoc (completing-read (or prompt "Resume conversation: ")
                                    (lambda (string predicate action)
                                      (if (eq action 'metadata)
