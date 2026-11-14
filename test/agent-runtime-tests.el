@@ -77,6 +77,28 @@
       (+agent/compose-rewrite)
       (should (equal seen '(rewrite))))))
 
+(ert-deftest agent-runtime-c10-noema-pane-adapter-precedes-first-send ()
+  "A Noema pane's first send goes to the page, not to the placeholder file.
+The adapter used to load only after `noema-md-bridge', which loads when a page
+has already answered, so the first send-buffer said \"is not a saved file\"."
+  (should (featurep 'noema-context))
+  (should (memq 'noema-context--editor-action
+                (default-value '+agent-editor-action-functions)))
+  (with-temp-buffer
+    (rename-buffer "*Noema: pane-test.md*" t)
+    (setq-local +noema-buffer-file-name "/tmp/pane-test.md")
+    (let (requests)
+      (cl-letf (((symbol-function '+noema-portal-buffer-p)
+                 (lambda (buffer) (eq buffer (current-buffer))))
+                ((symbol-function 'noema-md-bridge-request)
+                 (lambda (&rest args) (push args requests)))
+                ((symbol-function '+agent-context--send)
+                 (lambda (&rest _) (ert-fail "Placeholder buffer was sent"))))
+        (+agent-context-send-buffer)
+        (+agent-context-send-region)
+        (should (equal (nreverse requests)
+                       '(("agent" "document") ("agent" "selection"))))))))
+
 (ert-deftest agent-runtime-c6-reading-does-not-resolve-approval ()
   (agent-runtime-tests--buffer
     (setf (map-elt agent-shell--state :tool-calls)

@@ -43,8 +43,12 @@
 (after! tools/agent/acp
   (when (locate-library "noema-agent-acp") (require 'noema-agent-acp)))
 
-(after! noema-md-bridge
-  (require 'noema-context))
+;; The Noema pane adapter must be on `+agent-editor-action-functions' before
+;; the first editor action runs: a pane is a placeholder buffer, so without it
+;; send-region/send-buffer fall through to "is not a saved file".  Waiting for
+;; `noema-md-bridge' is too late, since that loads only after a page answered.
+(after! tools/agent/context
+  (when (locate-library "noema-context") (require 'noema-context)))
 
 ;; Install missing dependencies only; normal startup does no network access.
 ;; Migration does not upgrade versions or touch currently running sessions.
