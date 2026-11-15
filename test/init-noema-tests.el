@@ -328,6 +328,33 @@
           (should (eq retired buffer)))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
+(ert-deftest +noema-latex-intervention-kill-hook-keeps-its-buffer-current ()
+  "Deleting the intervention frame must not leave another buffer current.
+Later kill hooks, agent-shell's client cleanup among them, act on it."
+  (let* ((closing (generate-new-buffer " *latex-intervention*"))
+         (elsewhere (generate-new-buffer " *other-session*"))
+         (+noema--latex-intervention-buffers (make-hash-table :test #'equal))
+         (frame 'intervention-frame)
+         deleted)
+    (unwind-protect
+        (cl-letf (((symbol-function 'frame-list) (lambda () (list 'main frame)))
+                  ((symbol-function 'frame-live-p) (lambda (_) t))
+                  ((symbol-function 'frame-parameter)
+                   (lambda (f parameter)
+                     (and (eq f frame) (eq parameter 'noema-latex-intervention-buffer)
+                          closing)))
+                  ((symbol-function 'delete-frame)
+                   (lambda (f &rest _) (push f deleted) (set-buffer elsewhere))))
+          (puthash "failed-1" closing +noema--latex-intervention-buffers)
+          (with-current-buffer closing
+            (setq-local +noema--latex-intervention-task "failed-1")
+            (+noema--latex-intervention-killed-h)
+            (should (eq (current-buffer) closing)))
+          (should (equal deleted (list frame)))
+          (should-not (gethash "failed-1" +noema--latex-intervention-buffers)))
+      (kill-buffer closing)
+      (kill-buffer elsewhere))))
+
 (ert-deftest +noema-latex-intervention-opens-independent-editable-session ()
   (let* ((directory (make-temp-file "noema-latex-manual-" t))
          (file (expand-file-name "note.md" directory))

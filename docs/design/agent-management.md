@@ -275,7 +275,12 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
   `+agent-acp-show-buffer` / `+agent-acp-hide`。管理器为池总览与跨项目检查入口。
 - **C28 所有结束入口一致。** 原生 buffer query 保护忙碌、队列和草稿，拒绝后
   不改视图、通知业务或结束 client；确认后关闭观察者与视图清理各执行一次。
-  通用收起使用 Agent 显示控制器。测试：`c32-*`、`agent-close-c28-*`。
+  通用收起使用 Agent 显示控制器。逐会话的结束清理（client、输入提示、会话认领、
+  延迟计时器、待发提醒）只作用于正在结束的 buffer：kill 钩子依次在当时的当前
+  buffer 中运行，其他钩子改变它（删除 frame 会选中另一 frame 并换掉当前 buffer）
+  也不得结束另一会话的 client，或让本会话的 client 成为孤儿进程；领域钩子删除
+  frame 时保持当前 buffer。测试：`c32-*`、`agent-close-c28-*`、
+  `+noema-latex-intervention-kill-hook-keeps-its-buffer-current`。
 - **C29 既有入口覆盖原生输入。** `C-c a` 和 `C-c A` 从 Portal 原生终端转交到
   同一 Agent 命令及前缀；普通 Emacs 的 Normal、Insert、Emacs 状态保留同一入口。
   不另增混合管理键。测试：`agent-entry-c29-*`。

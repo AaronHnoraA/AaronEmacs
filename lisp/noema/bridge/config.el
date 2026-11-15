@@ -1783,6 +1783,25 @@ This is a memory-only check; it never opens an inactive project or reads disk."
     (select-window window)
     window))
 
+(defvar-local +noema--latex-intervention-task nil
+  "Failed LaTeX task id whose intervention this agent buffer is.")
+
+(defun +noema--latex-intervention-killed-h ()
+  "Forget this intervention buffer and delete the frames made for it.
+Deleting a selected frame selects another and makes its buffer current; the
+kill hooks after this one (agent-shell's client cleanup among them) must still
+run in this buffer, or they would end the session shown in that other frame."
+  (let ((buffer (current-buffer)))
+    (when +noema--latex-intervention-task
+      (remhash +noema--latex-intervention-task +noema--latex-intervention-buffers))
+    (save-current-buffer
+      (dolist (frame (frame-list))
+        (when (and (frame-live-p frame)
+                   (cdr (frame-list))
+                   (eq (frame-parameter frame 'noema-latex-intervention-buffer)
+                       buffer))
+          (delete-frame frame t))))))
+
 (defun +noema--latex-export-display (buffer)
   "Show a live export BUFFER outside the ordinary Agent Workspace tabs."
   (+noema--latex-intervention-display buffer "Noema LaTeX export agent"))
@@ -1831,15 +1850,8 @@ This is a memory-only check; it never opens an inactive project or reads disk."
                     :display-function #'+noema--latex-intervention-display))
       (puthash task-id buffer +noema--latex-intervention-buffers)
       (with-current-buffer buffer
-        (add-hook 'kill-buffer-hook
-                  (lambda ()
-                    (remhash task-id +noema--latex-intervention-buffers)
-                    (dolist (frame (frame-list))
-                      (when (and (> (length (frame-list)) 1)
-                                 (eq (frame-parameter frame
-                                                      'noema-latex-intervention-buffer)
-                                     (current-buffer)))
-                        (delete-frame frame t)))) nil t))
+        (setq-local +noema--latex-intervention-task task-id)
+        (add-hook 'kill-buffer-hook #'+noema--latex-intervention-killed-h nil t))
       (let ((draft (+noema--latex-intervention-prompt params)))
         (if (+agent-acp-state-value buffer '(:session :id))
             (+agent-acp-draft buffer draft)
@@ -1910,14 +1922,7 @@ This is a memory-only check; it never opens an inactive project or reads disk."
                            #'+noema--latex-export-display)
                (unless (bound-and-true-p +noema--latex-export-shown)
                  (setq-local +noema--latex-export-shown t)
-                 (add-hook 'kill-buffer-hook
-                           (lambda ()
-                             (dolist (frame (frame-list))
-                               (when (and (> (length (frame-list)) 1)
-                                          (eq (frame-parameter frame
-                                                               'noema-latex-intervention-buffer)
-                                              (current-buffer)))
-                                 (delete-frame frame t)))) nil t)))
+                 (add-hook 'kill-buffer-hook #'+noema--latex-intervention-killed-h nil t)))
              (+agent-acp-show-buffer buffer)
              (remote-gateway-resolve deferred '((ok . t))))
          (error

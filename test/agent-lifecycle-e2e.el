@@ -928,5 +928,30 @@
           (should (+agent-shell--local-slash "/resume")))
       (agent-lifecycle-e2e--dispose agent))))
 
+(ert-deftest agent-close-c28-a-foreign-kill-hook-cannot-end-another-session ()
+  "Closing one session ends its own client, even if a hook changes buffers.
+A kill hook that deletes a frame makes the next frame's buffer current; the
+cleanup after it must neither end that session nor orphan its own client."
+  (agent-lifecycle-e2e--with-session (closing store directory)
+    (let* ((other (+agent-acp-start :config (agent-flow-e2e--config
+                                             (expand-file-name "other.json" directory))
+                                    :directory directory :focus nil :origin 'manual))
+           (switch (lambda () (set-buffer other))))
+      (unwind-protect
+          (progn
+            (agent-flow-e2e--wait (lambda () (+agent-acp-state-value other '(:init-finished))))
+            (let ((own (agent-lifecycle-e2e--process closing))
+                  (kept (agent-lifecycle-e2e--process other)))
+              (agent-flow-e2e--send other "hold")
+              (agent-flow-e2e--wait (lambda () (+agent-acp-busy-p other)))
+              (with-current-buffer closing
+                (add-hook 'kill-buffer-hook switch nil t))
+              (with-current-buffer closing (kill-buffer closing))
+              (agent-flow-e2e--wait (lambda () (not (process-live-p own))) 3)
+              (should (process-live-p kept))
+              (should (eq (agent-lifecycle-e2e--process other) kept))
+              (should (+agent-acp-busy-p other))))
+        (agent-lifecycle-e2e--dispose other)))))
+
 (provide 'agent-lifecycle-e2e)
 ;;; agent-lifecycle-e2e.el ends here

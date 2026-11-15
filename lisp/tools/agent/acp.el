@@ -1836,6 +1836,43 @@ A timeout never declares success, replays a request, or kills another turn."
   (add-hook 'kill-buffer-query-functions #'+agent-acp--query-kill-h nil t)
   (add-hook 'kill-buffer-hook #'+agent-acp--before-kill-h -50 t))
 
+(defvar +agent-acp--killing-buffer nil
+  "The buffer `kill-buffer' is ending, bound only for the call's extent.")
+
+(defadvice! +agent-acp--note-killing-buffer-a (function &optional buffer-or-name)
+  "Bind the buffer that FUNCTION, `kill-buffer', ends with BUFFER-OR-NAME.
+Kill hooks run one after another in whatever buffer is current, and a foreign
+hook may change it: deleting a frame selects another one and makes its buffer
+current.  The per-session cleanup below then still knows its own buffer.  The
+binding is dynamic, so an aborted kill leaves nothing behind and a nested kill
+binds its own buffer."
+  :around #'kill-buffer
+  (let ((+agent-acp--killing-buffer
+         (or (get-buffer (or buffer-or-name (current-buffer)))
+             +agent-acp--killing-buffer)))
+    (funcall function buffer-or-name)))
+
+(defun +agent-acp--in-killed-buffer-a (function &rest arguments)
+  "Run per-session kill cleanup FUNCTION with ARGUMENTS in the ending buffer.
+These functions act on the current buffer's own client, overlay or claim; run
+in another session they would end that one's client instead (C28)."
+  (let ((owner +agent-acp--killing-buffer))
+    (if (and (buffer-live-p owner)
+             (not (eq owner (current-buffer)))
+             (with-current-buffer owner (derived-mode-p 'agent-shell-mode)))
+        (progn
+          (message "Agent close: cleanup of %s ran in %s; restored its own buffer"
+                   (buffer-name owner) (buffer-name))
+          (with-current-buffer owner (apply function arguments)))
+      (apply function arguments))))
+
+;; Only functions that run solely from kill and mode-change hooks: anything
+;; also called for another buffer during a kill must not be redirected.
+(dolist (function '(agent-shell--clean-up +agent-shell--forget-session
+                    +agent-input--cleanup-h +agent-acp--clear-deferred-h
+                    +agent-notify--killed-h))
+  (advice-add function :around #'+agent-acp--in-killed-buffer-a))
+
 (defun +agent-acp--unfinished-sessions ()
   "Return buffers of sessions that exiting Emacs would cost something.
 Temporary sessions keep no conversation worth a question."
