@@ -203,6 +203,9 @@ Agent 读到的每段文本都在这张表里。新增入口时加一行，并�
 | Skill 目录 | `renderAgentCatalog` | Pi，每回合 | pack preamble、Skill 名称和用途 |
 | Skill 正文 | `resources/skills/`、Skill 库、`.agents/skills/` | 需要时读取 | 深入判断 |
 | 任务发送 | `resources/agent/task.md`、`related.md`、`prompt-document.md` | 用户触发 | 这一次的任务 |
+| 探索成员 | `resources/agent/exploration/member.md`（恢复时前加 `resume.md`） | 探索的后台成员，启动时一次 | 问题、规则、命令、笔记本与工作方法 |
+| 探索裁判 | `resources/agent/exploration/coordinator.md` | 发起探索的会话，`start` 回执一次 | 怎样裁决、停止与恢复 |
+| 方向查重 | `resources/agent/exploration/duplicate.md` | 一次 Pi 模型调用，每次注册 | 同一方向的判断标准 |
 | 其他任务 Agent | MarginNote 同步、LaTeX 导出、Research Run、Magent CLI | 各自 owner | 自带上下文，不收以上引导 |
 
 ## 工作流程

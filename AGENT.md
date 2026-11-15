@@ -498,6 +498,17 @@ This config already has maintenance and workflow entry points. Reuse them:
   its advice text, never into a Skill; a Skill keeps only judgement, under a size budget
   a test holds (`docs/noema/design/project-graph.md`).  Do not add a task list, board or
   index beside it, and do not build it on Research Task/Job, Agenda or `.noema`.
+- Mathematical work: whether a proof holds is Lean's to decide, through
+  `agent:lean:judge` / `scripts/lean-judge.mjs` against the person's frozen
+  statement (`theorem … := sorry`), never a model's claim; parallel attacks on one
+  problem are explorations (`agent:exploration`, `C-c A M`, page `C-c A V`), whose
+  thinking lives in Markdown under the Project's `explorations/<id>/`: one notebook
+  per member, journal facts beside it, `summary.md` at the end
+  (`docs/noema/design/math-exploration.md`).  How every session keeps a math
+  Project — asking Emacs for the root instead of guessing, where notes, plans, logs,
+  checks and explorations go, claim status tags, memory layers — is the one
+  `noema-math-research` Skill (pack `noema-math`).  Do not add another prover loop,
+  proof checker, swarm or memory file beside them.
 - Agent Skills: the Noema capability resolver and its manager
   (`noema-skill-manager`).  Global Skills live flat in the vault library
   `+noema-skills-directory` (`NOEMA_GLOBAL_SKILLS`), not in `etc/`;

@@ -121,6 +121,7 @@ Dated and append-only. Read them for why something is the way it is, never for h
 
 ### records/audits/
 
+- [open-math-harness-2026-11.md](records/audits/open-math-harness-2026-11.md) Open Math Harness 源码审计：数学工作完整周期对照、Lean 判定与 Ultramath 的翻译取舍、项目识别与记忆分层。
 - [agent-task-isolation-2026-11.md](records/audits/agent-task-isolation-2026-11.md) Temporary ACP task isolation plan, regression evidence and live verification of unchanged ordinary-session defaults.
 - [marginnote-acp-pi-2026-11.md](records/audits/marginnote-acp-pi-2026-11.md) Mac-only MarginNote workflow, checkpoint history, task setting verification and live Pi/service integration audit.
 - [code-audit-2026-10.md](records/audits/code-audit-2026-10.md) Line and contract audit of the Emacs configuration: what was read, what was fixed, what stays open.
@@ -185,6 +186,7 @@ Noema is developed in its own repository (`site-lisp/noema/`); its documentation
 - [marginnote-agent-bridge.md](noema/design/marginnote-agent-bridge.md) MarginNote 官方 Bridge 优先的双端 agent 通道，与原生插件 JavaScript 执行接口。
 - [rendered-constructs.md](noema/design/rendered-constructs.md) 渲染组件（Rendered Constructs）统一架构
 - [pi-collaboration-2026-11.md](records/audits/pi-collaboration-2026-11.md) Pi 协作与观察项的设计收敛、实测问题和占用数字（记录）。
+- [math-exploration.md](noema/design/math-exploration.md) 数学探索与 Lean 判定：冻结陈述协议、Markdown 笔记本的并行探索、裁判回路与监督契约。
 - [project-graph.md](noema/design/project-graph.md) 项目任务图谱：`.agent/tasks/` 的数据、规则由代码执行的契约、Skill pack 与只读页面。
 - [research-synthesis.md](noema/design/research-synthesis.md) Research synthesis and Proposals
 - [scroll-ownership.md](noema/design/scroll-ownership.md) 视口归属：滚动只有一个主人

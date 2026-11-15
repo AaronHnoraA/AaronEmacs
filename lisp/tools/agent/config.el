@@ -1390,6 +1390,8 @@ is `+config-ask-model', registered with native Config Customize."
 (autoload 'noema-orchestration "noema-orchestration" nil t)
 (autoload 'noema-project-graph "noema-project-graph" nil t)
 (autoload 'noema-project-graph-add-watch "noema-project-graph" nil t)
+(autoload 'noema-exploration "noema-exploration" nil t)
+(autoload 'noema-exploration-start "noema-exploration" nil t)
 (autoload 'noema-sessions "noema-sessions" nil t)
 (autoload 'noema-sessions-switch "noema-sessions" nil t)
 (autoload 'noema-sessions-read "noema-sessions")

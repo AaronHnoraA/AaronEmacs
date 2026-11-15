@@ -70,6 +70,10 @@
       :doc "Open the Project's cache, task graph and watches")
      ("L" "Leave a watch…" noema-project-graph-add-watch :slash "watch"
       :doc "Tell this Project's Pi something after a countdown")
+     ("M" "Start exploration…" noema-exploration-start :slash "explore"
+      :doc "Several agents explore one problem, each on its own direction; this session judges")
+     ("V" "Explorations" noema-exploration :slash "explorations"
+      :doc "Open this Project's explorations: problems, notebooks, waiting reports")
      ("p" "Promote to Research" noema-agent-promote-current-session :if +agent-menu--session-p)
      ("F" "File reply in Wiki…" +noema-roam/file-agent-reply :if +agent-menu--session-p
       :slash "file" :doc "Make the last reply a Wiki page you review first")

@@ -1797,6 +1797,8 @@ Emacs 通用 agent 层统一管理轻量模型交互与结构化 coding-agent �
 | `H-t`（macOS `Option-T`，Noema 页面和 Portal 终端里也可用；`C-S-t` 保留为备用）/ `M-x agent-switcher` | 像 `Cmd-T` 选终端一样选 agent：列出不在屏幕上的会话、新建 Claude/Codex/OpenCode 和历史；`RET` 当前窗口，`S-RET` 右侧，`Cmd-RET` 下方 |
 | `C-c A W` | 打开当前项目 Pi |
 | `C-c A g` | 当前项目的 Agent cache：缓存、任务图谱、问题和日志（`noema-project-graph`） |
+| `C-c A M` | 发起数学探索：几个后台 Agent 各取一个方向攻同一问题，当前聊天当裁判；可给 Lean 冻结陈述，证明先经 Lean 判定（`noema-exploration-start`） |
+| `C-c A V` | 当前项目的探索：问题、成员笔记本、待裁决的报告；`a`/`r` 以人的身份裁决（`noema-exploration`） |
 | `C-c A n` | 编辑区新建执行 Agent；Pi 中新建同作用域的对话 |
 | `C-c A w` | 在当前 Project 仓库的新 Git worktree 里启动 Codex/Claude/OpenCode 会话 |
 | `C-c A N` | 同一任务交给几个 agent 并行尝试，各自一个 worktree |
@@ -2075,6 +2077,7 @@ tab-line/tab-bar，但会出现在 Ibuffer 的 Agent 分组和日常 buffer 选�
 | `?`（输入区外） / `C-c C-z` | 全部动作的菜单；鼠标右键 tab 相同 |
 | `/queue` `/next` `/changes` `/resume` | 输入区本地命令：队列、下一个等待的会话、改过的文件、已保存对话 |
 | `/cache` `/inbox` `/usage` `/pi` `/doctor` `/watch` | 同上，不走模型：Agent cache、Inbox、Usage、项目 Pi、Pi doctor、倒计时后告诉 Pi，见[用 Pi 协作](pi-collaboration.md) |
+| `/explore` `/explorations` | 不走模型：以本会话为裁判发起数学探索、打开项目的探索页，见[数学探索](../noema/design/math-exploration.md) |
 | `/fork` `/rename` `/restart` `/new` `/side` `/agents` | 输入区本地命令，生成中也可用；提供方的同名命令优先。`/side` 在支持原生 fork 时另开带原对话上下文的临时聊天，不打断当前回合；否则另开空白聊天 |
 | `C-c C-c` | 停止当前 Run 或回合，排队的 prompt 挂起 |
 | `C-c C-e` | 聚焦输入提示符 |

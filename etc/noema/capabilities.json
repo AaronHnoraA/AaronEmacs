@@ -245,6 +245,17 @@
           "noema-ediff-review"
         ],
         "preamble": "Markdown 源文件是权威。按需读取当前 syntax.md，保留原有身份、结构、公式和论断强度。显式需要审阅时使用原位 ediff；直接修改请求和已授权的常规工作不增加审批步骤。"
+      },
+      "noema-math": {
+        "agent_catalog": true,
+        "title": "Noema 数学研究",
+        "description": "数学项目的统一标准、Lean 判定与并行探索，以及证明的规划与审查",
+        "members": [
+          "noema-math-research",
+          "proof-plan",
+          "proof-review"
+        ],
+        "preamble": "数学工作先读 noema-math-research：项目事实向 Emacs 查询，结论带状态标签，证明由 Lean 判定，难题可并行探索；思路与痕迹都留在项目的 Markdown 里。"
       }
     }
   }
