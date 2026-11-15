@@ -208,6 +208,10 @@ web-host.mjs                    HTTP/SSE、静态资源、router composition
 HTTP handler 不再直接拥有 Jupyter、Assets、Session、Tasks、Filesystem、Prose、
 Emacs channel 表。Session manager 通过注入合法路径和原子写策略与 runtime 解耦。
 
+LanguageTool 默认服务地址为 `http://100.64.0.2:8765`，页面初始值、Node host 与
+Emacs 的语法检查配置使用同一地址。`NOEMA_LANGUAGETOOL_URL` 可覆盖 host 默认值，
+`var/noema/languagetool.json` 中保存的设置优先于默认值。
+
 Node host 对 canonical note root 只保留协议与插件装配：Markdown 打开、CM6 ChangeSet
 CAS 保存、rich note catalog、planning/property 和 FTS5 都由其监督的 Go kernel 提供。
 `server/lib/kernel-markdown-provider.mjs` 只做 box/path 边界校验与 JSON 形状映射；

@@ -38,7 +38,7 @@
   :type 'string
   :group 'languages)
 
-(config-defvar +languagetool-server-url "http://10.243.90.222:8765"
+(config-defvar +languagetool-server-url "http://100.64.0.2:8765"
   "Preferred LanguageTool HTTP server."
   :type 'string
   :group 'languages)

@@ -903,7 +903,7 @@ reconnect without a reload and without losing their in-memory editor state."
                     (or (bound-and-true-p +languagetool-language) "en-US"))
             (format "NOEMA_LANGUAGETOOL_URL=%s"
                     (or (bound-and-true-p +languagetool-server-url)
-                        "http://10.243.90.222:8765"))
+                        "http://100.64.0.2:8765"))
             (format "NOEMA_PROSE_WORDS=%s"
                     (expand-file-name "etc/prose-accepted-words.txt"
                                       user-emacs-directory))
