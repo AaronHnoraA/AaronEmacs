@@ -953,5 +953,21 @@ cleanup after it must neither end that session nor orphan its own client."
               (should (+agent-acp-busy-p other))))
         (agent-lifecycle-e2e--dispose other)))))
 
+(ert-deftest agent-entry-c49-local-commands-run-in-an-exited-session ()
+  "A local slash command runs without reconnecting an exited client."
+  (agent-lifecycle-e2e--with-session (buffer store directory)
+    (let ((process (agent-lifecycle-e2e--process buffer))
+          ran reconnected)
+      (delete-process process)
+      (agent-flow-e2e--wait (lambda () (+agent-acp-client-exited-p buffer)) 3)
+      (cl-letf (((symbol-function '+agent-menu-queue)
+                 (lambda () (interactive) (setq ran t)))
+                ((symbol-function '+agent-shell/reconnect)
+                 (lambda () (interactive) (setq reconnected t))))
+        (agent-flow-e2e--send buffer "/queue"))
+      (should ran)
+      (should-not reconnected)
+      (should-not (with-current-buffer buffer (agent-shell--prompt-input))))))
+
 (provide 'agent-lifecycle-e2e)
 ;;; agent-lifecycle-e2e.el ends here

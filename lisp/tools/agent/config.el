@@ -871,15 +871,17 @@ Emacs owns which frontend shows a conversation."
       (cadr entry))))
 
 (defun +agent-shell--submit-a (original &rest args)
-  "Reconnect exited clients or run local /resume before agent submission."
+  "Run local slash commands, or reconnect an exited client, before submission.
+Local commands come first: they never reach the agent, so /resume, /restart or
+/agents work in a session whose client has exited instead of reconnecting it."
   (cond ((and (derived-mode-p 'agent-shell-mode)
-              (+agent-shell--dead-client-p agent-shell--state))
-         (+agent-shell/reconnect))
-        ((and (derived-mode-p 'agent-shell-mode)
               (+agent-shell--local-slash (agent-shell--prompt-input)))
          (let ((command (+agent-shell--local-slash (agent-shell--prompt-input))))
            (agent-shell--clear-prompt-input)
            (call-interactively command)))
+        ((and (derived-mode-p 'agent-shell-mode)
+              (+agent-shell--dead-client-p agent-shell--state))
+         (+agent-shell/reconnect))
         ;; A Run's input is frozen, so what is typed during it waits its turn
         ;; rather than steering the Run or racing it with a second prompt.
         ((and (derived-mode-p 'agent-shell-mode)
