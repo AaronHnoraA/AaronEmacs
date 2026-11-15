@@ -552,6 +552,13 @@ G4–G9 与 G11 的项目池、显示归属、返回、预览及物理替换问�
   多次修改按检查点倒序回放，有一个不安全就整体不写。C44 的清单来自 ACP 报告的 diff，
   不是写前内容的检查点，`oldText` 也可能只是片段。没有可靠的前内容和预检前，不提供
   “撤销”，以免把部分回退说成安全回退；需要先定契约。
+- **G16 client 被关闭而非退出。** C38 只覆盖进程自行退出：退出时 `:client :process`
+  仍在，会话显示断开、挂起队列。若 client 被 `agent-shell--shutdown` 关闭而 buffer
+  仍在（删除 frame 的 kill 钩子曾这样关掉另一会话，见 C28），state 里已没有 client，
+  `+agent-shell--dead-client-p` 不成立：会话不显示断开，下次提交时 agent-shell
+  静默新建 client 并按原 ID 恢复，而不是走 `+agent-shell/reconnect` 的明确重连。
+  C28 的修复消除了已知来源；是否把“buffer 活着但 client 已被关闭”定义为与退出相同
+  的断开状态，需要先定契约。
 - **G3 状态迁移。** 模型和配额偏好从旧 Noema 路径复制到 `var/agent/`，保留原文件；
   现有 worktree 使用的 `noemaBase/noemaGroup/noemaAgent` Git 元数据保持可读写，
   避免改名使已存在的分支失去归属。它们不要求 Noema 运行。
