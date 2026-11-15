@@ -13,6 +13,27 @@ Run 的记忆由冻结与完成流程处理，普通 ACP 钩子跳过 Run、prob
 `unconfigured`；失败、超时或格式错误进入 `suspended` 并带重试等待时间，
 不能把缺少 `items` 的异常响应解释为空结果。
 
+## 引用闭环
+
+借鉴 Open Math Harness 的记忆读取侧：被用到的记忆留在前面，长期没人用的记忆退出注入。
+Hy Memory 的存储不变，闭环只作用在召回上。
+
+- **M1 召回的记忆可引用。** 注入块里每条带 id 的记忆以 `[mem:前八位]` 开头，并请模型只在
+  某条记忆改变了它的做法时引用它。
+- **M2 只有给过的记忆才算被引用。** 回合结束时从回复里解析 `[mem:…]`，只认这一回合召回过的
+  id，同一条只记一次；编造的 id 不计。
+- **M3 只在项目里留账。** 召回与引用以 `recall`、`cite` 两种事实追加到 Noema 项目根下的
+  `.agent/memory/citations.jsonl`（带 `.agent/.gitignore`）；项目之外什么也不写。
+- **M4 一回合一组事实。** 召回成功时写 `recall`，回合结束时写 `cite`（没有引用就不写），
+  然后清掉这一回合的召回记录。
+- **M5 计数只在桥里。** `scripts/noema-hy-memory.py` 的 `search` 读账本：被引用过的排在前面，
+  被召回 6 次以上却从未被引用的不再返回；仍按 4 条、3600 字符的上限截取。
+  `agent:memory:search` 的结果带每条的 `recalled` 与 `cited`。
+- **M6 查不了不等于没有。** Hy Memory 在 embedding 失败时返回空结果而不报错；桥的传输层记下
+  embedding 请求的失败，搜索没有结果且有失败时如实报错，调用方据此进入 `suspended`。
+
+测试：`tests/elisp/noema-hy-memory-tests.el`（M1–M4）、`tests/hy-memory-citations.test.ts`（M5）。
+
 ## 模型和数据
 
 - 记忆提取使用 Noema Pi 已配置的 `openai-codex/gpt-5.6-luna` 与现有 Codex 登录态。Noema 的 Pi 管理器和记忆层复用同一套凭据入口；记忆请求通过短暂运行的 Pi 模型适配器发送，不保存第二份令牌，也不使用 OpenAI Platform API key。

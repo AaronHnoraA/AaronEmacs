@@ -82,9 +82,13 @@
   探索目录 `explorations/` 作为同一布局的一部分。
 - **一个入口。** `agent:project:status` 现在同时报告项目的探索（运行、中断、待裁决数量），
   Agent 一次只读调用即可看到项目全貌。
+- **记忆召回实测。** 本机 Emacs 项目分区存有 51 条记忆，召回却一条都拿不到：NAS 上的
+  embedding 服务从这台 Mac 连不上（请求超时），而 Hy Memory 在这种情况下返回空结果、不报错，
+  于是 `agent:memory:search` 会把“查不了”说成“没有”。桥现在把这种情况如实报为失败（M6）。
+  网络本身需要人处理。
 - **记忆。** 四层：项目文档（权威）、Finding（经审核）、Hy Memory（自动、未核实）、探索与日志
-  （发生过什么）。上游的引用闭环值得借鉴，但需要先定 ACP 回复解析与 Hy Memory 保留策略的契约，
-  记为 math-exploration G2。
+  （发生过什么）。上游的引用闭环已在召回侧实现（Hy Memory M1–M6）：召回的记忆可引用，
+  引用落在项目的 `.agent/memory/citations.jsonl`，长期无人引用的记忆不再注入。
 
 ## 人机交互
 

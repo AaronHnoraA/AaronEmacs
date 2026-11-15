@@ -109,15 +109,15 @@ Remote、Markdown 与 agent-shell 约定重写，没有引入它的微内核或�
   对单人研究的收益不抵成本。冻结陈述协议与 `check` 已足够支撑人和 Agent 迭代证明。
 - 不做多人团队、审批主体或能力内核；这里的身份是会话的 buffer 与 native ID，信任边界是本机用户。
 - 不自动把探索结论写进人的笔记；结论回到 notes 由裁判在人要求时做，或由人自己做。
-- 不复制上游的 MEMORY.md 合并代理：项目记忆的分层见 `noema-math-research`。
+- 不复制上游的 MEMORY.md 合并代理：项目记忆的分层见 `noema-math-research`，引用闭环见 [Hy Memory](hy-memory.md)。
 
 ## 已知差距
 
 - **G1 真实端到端。** 引擎、页面与判定都有确定性测试，判定另有真实 Mathlib 用例；
   尚未在运行中的 host 上用真实成员跑完整一轮探索（需要模型预算与人的在场）。
-- **G2 记忆引用闭环。** 上游让模型标注用了哪条记忆，按引用次数决定合并时保留什么。
-  Hy Memory 的召回是隐藏上下文块，回复里的引用目前无人统计；要做需要先定 ACP 回复的
-  解析契约与 Hy Memory 的保留策略。当前只在 Skill 里要求说明所用记忆并核对原文。
+- **G2 记忆引用闭环。** 已在召回侧实现（[Hy Memory](hy-memory.md) M1–M6）：引用被计数，
+  长期未被引用的记忆退出注入。没有做的是上游的合并步骤，即由受限 Agent 把高引用记忆整理成
+  项目文档；确认过的知识仍由人或裁判写进 notes。
 - **G3 Remote 目标。** 成员按项目 workspace 启动，跟随 Agent 管理的 Remote 规则；Lean 判定在
   本机运行 `lake`。项目在其他 target 上时，判定尚未经 `remote-process-file` 路由。
 - **G4 `sorry` 的目标。** Lean 命令行不打印 `sorry` 处的目标，`check` 只报数量；上游用常驻 REPL
