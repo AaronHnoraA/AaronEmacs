@@ -1,6 +1,6 @@
 ---
 name: emacs-config
-description: Change or explain the Emacs configuration in ~/.config/emacs: where code and settings live, its APIs, its CLI entry points (bin/emacs-app, emacsopen, make) and development rules. Not for general Emacs, Noema's code (noema-development) or using Noema (noema-emacs-workflow).
+description: "Change or explain the Emacs configuration in ~/.config/emacs: where code and settings live, its APIs, its CLI entry points (bin/emacs-app, emacsopen, make) and development rules. Not for general Emacs, Noema's code (noema-development) or using Noema (noema-emacs-workflow)."
 ---
 
 # Emacs configuration

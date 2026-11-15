@@ -184,8 +184,10 @@
   Hyper 管理菜单 / `telescope`
 - `H-f` / `H-F` / `H-b` / `H-B`
   打开文件 / 其他窗口打开文件 / 切 buffer / 其他窗口切 buffer
-- `H-r` / `H-s` / `H-g` / `H-t`
-  最近文件 / 当前 buffer 搜索 / 项目 ripgrep / `telescope`
+- `H-r` / `H-s` / `H-g`
+  最近文件 / 当前 buffer 搜索 / 项目 ripgrep
+- `H-t`
+  Agent 选择器：切换会话、新建或打开历史
 - `H-p` / `H-P` / `H-R` / `H-T`
   项目菜单 / workspace 菜单 / run profile 菜单 / test 菜单
 - `H-m` / `H-a`
@@ -211,7 +213,7 @@
 - `H-<tab>`
   切换当前折叠（Org 标题、tree-sitter 折叠、hideshow 折叠统一走这个入口）
 
-`H-x` 现在直接打开 `telescope`，和 `SPC SPC` / `H-t` / `F2` 是同一个入口。
+`H-x` 现在直接打开 `telescope`，和 `SPC SPC` / `F2` 是同一个入口。
 普通 `M-x` 仍走默认 `amx` 行为。
 
 `H-,` 内部按键按用途分组：board 入口用 `c/g/L/j/a/h`，菜单入口用
@@ -1199,7 +1201,7 @@ wgrep 中按 `C-c C-c` 会应用并保存修改，然后退出搜索结果窗；
 
 - `SPC SPC`
   打开 `telescope`
-- `H-x` / `H-t` / `F2`
+- `H-x` / `F2`
   同样打开 `telescope`
 - `SPC SPC f`
   当前项目找文件
@@ -1538,7 +1540,7 @@ wdired 中按 `C-c C-c` 完成文件名修改后，会退出目录列表窗；Di
 - `M-o`
   `ace-window`；Noema xwidget 里的目标编号会显示在页面左上角
 - `M-O`
-  交换当前窗口与目标窗口
+  在当前 frame 内交换窗格；两个窗格直接交换，更多窗格先选目标，不影响浮窗
 - `M-\``
   `+portal-popup/toggle`
 - `H-\`` / `C-\``
@@ -1792,7 +1794,7 @@ Emacs 通用 agent 层统一管理轻量模型交互与结构化 coding-agent �
 | 键 | 功能 |
 |----|------|
 | `H-A` / `SPC a a` / `C-c A RET` | Agent Manager 浮窗；再次调用隐藏返回 |
-| `C-S-t`（`Ctrl-Shift-T`，Noema 页面和 Portal 终端里也可用）/ `M-x agent-switcher` | 像 `Cmd-T` 选终端一样选 agent：列出不在屏幕上的会话、新建 Claude/Codex/OpenCode 和历史；`RET` 当前窗口，`S-RET` 右侧，`Cmd-RET` 下方 |
+| `H-t`（macOS `Option-T`，Noema 页面和 Portal 终端里也可用；`C-S-t` 保留为备用）/ `M-x agent-switcher` | 像 `Cmd-T` 选终端一样选 agent：列出不在屏幕上的会话、新建 Claude/Codex/OpenCode 和历史；`RET` 当前窗口，`S-RET` 右侧，`Cmd-RET` 下方 |
 | `C-c A W` | 打开当前项目 Pi |
 | `C-c A g` | 当前项目的 Agent cache：缓存、任务图谱、问题和日志（`noema-project-graph`） |
 | `C-c A n` | 编辑区新建执行 Agent；Pi 中新建同作用域的对话 |

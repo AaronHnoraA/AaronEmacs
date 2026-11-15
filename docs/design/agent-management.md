@@ -35,7 +35,7 @@ Research 的逻辑 Session 和 Run ID 不可互换。关闭视图只改变显示
 | 新建 | `agent-shell` | 总是在当前窗口新建，不是开关 |
 | 选择 | `C-u C-u agent-shell`、`C-u C-c a` | 选池成员、新建或已保存对话 |
 | 召回 | `C-c a` | 回到本项目最近的会话；空池时选择新建或恢复 |
-| 切换 | `Ctrl-Shift-T`（`C-S-t`，Noema 页面里也可用） | 像 `Cmd-T` 选终端：不在屏幕上的会话、新建或历史，`RET`/`S-RET`/`Cmd-RET` 选窗口 |
+| 切换 | `H-t`（macOS `Option-T`，Noema 页面和 Portal 终端里也可用；`C-S-t` 保留为备用） | 像 `Cmd-T` 选终端：不在屏幕上的会话、新建或历史，`RET`/`S-RET`/`Cmd-RET` 选窗口 |
 | 返回 | 在聊天里 `C-c a` | 收起聊天，回到来源窗口；agent 继续工作 |
 
 进入聊天之后，所有操作都在 agent-shell 自己的工作方式里：
@@ -452,6 +452,21 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   `/delegate` 派工，`agent-open-worker`／`C-c A B`／`/workers` 打开已有 worker。
   `C-c A E`／`/butler` 召回全局 Pi；Pi 与其他 Agent 共用同一运行时。
   旧 local bridge 只翻译为公共 API，不另存回执或管理队列。
+- **C62 临时任务与普通会话隔离。** ACP 层将 `subagent`、`probe`、`marginnote`、
+  `latex-export` 及已有的 `side` 来源视为临时任务，在异步启动前复制并标记配置。
+  其模型切换回调不写普通模型偏好，也不进入领域的持久会话登记；仅指定推理强度的
+  pinned config 同样隔离。普通会话的显式模型选择仍可记忆，不重置已有用户偏好。
+  `spawn`／`background:true` 的 `create` 可传 `modelId`、`effort`；workspace 与
+  worktree 共用这一路径，在创建 worktree 前校验参数。私有副本去除被任务参数覆盖的
+  普通默认选项，包括具体 ID 和 ACP 类别名；任务推理级别在保留的模型/模式选项之后应用。
+  提供商实际选择必须在首个
+  带回执任务的 prompt 前核验；不支持或不匹配就失败，不静默用其他模型工作。
+  普通 `create` 拒绝任务参数；后续 `send` 尊重 worker 当前设置。后台可见性与生命周期
+  分开：隐藏普通聊天不会因此变成一次性任务，手动打开 worker 也不会将它变成普通聊天。
+  临时 worker 可按空闲保留策略回收，但初始化、运行、待决请求、队列、草稿与可见窗口
+  仍阻止回收。通用回收不删除原生历史、产物或 worktree；私有导出沿用既有的历史清理规则。
+  Noema 导出复用共享 pinned-config，不另建运行时。
+  测试：`agent-task-c62-*`、`agent-api-c62-*`、`agent-delegation-c62-*`。
 - **C63 一份跨 agent 的对话历史。** `/resume`（`h`）、Manager 的历史、项目池的恢复项
   都打开 `+agent/history`（`tools/agent/history`）。它只读 Claude Code
   （`~/.claude/projects/<目录>/<id>.jsonl`）、Codex（`~/.codex/state_5.sqlite` 的
@@ -463,7 +478,8 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   已打开的标 `● open`，移动时在悬浮框（与 LSP 悬浮文档同样的
   child frame，候选右侧或 minibuffer 正上方）预览最后几轮对话；它不取窗口也不取键盘，
   滚轮与 `C-M-v` / `C-M-S-v` 原地滚动，每个对话在一次选择中只读一次，移动去抖，选择结束
-  时隐藏并清空，下次复用同一个 frame。预览与查看都从 transcript 末尾按固定大小的字节窗
+  时销毁预览 frame 并清空 buffer，确认与取消都走同一清理路径；下次打开时重新创建，
+  同一次选择内切换候选仍复用预览。预览与查看都从 transcript 末尾按固定大小的字节窗
   往前分页读取（只解码像消息的行，单条消息有字数上限），从不读整个文件：悬浮框最新的在上，
   滚到底再加载更早的一页，一个对话最多保留 60 条，一次选择最多缓存 24 个对话。`Cmd-RET`
   在只读 Markdown buffer 中查看该对话（按时间顺序，先载入最近 20 条，`<` 加载更早，`r`

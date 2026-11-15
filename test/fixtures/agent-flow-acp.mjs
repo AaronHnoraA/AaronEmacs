@@ -14,7 +14,11 @@ const reply = (id, result={}) => send({id,result});
 const update = (sid, data) => send({method:'session/update',params:{sessionId:sid,update:data}});
 const text = (sid, value) => update(sid,{sessionUpdate:'agent_message_chunk',content:{type:'text',text:value}});
 const persist = () => writeFileSync(store, JSON.stringify(sessions));
-const session = id => ({sessionId:id, models:{currentModelId:'fixture',availableModels:[{modelId:'fixture',name:'Local fixture'},{modelId:'other',name:'Alternate fixture'}]}, modes:{currentModeId:'ask',availableModes:[{id:'ask',name:'Ask'},{id:'edit',name:'Edit'}]}});
+const configOptions = id => [
+  {id:'model',name:'Model',category:'model',type:'select',currentValue:sessions[id].model??'fixture',options:[{value:'fixture',name:'Local fixture'},{value:'other',name:'Alternate fixture'}]},
+  {id:'reasoning_effort',name:'Effort',category:'thought_level',type:'select',currentValue:sessions[id].effort??'medium',options:[{value:'medium',name:'Medium'},...(process.env.AGENT_FLOW_MODEL_EFFORT&&sessions[id].model!=='other'?[]:[{value:'xhigh',name:'Xhigh'}])]},
+];
+const session = id => ({sessionId:id, models:{currentModelId:sessions[id].model??'fixture',availableModels:[{modelId:'fixture',name:'Local fixture'},{modelId:'other',name:'Alternate fixture'}]}, modes:{currentModeId:'ask',availableModes:[{id:'ask',name:'Ask'},{id:'edit',name:'Edit'}]},...(process.env.AGENT_FLOW_CONFIG_OPTIONS?{configOptions:configOptions(id)}:{})});
 const finish = (sid, reason='end_turn') => { const req=active.get(sid); if(!req)return;active.delete(sid);reply(req, {stopReason:reason}); };
 const ask = (method, params, callback) => {const id=++seq;pending.set(id,callback);send({id,method,params});};
 createInterface({input:process.stdin}).on('line', line => {
@@ -39,6 +43,12 @@ createInterface({input:process.stdin}).on('line', line => {
       }
       case 'session/fork': {const id=`fixture-${Object.keys(sessions).length+1}`;sessions[id]=structuredClone(sessions[sid]);persist();reply(msg.id,session(id));break;}
       case 'session/set_model':case 'session/set_mode':reply(msg.id);break;
+      case 'session/set_config_option': {
+        if(p.configId==='model')sessions[sid].model=p.value;
+        else if(p.configId==='reasoning_effort')sessions[sid].effort=p.value;
+        else {send({id:msg.id,error:{code:-32602,message:'Unknown config option'}});break;}
+        reply(msg.id,{configOptions:configOptions(sid)});break;
+      }
       case '_session/steering': {
         // Opt-in through AGENT_FLOW_STEERING.  A steer whose text starts with
         // "decline" is refused the way Codex answers; any other joins the turn.

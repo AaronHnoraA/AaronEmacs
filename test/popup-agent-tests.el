@@ -1213,12 +1213,19 @@
     (unwind-protect
         (progn
           (with-current-buffer session
-            (setq default-directory "/fs:server:/home/test/"))
+            (setq default-directory "/fs:server:/home/test/")
+            (setq-local agent-shell--state (list (cons :buffer session))))
           (with-temp-buffer
             (+agent-shell-in-session-buffer-a
              (lambda (&rest _) (setq seen default-directory))
-             :state (list (cons :buffer session)) :acp-request nil))
-          (should (equal seen "/fs:server:/home/test/")))
+             :state (buffer-local-value 'agent-shell--state session) :acp-request nil))
+          (should (equal seen "/fs:server:/home/test/"))
+          ;; A stale physical state must not execute in the replacement client.
+          (setq seen nil)
+          (+agent-shell-in-session-buffer-a
+           (lambda (&rest _) (setq seen t))
+           :state (list (cons :buffer session)) :acp-request nil)
+          (should-not seen))
       (kill-buffer session))))
 
 (ert-deftest agent-shell-context-files-map-into-the-session-machine ()

@@ -1,6 +1,6 @@
 ---
 name: rendered-construct
-description: Use before adding or changing anything the Noema visual editor draws over Markdown source: a CM6 widget, Decoration.replace, block environment, inline chip, embedded editor, or a Vim motion crossing rendered content.
+description: "Use before adding or changing anything the Noema visual editor draws over Markdown source: a CM6 widget, Decoration.replace, block environment, inline chip, embedded editor, or a Vim motion crossing rendered content."
 ---
 
 # Rendered constructs

@@ -41,6 +41,7 @@
 (declare-function toggle-one-window "toggle-one-window" ())
 
 (defvar dashboard-buffer-name)
+(defvar aw-scope)
 
 (defun +open-entry-in-split (side open)
   "Split a main window on SIDE and run OPEN in the new pane.
@@ -327,21 +328,26 @@ Explicit Remote bookmark files and relative paths retain their own placement."
 (general-define-key :keymaps 'global "C-x r ." #'bookmark-actions-menu)
 
 (defun +windows/swap-window-dwim ()
-  "Swap the current window with another window.
-When only two windows are visible, swap with the other one directly.
-Otherwise, use `ace-window' to choose the target window."
+  "Swap panes within the current frame.
+With two panes, swap directly; otherwise choose with `ace-window'.
+Minibuffers and panes belonging to other frames are never targets."
   (interactive)
-  (unless (> (count-windows) 1)
-    (user-error "Need at least two windows to swap"))
-  (let ((source (selected-window))
-        (target nil))
+  (let* ((source (selected-window))
+         (frame (window-frame source))
+         (windows (window-list frame 'nomini))
+         target)
+    (unless (> (length windows) 1)
+      (user-error "Need at least two windows to swap"))
     (setq target
-          (if (= (count-windows) 2)
-              (next-window source nil t)
+          (if (= (length windows) 2)
+              (next-window source 'nomini frame)
             (progn
               (require 'ace-window)
-              (aw-select "Swap with window"))))
+              (let ((aw-scope 'frame))
+                (aw-select "Swap with window")))))
     (unless (and (window-live-p target)
+                 (eq (window-frame target) frame)
+                 (not (window-minibuffer-p target))
                  (not (eq source target)))
       (user-error "No target window selected"))
     (window-swap-states source target)))

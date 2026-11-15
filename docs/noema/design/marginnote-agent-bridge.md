@@ -43,13 +43,14 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 - **MN-C8：** Emacs 只有一个 MarginNote 命令 `noema-marginnote-sync`
   （Noema AI 菜单 `H-o %` 的 `M`），没有任务菜单、别名，也不把 MarginNote
   任务交给当前已有的会话。OCR、续接、合并、查询进度都写在它的 prompt 里，
-  由 skill 完成；运行中的同步会话从 `noema-sessions` 或 agent inbox 重新
+  由 skill 完成；运行中的同步会话从 Agent Manager 的真实会话列表重新
   打开，pack 在 Skill Manager 的 Packs 页管理。它不新建 Project、另建模型
   客户端或自行运行 OCR。
 - **MN-C9：** 默认只对用户指定的原生范围做智能 OCR 并写入指定目标，保留
   笔记内容、顺序、结构与未完成推导，允许简单纠正明显笔误。正文不加入识别
-  过程、符号辨认理由或未经请求的论文解释。截图与 TikZ 承载实际图示，主稿
-  使用官方指定页压平 PDF；数据库和笔画只辅助增量、定位与区分背景。整理、扩写、内容合并须由用户明确要求；接续
+  过程、符号辨认理由或未经请求的论文解释。截图与 TikZ 承载实际图示，文档页主稿
+  使用官方指定页压平 PDF；自由画布局部使用核验范围的 scene 回执与媒体，数据库和笔画
+  只辅助增量、定位与区分背景。整理、扩写、内容合并须由用户明确要求；接续
   OCR 或存在旧稿不构成内容合并授权。
 - **MN-C10：** `noema-marginnote-sync` 是正式入口，
   与 LaTeX 导出一样拥有自己的 agent 会话：读入目标 Markdown（可空）、写入方式
@@ -60,11 +61,11 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   `update`（只换对应原稿范围）、`append`、`replace`、`merge`；后两者即为用户
   对覆盖或内容合并的明确授权。
 - **MN-C11：** 同步会话钉住 `noema-marginnote-sync-agent` / `-model` /
-  `-effort`（默认 Codex、`gpt-6.1-terra`、`high`；前缀参数启动时选
+  `-effort`（默认 Codex、`gpt-6.1-terra`、`xhigh`；前缀参数启动时选
   reasoning，密集推导默认给 `noema-marginnote-sync-dense-effort` 即 `xhigh`），经
   `+agent-acp-pinned-config`：普通会话记住的模型不进入它，它里面的模型
-  选择也不写回普通会话的记忆。钉住的模型不可用时任务只留作草稿，不在别的
-  模型上运行。
+  选择也不写回普通会话的记忆。首次派发使用共享 ACP 任务设置核验；模型或推理
+  级别未生效时任务只留作草稿，不静默降级。这个默认值只属于 OCR 同步入口。
 - **MN-C12：** 同步任务的中间产物（官方导出 PDF、页面渲染、裁图、OCR 候选、
   分页草稿、`workflow.json` 与回执）放在 `noema-marginnote-work-root`
   （`var/noema/marginnote/`）下按原生来源身份分的子目录，重跑时复用，不进
@@ -143,10 +144,20 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   写预留记录、新卡、初始位置与来源关系。刷新后按实际 frame 尺寸核验，尺寸/位置最终调整是另一个 Undo 组，
   不宣称整个创建流程一键撤销。未知或部分结果先找回原请求及 noteId，已被用户改动或删除的卡不自动覆盖或重建。
   记录不是跨设备锁，宿主崩溃前未保存的数据和大量根 metadata 的成本仍属边界。
+- **MN-C28：** 当前视区取材必须同时核对设备、可见 surface 与本次坐标基准；焦点名、库存第一项
+  和历史缓存都不能代替屏幕范围。主 Agent 可以委派只读取材，但验收其范围后才派 OCR；Pi 没有
+  shell 或图像工具时读取 Markdown 范围摘要，并明确视觉复核由谁完成。已保存画布合成不称截图。
+  文档页环境检查只探测显式设备（省略时为 Mac），插件与 Bridge 使用同一设备。
+  原生来源查询和 PDF 导出必须显式指定设备，省略时在访问前拒绝；不记住全局“上次设备”。
+- **MN-C29：** 学习集检查点目录只提供保存历史的元数据，按需读取且不恢复；目录版本不决定 OCR
+  是否复用。自由画布局部增量仍核对当前源库存、布局、未定位缺口与本地源文件/视图完整性；
+  文档页使用稳定页身份与渲染快照。两端分别保存历史与回执，不用跨设备版本号猜测同步完成。
 
 ## 实现位置
 
 - `marginnote-agent` 的 `mn_annotation_state.mjs/.js`：原生局部布局和点名卡片的当前状态；只读。
+- 同 skill 的 `mn_viewport.py`：已核验 iPad 根画布视区取材；`mn_region_check.py`：已读局部复查；
+  `mn_history.py`：Mac/iPad 学习集检查点目录及目录元数据比较，不提供笔记正文 diff。
 - 同 skill 的 `mn_annotation_position.mjs/.js`、`mn_annotation_source_check.py`：已有文本卡的单次原生位置/关系写入、官方源复查与实际布局验收。
 - 同 skill 的 `mn_annotation_create.mjs/.js`、`mn_annotation_create_request.py`：从局部方案创建独立卡、按实际尺寸适配并找回同方案记录；`mn_annotation_native.js` 共用原生来源检查。
 
@@ -170,6 +181,11 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 
 ## 已知差距
 
+- **MN-G7：** Mac 的当前脑图视区映射尚未验证；已有 Mac 批注布局变换不能证明官方
+  `scrollBounds/zoomScale` 的视区映射。当前可见 surface 为文档时只记录文档观察，不生成脑图
+  OCR 来源，也不套用 iPad 公式。逐笔记编辑历史、历史正文与版本差异读取仍没有已公布路由；
+  `mn_history.py` 仅对已有学习集检查点目录负责。
+
 - **MN-G6：** skill 的局部布局已在真实批注跑通。
   已接到通用的原生位置/关系写入与读回，测试卡精确移动/恢复、位置与关系共同 Undo 已实测。
   新卡创建工具已在真实图片旁通过尺寸适配、官方正文/原生位置回读及同方案查重，隔离创建组 Undo 通过。
@@ -183,14 +199,15 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   仍须核对实际加载源码、完整 exec、关闭重开，以及实际设备的暂停/模板行为。旧 host 尚未重启，
   不因新默认关闭旧监听就声称当前进程已无监听。
 
-- **MN-G4：** 官方认证插件入口已在 Mac 上验证鉴权及 1.0.8 无浮窗原生回调，iPad 尚待验收。
+- **MN-G4：** 官方认证插件入口已在 Mac 上验证鉴权及 1.0.8 无浮窗原生回调；iPad 已验证
+  根画布只读 basis 和视区素材回执，不能据此开放 Mac 批注写入包装器。
   经旧 Noema 通道的 Mac 坐标原型已在测试卡验证实际布局、落盘及模型 Undo；支持独立卡及
   子脑图直属卡；又在真实研究画布完成手写旁独立批注，官方源复查、原生 frame 回读、正文及关系元数据回读均通过。
   CLI 根画布存储坐标可直接写自由卡的 mindpos；frame 转换须减 size/2、减 offset、加 20000，不能重复加偏移。
   普通父子分支仍受自动排版控制。此前在线旧包使用
   MN-C5 的兼容通道。用户已确认卸载历史 Canvas Lab 副本。
-- **MN-G1：** Noema 插件 1.0.3 在 macOS 5.0.1 上的查询与手写读取已验证；iPad
-  连接及取材仍未验证。插件通道固定在 `127.0.0.1`，iPad 只能走 Bridge。
+- **MN-G1：** 双端连接与官方局部取材已有验证；iPad 的原生写入、生命周期恢复和多窗口绑定
+  仍未现场验收。默认插件通道复用设备自己的官方 Bridge；只有 legacy host 通道固定本机回环。
 - **MN-G2：** 5.0.1 上 Bridge 的读写路由、官方导出和页内留白写字已在 macOS 和 iPad
   验证，含带手写的插入留白；贴图等其他图层仍需每次视觉核对。插件命令执行、批注稿
   编辑器与 `/writing/*` 写入路由未验证。
@@ -202,7 +219,7 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 
 安全边界见[首次审计](../records/audits/marginnote-plugin-audit-2026-11.md)，
 官方通道的实测、迁移与部署限制见[后续复核](../records/audits/marginnote-official-channel-2026-11.md)。
-当前源码 1.0.6；安装和 host 重新加载以运行时版本、PID 与回执为准，不能由本节版本推断。
+当前源码 1.0.8；安装和 host 重新加载以运行时版本、PID 与回执为准，不能由本节版本推断。
 
 在 Noema 源码目录运行 `node scripts/build-marginnote-addon.mjs`，将
 `build/marginnote/noema.mnaddon` 交给 MarginNote 原生安装器并启用。

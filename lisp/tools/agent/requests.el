@@ -90,6 +90,7 @@
   "Send RECORD's full content with callbacks tied to this request."
   (let ((buffer (plist-get record :buffer)))
     (with-current-buffer buffer
+      (+agent-acp-verify-task-options)
       (+agent-requests--activate record)
       (+agent-acp-prompt
        :buffer buffer :content (plist-get record :content) :run-id (plist-get record :id) :process-queue t

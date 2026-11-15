@@ -168,12 +168,12 @@
 (ert-deftest agent-c63-preview-floats-like-an-lsp-hover ()
   (require 'posframe nil t)
   (skip-unless (fboundp 'posframe-show))
-  (let (shown hidden (reads 0))
+  (let (shown closed (reads 0))
     (cl-letf (((symbol-function 'posframe-workable-p) (lambda () t))
               ((symbol-function 'posframe-show)
                (lambda (buffer &rest args)
                  (setq shown (list buffer (plist-get args :poshandler) (plist-get args :accept-focus)))))
-              ((symbol-function 'posframe-hide) (lambda (buffer) (setq hidden buffer)))
+              ((symbol-function 'posframe-delete-frame) (lambda (buffer) (setq closed buffer)))
               ((symbol-function '+agent-history--page)
                (lambda (_ &optional _next)
                  (cl-incf reads) (list '(("assistant" . "planned") ("user" . "plan it")))))
@@ -194,10 +194,48 @@
                                    (with-current-buffer buffer (buffer-string))))
           (should (compare-window-configurations layout (current-window-configuration)))
           (funcall state 'exit nil)
-          ;; Hidden for reuse, emptied, never killed.
-          (should (eq hidden buffer))
+          ;; Release the frame; only its empty buffer remains reusable.
+          (should (eq closed buffer))
           (should (buffer-live-p buffer))
           (should (= 0 (buffer-size buffer))))))))
+
+(ert-deftest agent-c63-resume-preview-is-destroyed-on-accept-and-cancel ()
+  "Each Resume invocation releases its actual child frame on exit."
+  (skip-unless (display-graphic-p))
+  (require 'posframe)
+  (require 'consult)
+  (let ((+agent-history-preview-buffer (generate-new-buffer-name " *resume-preview-test*"))
+        (row (list :agent "codex" :id "preview-test" :title "Resume preview"
+                   :updated (float-time)))
+        frames)
+    (unwind-protect
+        (dolist (action '(accept cancel))
+          (let (shown cancelled)
+            (cl-letf* ((show (symbol-function '+agent-history--show-preview))
+                       ((symbol-function '+agent-history--page)
+                        (lambda (&rest _) (list '(("assistant" . "Preview text")))))
+                       ((symbol-function '+agent-history--show-preview)
+                        (lambda (buffer)
+                          (prog1 (funcall show buffer)
+                            (setq shown (buffer-local-value 'posframe--frame buffer))
+                            (setq unread-command-events
+                                  (list (if (eq action 'cancel) ?\C-g ?\r)))))))
+              (let ((selected
+                     (condition-case nil
+                         (with-timeout (5 (error "Resume preview did not exit"))
+                           (+agent-history-read (list row)))
+                       (quit (setq cancelled t) nil))))
+                (if (eq action 'accept)
+                    (should (eq selected row))
+                  (should cancelled))))
+            (should (framep shown))
+            (should-not (frame-live-p shown))
+            (should-not (memq shown frames))
+            (push shown frames)
+            (let ((buffer (get-buffer +agent-history-preview-buffer)))
+              (should (buffer-live-p buffer))
+              (should (zerop (buffer-size buffer))))))
+      (posframe-delete +agent-history-preview-buffer))))
 
 (ert-deftest agent-c63-preview-scrolls-without-taking-the-keyboard ()
   (let ((buffer (+agent-history--preview-render

@@ -20,6 +20,14 @@ for its bounded reply, or end your turn and receive the notification. `show`
 opens the real worker buffer only when requested. Do not make the user relay
 OCR output or worker messages.
 
+`spawn` and `create` with `background:true` accept optional `modelId` and
+`effort`, including worktree workers. These are session-local task settings:
+never change shared provider variables or preference files to configure a worker.
+Emacs verifies the actual selection before the first task prompt and fails that
+task if it cannot honor the requested options. Ordinary `create` rejects them;
+`send` continues with the worker's current settings. Temporary workers stay out
+of durable project conversation registration, even when manually opened.
+
 ## Local socket fallback
 
 When the Noema HTTP host is unavailable and the local bridge is enabled, run

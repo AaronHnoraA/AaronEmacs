@@ -448,6 +448,15 @@ and private LaTeX exports."
   (locate-user-emacs-file "var/agent/models.json")
   "Local, non-project storage for the last successfully selected model per agent.")
 
+(defconst +agent-acp-task-origins '(subagent probe marginnote latex-export)
+  "Task-owned sessions: no interactive preference writeback or durable adoption.")
+(defvar +agent-acp-ephemeral-origins)
+
+(defun +agent-acp-temporary-origin-p (origin)
+  "Whether ORIGIN owns a temporary task or an explicitly ephemeral side chat."
+  (or (memq origin +agent-acp-task-origins)
+      (memq origin +agent-acp-ephemeral-origins)))
+
 (defun +agent-acp--read-models ()
   "Read model preferences as data, never as executable Lisp."
   (condition-case nil
@@ -469,9 +478,10 @@ and private LaTeX exports."
       (error (message "Could not save agent model preference: %s" (error-message-string err))))))
 
 (defun +agent-acp--remember-interactive-model (identifier model)
-  "Remember MODEL for IDENTIFIER only outside private export sessions."
-  (unless (or (eq (bound-and-true-p +agent-acp-session-origin)
-                  'latex-export)
+  "Remember MODEL for IDENTIFIER only outside session-local task configurations."
+  (unless (or (+agent-acp-temporary-origin-p (bound-and-true-p +agent-acp-session-origin))
+              (map-nested-elt (agent-shell--state)
+                              '(:agent-config :agent-session-local))
               (map-nested-elt (agent-shell--state)
                               '(:agent-config :agent-pinned-model)))
     (+agent-acp--remember-model identifier model)))
@@ -559,24 +569,64 @@ model; the pin keeps that choice out of the remembered interactive model."
                        ('codex "reasoning_effort")
                        ('claude-code "effort")
                        ('pi "thinkingLevel")))
+         (pin-model (and (stringp model-id) (not (string-empty-p model-id))))
+         (pin-effort (and effort-key
+                          (or (functionp effort)
+                              (and (stringp effort) (not (string-empty-p effort))))))
          (default-options (map-elt copy :default-config-options)))
-    (when (and (stringp model-id) (not (string-empty-p model-id)))
+    ;; Effort-only task configurations need the same writeback fence as models.
+    (setf (alist-get :agent-session-local copy) t)
+    (when pin-model
       (setf (alist-get :agent-pinned-model copy) model-id
             (alist-get :default-model-id copy)
             (lambda () (+agent-acp-export-model-id model-id))))
-    (when (and effort-key (or (functionp effort) (and (stringp effort) (not (string-empty-p effort)))))
+    (when (or pin-model pin-effort)
       (setf (alist-get :default-config-options copy)
             (lambda ()
-              (let ((options (if (functionp default-options)
-                                 (funcall default-options)
-                               default-options)))
-                (cons (cons effort-key (if (functionp effort) (funcall effort) effort))
-                      (seq-remove (lambda (entry)
-                                    (equal (car-safe entry) effort-key))
-                                  options))))))
+              (let* ((options (if (functionp default-options)
+                                  (funcall default-options)
+                                default-options))
+                     (state (and (derived-mode-p 'agent-shell-mode) agent-shell--state))
+                     ;; Defaults accept advertised IDs and ACP category aliases.
+                     ;; Remove both spellings of anything the task owns.
+                     (kept (seq-remove
+                            (lambda (entry)
+                              (let* ((key (car-safe entry))
+                                     (category (map-elt (agent-shell--resolve-config-option state key)
+                                                        :category)))
+                                (or (and pin-model (or (equal key "model") (equal category "model")))
+                                    (and pin-effort (or (equal key effort-key)
+                                                        (equal key "thought_level")
+                                                        (equal category "thought_level"))))))
+                            options)))
+                (if pin-effort
+                    ;; A retained model/mode can change which efforts exist.
+                    (append kept (list (cons effort-key (if (functionp effort) (funcall effort) effort))))
+                  kept)))))
     copy))
 
 
+
+(defvar-local +agent-acp--task-options-verified-state nil
+  "Physical ACP state whose initial task options have been verified.")
+
+(defun +agent-acp-verify-task-options ()
+  "Verify explicit task options before the first tracked prompt is sent.
+Unavailable or rejected options must not silently fall back to another model
+or effort.  Later intentional changes within this session remain possible."
+  (let* ((state (agent-shell--state))
+         (options (map-nested-elt state '(:agent-config :agent-task-options))))
+    (when (and options (not (eq state +agent-acp--task-options-verified-state)))
+      (when-let* ((model (plist-get options :model)))
+        (let ((resolved (+agent-acp-export-model-id model)))
+          (unless (and resolved (equal resolved (+agent-acp-current-model-id)))
+            (user-error "Task model %s was not selected (actual: %s)"
+                        model (+agent-acp-current-model-id)))))
+      (when-let* ((effort (plist-get options :effort)))
+        (unless (equal effort (agent-shell--current-thought-level-id state))
+          (user-error "Task effort %s was not selected (actual: %s)"
+                      effort (agent-shell--current-thought-level-id state))))
+      (setq +agent-acp--task-options-verified-state state))))
 
 (defun +agent-acp-set-model (model-id &optional buffer)
   "Select MODEL-ID in BUFFER through ACP after checking session state."
@@ -1625,7 +1675,8 @@ request, no timer.  It is the one place Noema reads agent-shell's usage."
                      (if (natnump turns) turns 0))))))
 
 (defcustom +agent-acp-ephemeral-origins '(side latex-export)
-  "Session origins that never enter a project's durable session registry.
+  "Additional session origins that never enter a project's durable registry.
+Origins in `+agent-acp-task-origins' always have that property.
 A side chat asks a quick question beside a session without becoming one of
 the project's conversations; it is listed while it lives and then goes.
 Adopted from Pisper's temporary side chat."
@@ -2225,7 +2276,7 @@ the runtime does not start a document host or create a business project."
       (with-current-buffer buffer
         (setq-local +agent-acp-session-origin origin))
       (+agent-acp-mark-session-buffer buffer name agent root)
-      (unless (memq origin +agent-acp-ephemeral-origins)
+      (unless (+agent-acp-temporary-origin-p origin)
         (run-hook-with-args '+agent-session-adopt-functions buffer name root))
       buffer)))
 
@@ -2443,7 +2494,8 @@ command, because upstream returns the buffer before its caller can name it."
        (not (buffer-local-value 'remote-buffer-disconnected-p buffer))
        (let ((origin (buffer-local-value '+agent-acp-session-origin buffer)))
          (and (not (memq origin '(pi pi-emacs pi-project)))
-              (memq origin +agent-acp-auto-stop-origins)))))
+              (or (memq origin +agent-acp-task-origins)
+                  (memq origin +agent-acp-auto-stop-origins))))))
 
 (defun +agent-acp-sweep-warm-buffers (&optional limit idle-seconds)
   "Hibernate unused recoverable background clients through their shared owner.
@@ -2763,7 +2815,10 @@ opening a new one; cancelling ends the client.
 
 Noema disables agent-shell's duplicate Markdown transcript and defaults to a
 visible-only render policy.  Neither setting affects ACP transport or events."
-  (let* ((directory (+agent-acp--client-directory directory))
+  (let* ((config (if (+agent-acp-temporary-origin-p origin)
+                     (+agent-acp-pinned-config config nil nil)
+                   config))
+        (directory (+agent-acp--client-directory directory))
         (default-directory directory)
         ;; Project discovery can return a logical /fs: root again. Pin the
         ;; actual process directory through the asynchronous ACP handshake.

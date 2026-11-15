@@ -37,6 +37,93 @@
    (lambda () (eq t (alist-get 'terminal (agent-delegation-tests--result id)))))
   (agent-delegation-tests--result id))
 
+(ert-deftest agent-delegation-c62-task-options-and-model-changes-stay-in-the-worker ()
+  (agent-delegation-tests--fixture
+    (let* ((process-environment (copy-sequence process-environment))
+           (+agent-acp-model-preferences-file (expand-file-name "models.json" directory)))
+      (setenv "AGENT_FLOW_CONFIG_OPTIONS" "1")
+      (setf (alist-get :identifier config) 'codex)
+      (+agent-acp--remember-model 'codex "fixture")
+      (let* ((reply (+agent/api `((action . "spawn") (root . ,directory) (agent . "codex")
+                                  (modelId . "other") (effort . "xhigh") (prompt . "isolated task"))))
+             (worker (get-buffer (alist-get 'buffer (alist-get 'session reply)))))
+        (should (equal (alist-get 'state (agent-delegation-tests--done (alist-get 'requestId reply))) "completed"))
+        (should (equal (+agent-acp-current-model-id worker) "other"))
+        (with-current-buffer worker
+          (should (equal (agent-shell--current-thought-level-id (agent-shell--state)) "xhigh")))
+        ;; Exercise an asynchronous user model change in the real ACP client.
+        (+agent-acp-set-model "fixture" worker)
+        (agent-flow-e2e--wait (lambda () (equal (+agent-acp-current-model-id worker) "fixture")))
+        (+agent-acp-set-model "other" worker)
+        (agent-flow-e2e--wait (lambda () (equal (+agent-acp-current-model-id worker) "other")))
+        (should (equal (gethash "codex" (+agent-acp--read-models)) "fixture"))
+        (let* ((ordinary (+agent/api `((action . "create") (root . ,directory) (agent . "codex"))))
+               (chat (get-buffer (alist-get 'buffer (alist-get 'session ordinary)))))
+          (agent-flow-e2e--wait (lambda () (+agent-acp-state-value chat '(:init-finished))))
+          (should (equal (+agent-acp-current-model-id chat) "fixture"))
+          (with-current-buffer chat
+            (should (equal (agent-shell--current-thought-level-id (agent-shell--state)) "medium")))
+          (+agent-acp-set-model "other" chat)
+          (agent-flow-e2e--wait (lambda () (equal (gethash "codex" (+agent-acp--read-models)) "other"))))))))
+
+(ert-deftest agent-delegation-c62-unavailable-task-model-never-sends-the-prompt ()
+  (agent-delegation-tests--fixture
+    (let* ((reply (+agent/api `((action . "spawn") (root . ,directory) (agent . "flow-fixture")
+                                (modelId . "missing-model") (prompt . "must not run"))))
+           (result (agent-delegation-tests--done (alist-get 'requestId reply))))
+      (should (equal (alist-get 'state result) "failed"))
+      (should (string-match-p "model" (alist-get 'stopReason result)))
+      (with-temp-buffer
+        (insert-file-contents (concat store ".events"))
+        (should-not (string-match-p "session/prompt" (buffer-string)))))))
+
+(ert-deftest agent-delegation-c62-task-options-override-category-defaults ()
+  (agent-delegation-tests--fixture
+    (let ((process-environment (copy-sequence process-environment)))
+      (setenv "AGENT_FLOW_CONFIG_OPTIONS" "1")
+      (setf (alist-get :identifier config) 'codex
+            (alist-get :default-config-options config)
+            (lambda () '(("model" . "fixture") ("thought_level" . "medium"))))
+      (let* ((reply (+agent/api `((action . "spawn") (root . ,directory) (agent . "codex")
+                                  (modelId . "other") (effort . "xhigh") (prompt . "task overrides"))))
+             (worker (get-buffer (alist-get 'buffer (alist-get 'session reply)))))
+        (should (equal (alist-get 'state (agent-delegation-tests--done (alist-get 'requestId reply))) "completed"))
+        (should (equal (+agent-acp-current-model-id worker) "other"))
+        (with-current-buffer worker
+          (should (equal (agent-shell--current-thought-level-id (agent-shell--state)) "xhigh")))
+        (should (equal (funcall (alist-get :default-config-options config))
+                       '(("model" . "fixture") ("thought_level" . "medium"))))))))
+
+(ert-deftest agent-delegation-c62-unavailable-task-effort-never-sends-the-prompt ()
+  (agent-delegation-tests--fixture
+    (let ((process-environment (copy-sequence process-environment)))
+      (setenv "AGENT_FLOW_CONFIG_OPTIONS" "1")
+      (setf (alist-get :identifier config) 'codex)
+      (let* ((reply (+agent/api `((action . "spawn") (root . ,directory) (agent . "codex")
+                                  (effort . "missing-effort") (prompt . "must not run"))))
+             (result (agent-delegation-tests--done (alist-get 'requestId reply))))
+        (should (equal (alist-get 'state result) "failed"))
+        (should (string-match-p "effort" (alist-get 'stopReason result)))
+        (with-temp-buffer
+          (insert-file-contents (concat store ".events"))
+          (should-not (string-match-p "session/prompt" (buffer-string))))))))
+
+(ert-deftest agent-delegation-c62-effort-is-applied-after-retained-model-default ()
+  (agent-delegation-tests--fixture
+    (let ((process-environment (copy-sequence process-environment)))
+      (setenv "AGENT_FLOW_CONFIG_OPTIONS" "1")
+      (setenv "AGENT_FLOW_MODEL_EFFORT" "1")
+      (setf (alist-get :identifier config) 'codex
+            (alist-get :default-config-options config)
+            (lambda () '(("model" . "other"))))
+      (let* ((reply (+agent/api `((action . "spawn") (root . ,directory) (agent . "codex")
+                                  (effort . "xhigh") (prompt . "model-dependent effort"))))
+             (worker (get-buffer (alist-get 'buffer (alist-get 'session reply)))))
+        (should (equal (alist-get 'state (agent-delegation-tests--done (alist-get 'requestId reply))) "completed"))
+        (should (equal (+agent-acp-current-model-id worker) "other"))
+        (with-current-buffer worker
+          (should (equal (agent-shell--current-thought-level-id (agent-shell--state)) "xhigh")))))))
+
 (ert-deftest agent-delegation-c60-spawn-background-and-read-exact-result ()
   (agent-delegation-tests--fixture
     (let* ((window (selected-window)) (shown (window-buffer window))

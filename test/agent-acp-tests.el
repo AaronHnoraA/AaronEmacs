@@ -59,7 +59,7 @@
         ;; The remembered interactive model does not reach the pinned session.
         (should (equal (funcall (alist-get :default-model-id started)) "gpt-6.1-terra"))
         (should (equal (funcall (alist-get :default-config-options started))
-                       '(("reasoning_effort" . "xhigh") ("mode" . "auto"))))
+                       '(("mode" . "auto") ("reasoning_effort" . "xhigh"))))
         ;; A model change inside the pinned session is not remembered.
         (cl-letf (((symbol-function 'agent-shell--state)
                    (lambda () `((:agent-config . ,pinned)))))
@@ -69,6 +69,51 @@
         (should (equal (alist-get :default-config-options original)
                        '(("reasoning_effort" . "high") ("mode" . "auto"))))))))
 
+(ert-deftest agent-task-c62-temporary-model-selections-do-not-write-ordinary-defaults ()
+  (let* ((directory (make-temp-file "agent-task-preferences-" t))
+         (+agent-acp-model-preferences-file (expand-file-name "models.json" directory)))
+    (unwind-protect
+        (progn
+          (+agent-acp--remember-model 'codex "ordinary")
+          (dolist (origin '(subagent probe marginnote side latex-export))
+            (with-temp-buffer
+              (setq-local major-mode 'agent-shell-mode
+                          +agent-acp-session-origin origin
+                          agent-shell--state '((:agent-config . ((:identifier . codex)))))
+              (+agent-acp--remember-interactive-model 'codex "task-model"))
+            (should (equal (gethash "codex" (+agent-acp--read-models)) "ordinary"))))
+      (delete-directory directory t))))
+
+(ert-deftest agent-task-c62-effort-only-pin-does-not-write-ordinary-defaults ()
+  (let ((saved "ordinary")
+        (config (+agent-acp-pinned-config '((:identifier . codex)) nil "xhigh")))
+    (cl-letf (((symbol-function '+agent-acp--remember-model)
+               (lambda (_ model) (setq saved model))))
+      (with-temp-buffer
+        (setq-local major-mode 'agent-shell-mode
+                    agent-shell--state `((:agent-config . ,config)))
+        (+agent-acp--remember-interactive-model 'codex "task-model")))
+    (should (equal saved "ordinary"))
+    (should (equal (funcall (alist-get :default-config-options config))
+                   '(("reasoning_effort" . "xhigh"))))))
+
+(ert-deftest agent-task-c62-pins-remove-advertised-aliases-only-for-owned-options ()
+  (with-temp-buffer
+    (setq-local major-mode 'agent-shell-mode
+                agent-shell--state
+                '((:session . ((:config-options . (((:id . "custom-model") (:category . "model"))
+                                                   ((:id . "custom-effort") (:category . "thought_level"))))))))
+    (let ((original '((:identifier . codex)
+                      (:default-config-options . (("custom-model" . "ordinary")
+                                                  ("custom-effort" . "medium")
+                                                  ("mode" . "ask"))))))
+      (should (equal (funcall (alist-get :default-config-options
+                                       (+agent-acp-pinned-config original "task" nil)))
+                     '(("custom-effort" . "medium") ("mode" . "ask"))))
+      (should (equal (funcall (alist-get :default-config-options
+                                       (+agent-acp-pinned-config original nil "xhigh")))
+                     '(("custom-model" . "ordinary") ("mode" . "ask") ("reasoning_effort" . "xhigh")))))))
+
 (ert-deftest +agent-acp-claude-export-keeps-other-options-at-medium-effort ()
   (let* ((original '((:identifier . claude-code)
                      (:default-config-options . noema-test-claude-options)))
@@ -77,7 +122,7 @@
                (lambda () '(("mode" . "auto") ("effort" . "high")))))
       (setq copy (noema-agent-export-config original "sonnet"))
       (should (equal (funcall (alist-get :default-config-options copy))
-                     '(("effort" . "medium") ("mode" . "auto"))))
+                     '(("mode" . "auto") ("effort" . "medium"))))
       (should (eq (alist-get :default-config-options original)
                   'noema-test-claude-options)))))
 
@@ -652,12 +697,24 @@
       (should (= (+agent-acp-pending-prompt-count buffer) 2))
       (should-not (+agent-acp-auto-stoppable-p buffer)))))
 
+(ert-deftest agent-task-c62-background-retention-protects-running-and-queued-work ()
+  (with-temp-buffer
+    (setq-local major-mode 'agent-shell-mode shell-maker--busy nil
+                +agent-acp-session-origin 'subagent
+                agent-shell--state (list (cons :pending-prompts nil) (cons :init-finished t)))
+    (should (+agent-acp-auto-stoppable-p (current-buffer)))
+    (setf (map-elt agent-shell--state :pending-prompts) '("next"))
+    (should-not (+agent-acp-auto-stoppable-p (current-buffer)))
+    (setf (map-elt agent-shell--state :pending-prompts) nil
+          (map-elt agent-shell--state :active-requests) '(running))
+    (should-not (+agent-acp-auto-stoppable-p (current-buffer)))))
+
 ;; Adopted from Pisper's temporary side chat.
 (ert-deftest +agent-acp-side-chats-stay-out-of-the-durable-registry ()
   (let (durable)
     (cl-letf (((symbol-function 'noema-agent-register-session)
                (lambda (_buffer name _root) (push name durable))))
-      (dolist (origin '(side manual))
+      (dolist (origin '(side subagent probe marginnote latex-export manual))
         (with-temp-buffer
           (setq-local major-mode 'agent-shell-mode
                       +agent-acp-session-origin origin)

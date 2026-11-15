@@ -121,6 +121,8 @@ Dated and append-only. Read them for why something is the way it is, never for h
 
 ### records/audits/
 
+- [agent-task-isolation-2026-11.md](records/audits/agent-task-isolation-2026-11.md) Temporary ACP task isolation plan, regression evidence and live verification of unchanged ordinary-session defaults.
+- [marginnote-acp-pi-2026-11.md](records/audits/marginnote-acp-pi-2026-11.md) Mac-only MarginNote workflow, checkpoint history, task setting verification and live Pi/service integration audit.
 - [code-audit-2026-10.md](records/audits/code-audit-2026-10.md) Line and contract audit of the Emacs configuration: what was read, what was fixed, what stays open.
 - [eca-hq-agent-management-2026-10.md](records/audits/eca-hq-agent-management-2026-10.md) Source audit of ECA, eca-emacs and agent-shell-hq against Emacs agent ownership, management, interaction and notification contracts.
 - [agent-manager-lifecycle-2026-10.md](records/audits/agent-manager-lifecycle-2026-10.md) Direct Agent Manager, Aaron UI workspace grouping and popup integration, with restart, cancellation, recycling and callback lifetime verification.

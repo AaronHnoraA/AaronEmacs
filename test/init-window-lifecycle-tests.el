@@ -48,6 +48,39 @@ MODE is set as the buffer's `major-mode' symbol only; no mode body runs."
              (let ((kill-buffer-query-functions nil))
                (kill-buffer buffer))))))))
 
+(ert-deftest c38-window-swap-excludes-child-frames ()
+  "Both swap branches keep editing buffers out of hidden and visible floats."
+  (skip-unless (display-graphic-p))
+  (require 'ace-window)
+  (dolist (case '((2 nil) (3 t)))
+    (window-lifecycle-tests--with-buffers
+        ((first "c38-first") (last "c38-last") (floating "c38-floating"))
+      (let* ((frame (selected-frame))
+             (left (selected-window))
+             (right (split-window-right))
+             (aw-scope 'global)
+             (aw-dispatch-always nil)
+             (aw-ignore-current nil)
+             (aw-dispatch-when-more-than 100)
+             child)
+        (unwind-protect
+            (progn
+              (when (= (car case) 3)
+                (setq right (split-window right nil 'right)))
+              (set-window-buffer left first)
+              (set-window-buffer right last)
+              (setq child (make-frame `((parent-frame . ,frame) (minibuffer . nil)
+                                        (visibility . ,(cadr case))
+                                        (width . 35) (height . 8))))
+              (set-window-buffer (frame-selected-window child) floating)
+              (select-frame frame)
+              (select-window right)
+              (+windows/swap-window-dwim)
+              (should (eq (window-buffer left) last))
+              (should (eq (window-buffer right) first))
+              (should (eq (window-buffer (frame-selected-window child)) floating)))
+          (when (frame-live-p child) (delete-frame child t)))))))
+
 (ert-deftest c6-close-view-is-one-transition-for-every-kind ()
   "Closing a view keeps its buffer alive and shows the previous one."
   (dolist (mode '(fundamental-mode portal-terminal-mode xwidget-webkit-mode))

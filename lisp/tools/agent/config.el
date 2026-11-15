@@ -910,8 +910,8 @@ Emacs owns which frontend shows a conversation."
       (+agent-view-embed buffer window)
       buffer)))
 
-;; Ctrl-Shift-T is to agents what Cmd-T (`terminal-switcher') is to terminals
-;; (Cmd-Shift-T too, where no system hotkey takes it first):
+;; H-t (Option-T) is to agents what Cmd-T (`terminal-switcher') is to terminals
+;; (Ctrl-Shift-T and Cmd-Shift-T remain aliases):
 ;; one list of the sessions not on screen and of new ones, and Return,
 ;; Shift-Return or Command-Return choose where the chosen one goes.
 
@@ -1002,7 +1002,10 @@ below.  Sessions already on screen are left out."
 (defalias 'agent-switcher #'+agent/switcher
   "Choose an agent session or start one, like `terminal-switcher'.")
 
-(general-define-key :keymaps 'global "C-S-t" #'+agent/switcher "M-T" #'+agent/switcher)
+(general-define-key :keymaps 'global
+                    "H-t" #'+agent/switcher
+                    "C-S-t" #'+agent/switcher
+                    "M-T" #'+agent/switcher)
 
 (defun +agent-shell--managed-entry-a (_original &optional arg)
   "Make `agent-shell' open a new managed session in the invoking window.

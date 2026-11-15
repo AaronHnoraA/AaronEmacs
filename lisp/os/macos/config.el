@@ -313,7 +313,6 @@ With positive ARG, enable it.  With zero or negative ARG, disable it."
                      ("H-g" . +telescope/ripgrep)
                      ("H-p" . project-menu)
                      ("H-P" . workspace-menu)
-                     ("H-t" . telescope)
                      ("H-T" . test-menu)
                      ("H-m" . magit-status)
                      ("H-a" . noema-agenda)

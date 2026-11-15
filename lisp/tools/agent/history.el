@@ -33,7 +33,7 @@
 (declare-function markdown-view-mode "markdown-mode" ())
 (declare-function consult--read "consult" (table &rest options))
 (declare-function posframe-show "posframe" (buffer-or-name &rest args))
-(declare-function posframe-hide "posframe" (buffer-or-name))
+(declare-function posframe-delete-frame "posframe" (buffer-or-name))
 (declare-function posframe-workable-p "posframe" ())
 (declare-function consult--lookup-cdr "consult" (selected candidates &rest _))
 (declare-function noema-sessions-native-binding "noema-sessions" (id root))
@@ -505,11 +505,10 @@ ORDER BY p.time_created DESC LIMIT %d"
   "Return ROW's last messages as (ROLE . TEXT), oldest first."
   (reverse (car (+agent-history--page row))))
 
-;; The preview is one hidden buffer shown in one reused child frame, like an LSP
-;; hover: it never takes a window, never takes the keyboard, and is hidden (not
-;; deleted) when the picker ends, so the next picker opens it without building a
-;; frame.  Moving through the list is debounced and each conversation is read
-;; once per picker.
+;; The preview uses one child frame per picker, without taking a layout window
+;; or the keyboard.  Exiting the picker deletes that frame and empties its
+;; reusable buffer; the next picker creates a new frame.  Moving through the
+;; list is debounced and each conversation is read once per picker.
 
 (defconst +agent-history-preview-buffer " *agent-history-preview*")
 
@@ -778,10 +777,10 @@ Return non-nil when it is the box, which leaves the window layout alone."
     nil))
 
 (defun +agent-history--hide-preview ()
-  "Hide the preview box and empty its buffer, keeping the frame for reuse."
+  "Delete the preview frame and empty its reusable buffer."
   (when-let* ((buffer (get-buffer +agent-history-preview-buffer)))
-    (when (fboundp 'posframe-hide)
-      (posframe-hide buffer))
+    (when (fboundp 'posframe-delete-frame)
+      (posframe-delete-frame buffer))
     (dolist (window (get-buffer-window-list buffer nil t))
       (unless (frame-parameter (window-frame window) 'posframe-buffer)
         (ignore-errors (quit-restore-window window 'bury))))
@@ -796,7 +795,7 @@ Return non-nil when it is the box, which leaves the window layout alone."
   "Return a consult state function previewing the conversation at point.
 A conversation's first page is read once per picker and older pages only as the
 box is scrolled; at most `+agent-history--preview-cache-size' conversations are
-kept.  The box is hidden on exit."
+kept.  The preview frame is deleted on exit."
   (let ((windows (current-window-configuration))
         (cache (make-hash-table :test #'equal))
         windowed)

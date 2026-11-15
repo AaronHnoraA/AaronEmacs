@@ -170,6 +170,10 @@ Agent 池仍按项目与 target 隔离；两者的作用域由各自的既有工
 保存自己的最大化前布局，再按恢复；固定 popup 不会让第二次按键失去恢复能力。
 布局撤销／重做仍由 Winner 单独提供。
 
+`Cmd-Shift-O` 只交换当前 frame 内的普通窗格；两个窗格时直接交换，更多窗格时
+在本 frame 内选择目标。其他顶层窗口、隐藏或可见的 child frame 和 minibuffer
+均不参与交换。
+
 ### 编译与任务输出
 
 run、test、task 与普通 compilation-mode 输出共用 `tools/output` 声明的底部
@@ -309,6 +313,10 @@ Portal 终端与 agent-shell 使用同一行 popup 标签，放在 Emacs 的 tab
   无其他主编辑窗格时分屏；从侧窗格发起也不覆盖原聊天。`noFocus` 保留原焦点。
   Noema 宿主通过同步 gateway 返回实际
   文件、buffer、window、frame 与定位结果；页面自身原有打开与克隆操作继续沿用其 owner。
+
+- **C38** `Cmd-Shift-O` 的计数与目标选择都限于当前 frame 的非 minibuffer 窗格；
+  两窗格直接交换，多窗格的 Ace 选择器也不跨 frame。其他窗口和 child frame 的
+  buffer、尺寸与可见状态不变。测试：`c38-*`（含图形界面的隐藏／可见子窗口回归）。
 
 
 窗口测试文件：`test/init-window-lifecycle-tests.el`、`test/init-windows-tests.el`，

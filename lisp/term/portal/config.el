@@ -103,6 +103,13 @@ These remain client process defaults; the backend owns target projection.")
                (logior 4 (logand modifiers (lognot 8)))
              modifiers)))
 
+(defun +portal--translate-option-chord (original key)
+  "Compile Hyper KEY as physical Option in Portal's native keymap syntax."
+  (funcall original
+           (if (eq system-type 'darwin)
+               (string-replace "H-" "M-" key)
+             key)))
+
 (defun +portal-windmove-boundary-a (original &rest args)
   "Keep a native Portal view focused when Windmove reaches a boundary."
   (let ((origin (selected-window))
@@ -132,6 +139,9 @@ These remain client process defaults; the backend owns target projection.")
                 #'+portal-windmove-boundary-a)))
 
 (with-eval-after-load 'portal-input
+  (unless (advice-member-p #'+portal--translate-option-chord 'portal-input--chord)
+    (advice-add 'portal-input--chord :around
+                #'+portal--translate-option-chord))
   (unless (advice-member-p #'+portal--translate-command-key 'portal-input--event)
     (advice-add 'portal-input--event :around
                 #'+portal--translate-command-key))
@@ -912,9 +922,11 @@ The window manager places the frame; this only opens it."
                    ("M-`" . +portal-popup/toggle)))
     (keymap-set portal-terminal-mode-map (car entry) (cdr entry)))
   ;; Native bindings claim keys before Ghostty or the macOS window menu.
-  ;; Command uses Meta in this Emacs, so use the same commands as other buffers.
+  ;; Native s is physical Command; Hyper is compiled to physical Option by
+  ;; `+portal--translate-option-chord', retaining H-t as the dispatch event.
   (dolist (entry `(("C-x" . ,ctl-x-map)
                    ("s-t" . +portal/terminal-selector)
+                   ("H-t" . +agent/switcher)
                    ("C-S-t" . +agent/switcher)
                    ("s-T" . +agent/switcher)
                    ("C-c e" . +portal-popup/toggle)

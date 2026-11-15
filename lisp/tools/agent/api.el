@@ -3,7 +3,7 @@
 ;;; Commentary:
 ;; No registry or execution state lives here.  The Noema gateway exposes this
 ;; adapter to Pi through the same progressively disclosed API as editor actions.
-;; Contract: docs/design/agent-management.md C45, C50, C60–C61.
+;; Contract: docs/design/agent-management.md C45, C50, C60–C62.
 
 ;;; Code:
 (require 'cl-lib)
@@ -107,6 +107,7 @@ as zero."
   (remote-require-on-client 'tools/agent/worktree)
   (let* ((default-directory root)
          (started (+agent-worktree--start agent (+agent-api--string body "worktree")
+                                          :config (+agent-api--creation-config agent body)
                                           :background (eq (+agent-api--value body "background") t)
                                           :group (+agent-api--string body "group"))))
     `((ok . t) (accepted . t)
@@ -133,12 +134,27 @@ as zero."
                                  (seq-subseq records (min offset total) (min total (+ offset limit))))))
       (nextOffset . ,(when (< (+ offset limit) total) (+ offset limit))))))
 
-(defun +agent-api--create-in-workspace (root agent directory &optional body)
-  "Start AGENT in ROOT's workspace DIRECTORY, without a prompt."
-  (let* (;; Provider packages are Emacs client code, even for remote work.
+(defun +agent-api--creation-config (agent body)
+  "Resolve AGENT and apply only BODY's session-local task options."
+  (let* ((model (+agent-api--string body "modelId"))
+         (effort (+agent-api--string body "effort"))
          (config (let ((default-directory temporary-file-directory))
                    (+agent-acp-config-for agent))))
     (unless config (user-error "Agent %s has no available ACP configuration" agent))
+    (when (and (or model effort) (not (eq (+agent-api--value body "background") t)))
+      (user-error "modelId/effort are task options; use spawn or background create"))
+    (when (and effort (not (memq (map-elt config :identifier) '(codex claude-code pi))))
+      (user-error "Agent %s has no known ACP effort option" agent))
+    (if (or model effort)
+        (let ((copy (+agent-acp-pinned-config config model effort)))
+          (setf (alist-get :agent-task-options copy) (list :model model :effort effort))
+          copy)
+      config)))
+
+(defun +agent-api--create-in-workspace (root agent directory &optional body)
+  "Start AGENT in ROOT's workspace DIRECTORY, without a prompt."
+  (let* (;; Provider packages are Emacs client code, even for remote work.
+         (config (+agent-api--creation-config agent body)))
     (let* ((name (+agent-api--string body "name"))
            (background (eq (+agent-api--value body "background") t))
            (origin (if background 'subagent 'manual))

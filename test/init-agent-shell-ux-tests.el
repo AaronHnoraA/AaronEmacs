@@ -399,4 +399,24 @@
                   (should (eq (car embedded) hidden)))))))
       (mapc #'kill-buffer (list shown hidden worker)))))
 
+(ert-deftest agent-shell-ux-option-t-reaches-the-switcher-in-native-terminals ()
+  "Option-T must publish a native Option chord, retaining Hyper for dispatch."
+  (require 'portal-terminal-bindings)
+  (should (eq (key-binding (kbd "H-t")) #'+agent/switcher))
+  ;; Native bindings describe physical keys, including after a modifier swap.
+  (dolist (mac-option-modifier '(hyper meta))
+    (let* ((compiled (portal-terminal--compile-native-map portal-terminal-native-map))
+           (entry (seq-find (lambda (item)
+                              (and (equal (alist-get 'character item) "t")
+                                   (= (alist-get 'modifiers item) 4)))
+                            (cdr compiled))))
+      (should entry)
+      (should (equal (vector (alist-get 'event entry)) (kbd "H-t")))
+      (should (eq (lookup-key (car compiled) (vector (alist-get 'event entry)))
+                  #'+agent/switcher))
+      (should-not (seq-find (lambda (item)
+                             (and (equal (alist-get 'character item) "[")
+                                  (= (alist-get 'modifiers item) 2)))
+                           (cdr compiled))))))
+
 ;;; init-agent-shell-ux-tests.el ends here

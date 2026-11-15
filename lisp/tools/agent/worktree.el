@@ -245,12 +245,13 @@ counterpart of the Project workspace."
   (let ((root (+agent-acp-project-root)))
     (cons root (+agent-workspace root))))
 
-(cl-defun +agent-worktree--start (agent name &key focus group background)
+(cl-defun +agent-worktree--start (agent name &key focus group background config)
   "Start AGENT in a new worktree NAME of the current Project; return a plist.
 FOCUS shows the session.  GROUP, a slug, records the worktree as one attempt
-of that parallel group.  The plist is the worktree's plus :buffer."
+of that parallel group.  CONFIG optionally supplies a private task configuration.
+The plist is the worktree's plus :buffer."
   (pcase-let* ((`(,root . ,workspace) (+agent-worktree--workspace))
-               (config (or (+agent-acp-config-for agent)
+               (config (or config (+agent-acp-config-for agent)
                            (user-error "No agent-shell configuration for %s" agent)))
                (checkout (or (+agent-worktree-checkout workspace)
                              (user-error "The Project workspace is not a Git repository: %s"

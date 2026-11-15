@@ -1438,7 +1438,7 @@ BODY sees `calls' (newest first) and `callbacks' for prepare responses."
           (should (equal (gethash "defaultModel" settings) "claude-haiku-4-5"))
           (should (equal (append (gethash "enabledModels" settings) nil)
                          noema-pi-model-pool)))
-        (should (string-match-p "Emacs companion"
+        (should (string-match-p "Emacs's global butler"
                                 (with-temp-buffer
                                   (insert-file-contents (expand-file-name "SYSTEM.md" noema-pi-agent-directory))
                                   (buffer-string))))
