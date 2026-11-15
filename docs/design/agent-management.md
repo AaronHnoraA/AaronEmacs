@@ -279,7 +279,8 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
   延迟计时器、待发提醒）只作用于正在结束的 buffer：kill 钩子依次在当时的当前
   buffer 中运行，其他钩子改变它（删除 frame 会选中另一 frame 并换掉当前 buffer）
   也不得结束另一会话的 client，或让本会话的 client 成为孤儿进程；领域钩子删除
-  frame 时保持当前 buffer。测试：`c32-*`、`agent-close-c28-*`、
+  frame 时保持当前 buffer。结束时仍挂起的结构化回合（Run、LaTeX 导出）以“会话已关闭”
+  失败结清一次，调用方不必等自己的超时。测试：`c32-*`、`agent-close-c28-*`、
   `+noema-latex-intervention-kill-hook-keeps-its-buffer-current`。
 - **C29 既有入口覆盖原生输入。** `C-c a` 和 `C-c A` 从 Portal 原生终端转交到
   同一 Agent 命令及前缀；普通 Emacs 的 Normal、Insert、Emacs 状态保留同一入口。

@@ -969,5 +969,20 @@ cleanup after it must neither end that session nor orphan its own client."
       (should-not reconnected)
       (should-not (with-current-buffer buffer (agent-shell--prompt-input))))))
 
+(ert-deftest agent-close-c28-closing-settles-a-pending-structured-turn ()
+  "Closing a session fails its pending structured turn once, at once.
+Its owner (a Run, a LaTeX export) must not wait for its own timeout."
+  (agent-lifecycle-e2e--with-session (buffer store directory)
+    (let (results)
+      (+agent-acp-prompt :buffer buffer :content '(((type . "text") (text . "hold")))
+                         :on-success (lambda (response) (push (list 'ok response) results))
+                         :on-failure (lambda (error _raw) (push (list 'failed error) results)))
+      (agent-flow-e2e--wait (lambda () (+agent-acp-busy-p buffer)))
+      (with-current-buffer buffer
+        (let ((kill-buffer-query-functions nil)) (kill-buffer buffer)))
+      (should (= (length results) 1))
+      (should (eq (car (car results)) 'failed))
+      (should (string-match-p "closed" (format "%s" (cadr (car results))))))))
+
 (provide 'agent-lifecycle-e2e)
 ;;; agent-lifecycle-e2e.el ends here

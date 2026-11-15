@@ -1834,7 +1834,26 @@ A timeout never declares success, replays a request, or kills another turn."
                #'agent-shell--prompt-queue-confirm-kill-emacs)
   (add-hook 'kill-emacs-query-functions #'+agent-acp--query-kill-emacs-h)
   (add-hook 'kill-buffer-query-functions #'+agent-acp--query-kill-h nil t)
-  (add-hook 'kill-buffer-hook #'+agent-acp--before-kill-h -50 t))
+  (add-hook 'kill-buffer-hook #'+agent-acp--before-kill-h -50 t)
+  (add-hook 'kill-buffer-hook #'+agent-acp--settle-prompt-h -40 t))
+
+(defun +agent-acp--settle-prompt-h ()
+  "Fail this buffer's pending structured turn: closing ends it unanswered.
+The client's shutdown drops its pending requests without calling them, so a
+caller waiting on the turn (a Run, a LaTeX export) would otherwise wait for
+its own timeout.  A physical replacement keeps the turn's owner informed by
+its own restart path instead."
+  (let ((receipt (bound-and-true-p +agent-acp--prompt-receipt)))
+    (when (and (eq (plist-get receipt :status) 'pending)
+               (functionp (plist-get receipt :fail))
+               (not (eq (current-buffer) +window-buffer-replacement)))
+      (condition-case err
+          (funcall (plist-get receipt :fail)
+                   "Agent session closed before the turn finished"
+                   '((code . -32603)
+                     (message . "Agent session closed before the turn finished")))
+        (error (message "Agent close: settling the pending turn failed: %s"
+                        (error-message-string err)))))))
 
 (defvar +agent-acp--killing-buffer nil
   "The buffer `kill-buffer' is ending, bound only for the call's extent.")
@@ -1870,7 +1889,7 @@ in another session they would end that one's client instead (C28)."
 ;; also called for another buffer during a kill must not be redirected.
 (dolist (function '(agent-shell--clean-up +agent-shell--forget-session
                     +agent-input--cleanup-h +agent-acp--clear-deferred-h
-                    +agent-notify--killed-h))
+                    +agent-notify--killed-h +agent-acp--settle-prompt-h))
   (advice-add function :around #'+agent-acp--in-killed-buffer-a))
 
 (defun +agent-acp--unfinished-sessions ()
@@ -3234,7 +3253,9 @@ Research callers retain their explicit queue policy by leaving it nil."
     ;; A new turn is running; do not write a prompt into its output.
     (setq-local +agent-acp--prompt-owed nil)
     (let ((state agent-shell--state)
-          (receipt (list :run-id run-id :status 'pending :response nil :error nil)))
+          (receipt (list :run-id run-id :status 'pending :response nil :error nil
+                         :fail nil))
+          fail)
       (setq-local +agent-acp--prompt-receipt receipt)
       ;; `agent-shell--handle' normally advances the turn before dispatch.
       ;; Frozen structured prompts bypass that input parser, not turn identity.
@@ -3248,6 +3269,27 @@ Research callers retain their explicit queue policy by leaving it nil."
       (condition-case err
           (+agent-acp--display-submitted-content state content run-id)
         (error (message "Noema input display: %s" (error-message-string err))))
+      ;; Kept on the receipt: closing the buffer settles a pending turn with it.
+      (setq fail (lambda (error raw)
+                   (when (eq (plist-get receipt :status) 'pending)
+                     (setf (plist-get receipt :status) 'failed
+                           (plist-get receipt :error) raw)
+                     (when (and (buffer-live-p buffer)
+                                (eq receipt (buffer-local-value '+agent-acp--prompt-receipt buffer)))
+                       (with-current-buffer buffer
+                         (+agent-acp--clear-stop)
+                         (setq +agent-acp--turn-started-at nil)
+                         (unless remote-buffer-disconnected-p
+                           (setq +agent-acp-last-error (or error "ACP request failed")))
+                         (+agent-acp--hold-queue)))
+                     (unwind-protect
+                         (when on-failure (funcall on-failure error raw))
+                       (+agent-acp--finish-prompt buffer receipt process-queue)
+                       (when (and (buffer-live-p buffer)
+                                  (eq receipt (buffer-local-value '+agent-acp--prompt-receipt buffer)))
+                         (+agent-acp--report-turn-complete
+                          buffer '((:event . turn-complete) (:data . ((:stop-reason . "error"))))))))))
+      (setf (plist-get receipt :fail) fail)
       (agent-shell--send-request
        :state state :client (map-elt state :client)
        :request (acp-make-session-prompt-request
@@ -3282,24 +3324,7 @@ Research callers retain their explicit queue policy by leaving it nil."
                          ;; prompt, even when this buffer's output was deferred.
                          (+agent-render-flush buffer)
                          (with-current-buffer buffer (agent-shell--prompt-queue-process-next)))))
-       :on-failure (lambda (error raw)
-                     (setf (plist-get receipt :status) 'failed
-                           (plist-get receipt :error) raw)
-                     (when (and (buffer-live-p buffer)
-                                (eq receipt (buffer-local-value '+agent-acp--prompt-receipt buffer)))
-                       (with-current-buffer buffer
-                         (+agent-acp--clear-stop)
-                         (setq +agent-acp--turn-started-at nil)
-                         (unless remote-buffer-disconnected-p
-                           (setq +agent-acp-last-error (or error "ACP request failed")))
-                         (+agent-acp--hold-queue)))
-                     (unwind-protect
-                         (when on-failure (funcall on-failure error raw))
-                       (+agent-acp--finish-prompt buffer receipt process-queue)
-                       (when (and (buffer-live-p buffer)
-                                  (eq receipt (buffer-local-value '+agent-acp--prompt-receipt buffer)))
-                         (+agent-acp--report-turn-complete
-                          buffer '((:event . turn-complete) (:data . ((:stop-reason . "error"))))))))))))
+       :on-failure fail))))
 
 (defun +agent-acp-file-uri (file &optional session)
   "Return FILE as the `file://' uri agent-shell would put in a content block.
