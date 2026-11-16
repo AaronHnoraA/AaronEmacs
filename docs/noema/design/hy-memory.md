@@ -38,8 +38,8 @@ Hy Memory 的存储不变，闭环只作用在召回上。
 
 - 记忆提取使用 Noema Pi 已配置的 `openai-codex/gpt-5.6-luna` 与现有 Codex 登录态。Noema 的 Pi 管理器和记忆层复用同一套凭据入口；记忆请求通过短暂运行的 Pi 模型适配器发送，不保存第二份令牌，也不使用 OpenAI Platform API key。
 - Pi 运行时由 Emacs 的 `make pi-setup` 固定安装在 `var/agent/pi/runtime/`，不查找系统 Pi。Pi client 与记忆适配器使用相同的系统 CA bundle 约定，显式 `NODE_EXTRA_CA_CERTS` 优先；原有 Hy Memory 索引与 embedding 后端保持同一份。
-- embedding 使用胖胖的私有 OpenAI 兼容服务：`http://10.243.90.222:19528/v1`，模型 `Xenova/bge-small-zh-v1.5`，输出 512 维。Codex 登录态本身不提供 embedding。Bearer 令牌保存在权限为 `0600` 的 `~/.config/noema/hy-memory.env`，不会写进仓库。Mac 可通过 `ssh Aaron-nas-remote cat .config/pangpang/embedding-token` 取得令牌；本机直连 ZeroTier 的 SSH 有时无法路由，因此当前使用已配置的远程 SSH 别名。更换 embedding 模型或维度时，应新建索引并迁移，不能直接在现有索引上混用向量。
-- 该 Mac 上 Python 直连 ZeroTier 偶发路由错误，embedding 请求使用系统 `curl` 发送。令牌和请求体仅放在临时私有文件中，Pi 请求仍使用本机回环地址；无需驻留代理进程。
+- embedding 使用胖胖的私有 OpenAI 兼容服务：`http://100.64.0.2:19528/v1`（NAS 的 Tailscale 地址），模型 `Xenova/bge-small-zh-v1.5`，输出 512 维。Codex 登录态本身不提供 embedding。Bearer 令牌保存在权限为 `0600` 的 `~/.config/noema/hy-memory.env`，不会写进仓库。Mac 可通过 `ssh Aaron-nas-remote cat .config/pangpang/embedding-token` 取得令牌。NAS 换地址时，服务必须监听新地址（`Aaron-nas-remote` 的 HostName），客户端的 `MEMORY_EMBEDDER_BASE_URL` 随之更新；服务只绑旧地址时召回按 M6 报失败。更换 embedding 模型或维度时，应新建索引并迁移，不能直接在现有索引上混用向量。
+- 该 Mac 上 Python 直连 NAS 偶发路由错误，embedding 请求使用系统 `curl` 发送。令牌和请求体仅放在临时私有文件中，Pi 请求仍使用本机回环地址；无需驻留代理进程。
 - 私有索引位于 `~/.local/share/noema/hy-memory/`。SDK 虚拟环境位于 `~/.local/share/noema/hy-memory-venv/`。不需要 Ollama 或本地模型。
 - 凭据未配置时，自动记忆保持关闭；Noema 原有会话和 Run 路径照常工作。召回最多等待 3 秒，失败后跳过记忆并在 60 秒内停止重试；写入始终异步进行。服务错误不会写入会话日志。
 
