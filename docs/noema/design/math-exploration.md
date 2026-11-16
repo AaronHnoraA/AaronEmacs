@@ -109,8 +109,14 @@ Remote、Markdown 与 agent-shell 约定重写，没有引入它的微内核或�
   沙箱里的成员不需要回环访问就能读；写操作经 host。命令行把 `--files`、`--proof` 按调用者的
   当前目录转成绝对路径，引擎对相对路径同时接受相对探索目录与相对项目根两种写法。
 
+- **E17 被沙箱挡住的写操作走探索目录。** 命令行连 host 时如果被沙箱拒绝（回环 EPERM），成员自己的
+  `register`、`post`、`abandon`、`submit` 写成 `explorations/<id>/.requests/` 下的请求文件。host 在探索
+  运行期间监听这个目录，每次巡检时也扫一遍：先认领请求，再按同一套规则执行，最后把回答写在旁边。
+  裁决、停止、恢复永不走这条路，所以写文件不能代替裁判。没人应答的请求会被收回，不会延后执行；
+  已被认领却没回答时，结果未知，要先读看板再重试。
+
 测试：`tests/lean-judge.test.ts`（L1–L8，真实 Lean 用例需 `NOEMA_LEAN_JUDGE_LIVE=1`）、
-`tests/exploration.test.ts`（E1–E16）、`tests/elisp/noema-exploration-tests.el`（E13）。
+`tests/exploration.test.ts`（E1–E17）、`tests/elisp/noema-exploration-tests.el`（E13）。
 
 ## 不做
 

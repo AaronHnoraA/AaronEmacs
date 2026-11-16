@@ -26,7 +26,10 @@ than failing.
 4. **Preserve math verbatim.** Keep inline math `\(...\)` and display math
    `\[...\]` (and `$$...$$` → `\[...\]`) exactly as written. Never escape
    backslashes inside math. Macros such as `\rank`, `\ket`, `\abs` are provided
-   globally — use them, never redefine them.
+   globally — use them, never redefine them. Blank lines inside display math
+   are the one change: KaTeX draws past them, but they end Pandoc's `$$` block
+   and are an error in TeX, so the preparation (Go kernel and JS fallback alike,
+   held equal by `shared/latex-transform-fixtures.json`) drops them.
 5. **Preserve TikZ verbatim.** A `#+begin tikz` block becomes a real LaTeX
    `tikzpicture`, with TikZ and its `calc` library loaded by the host. Do not
    replace the figure with a web preview or SVG, and do not edit its commands.
@@ -38,6 +41,8 @@ than failing.
 | `# .. ######` | `\section` / `\subsection` / `\subsubsection` / `\paragraph` |
 | `- item` / `* item` / `+ item` | `itemize` (indent = nesting) |
 | `1. item` / `1) item` / `(a) item` | native `enumerate` with matching labels |
+| `---` / `***` / `___` after a blank line | a rule (prepared as `* * *`, so Pandoc never reads text under it as YAML or a table; YAML blocks are off — metadata is `#+begin meta`) |
+| `---` directly under a paragraph line | a setext heading, as in the editor |
 | `> quote` | `quote` |
 | ` ```lang ` fenced code | `verbatim` |
 | `**x**` / `__x__` | `\textbf{x}` |
