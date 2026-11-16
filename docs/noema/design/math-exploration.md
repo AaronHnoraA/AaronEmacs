@@ -100,6 +100,7 @@ Remote、Markdown 与 agent-shell 约定重写，没有引入它的微内核或�
 - **E14 命令行与 API 同一份代码。** `scripts/exploration.mjs` 把每个操作转给 host；
   `agent:project:status` 的 `explorations` 给出运行、中断与待裁决报告的数量。
 
+实测：2026-11-16 在运行中的 host 上以真实 Codex 成员跑完一轮（见审计记录的“验证”）。
 测试：`tests/lean-judge.test.ts`（L1–L8，真实 Lean 用例需 `NOEMA_LEAN_JUDGE_LIVE=1`）、
 `tests/exploration.test.ts`（E1–E14）、`tests/elisp/noema-exploration-tests.el`（E13）。
 
@@ -113,8 +114,6 @@ Remote、Markdown 与 agent-shell 约定重写，没有引入它的微内核或�
 
 ## 已知差距
 
-- **G1 真实端到端。** 引擎、页面与判定都有确定性测试，判定另有真实 Mathlib 用例；
-  尚未在运行中的 host 上用真实成员跑完整一轮探索（需要模型预算与人的在场）。
 - **G2 记忆引用闭环。** 已在召回侧实现（[Hy Memory](hy-memory.md) M1–M6）：引用被计数，
   长期未被引用的记忆退出注入。没有做的是上游的合并步骤，即由受限 Agent 把高引用记忆整理成
   项目文档；确认过的知识仍由人或裁判写进 notes。

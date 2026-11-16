@@ -105,4 +105,11 @@
 - `tests/exploration.test.ts` 11 项；`tests/elisp/noema-exploration-tests.el` 4 项；
   相邻的项目、图谱、观察项、API、Skill 契约测试全部通过。
 - 本机真实调用 Pi 模型一次，确认 `pi-model.mjs` 在缺少 `NODE_EXTRA_CA_CERTS` 的进程中可用。
-- 未做：运行中的 host 上真实成员的一轮完整探索（math-exploration G1）。
+- 真实一轮（重启 host 后，临时 Noema 项目，仅依赖 Lean 核心库的冻结陈述
+  `2 * (List.range (n + 1)).sum = n * (n + 1)`，2 个 Codex 成员，15 分钟，后台 Codex 会话当裁判）：
+  m1 注册“对 n 归纳”；m2 提出同一路线被模型查重拒绝（理由：d1 的改写），改注册“k 与 n−k 配对”；
+  m1 提交，引擎的 Lean 判定先接受（只依赖 propext）才唤醒裁判；m2 发布一条已验证的反转引理后
+  放弃并写明缺口，监督时钟随即记为 idle；裁判读问题、笔记本与证明并重跑验证后以 `finish` 接受，
+  探索以 solved 结束并生成 `summary.md`。两本笔记本都按标准写了 State 索引与状态标签。
+  独立复核 m1 的证明被 Lean 判定接受。整轮约 10 分钟。
+- 实跑中发现并修正：探索 id 与 meta 日期原用 UTC（本地 16 日写成 15 日），改为本地日期。
