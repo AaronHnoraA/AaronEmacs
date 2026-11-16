@@ -32,6 +32,8 @@ Hy Memory 的存储不变，闭环只作用在召回上。
 - **M6 查不了不等于没有。** Hy Memory 在 embedding 失败时返回空结果而不报错；桥的传输层记下
   embedding 请求的失败，搜索没有结果且有失败时如实报错，调用方据此进入 `suspended`。
 
+- **M7 只有一行 JSON 离开桥。** 桥启动即把 stderr 指向 `/dev/null`：Emacs 从同一个缓冲区读 stdout 与 stderr，SDK 关闭时打印的 traceback 会让每次召回都无法解析，也可能带出对话内容。
+
 测试：`tests/elisp/noema-hy-memory-tests.el`（M1–M4）、`tests/hy-memory-citations.test.ts`（M5）。
 
 ## 模型和数据
