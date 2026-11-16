@@ -101,8 +101,16 @@ Remote、Markdown 与 agent-shell 约定重写，没有引入它的微内核或�
   `agent:project:status` 的 `explorations` 给出运行、中断与待裁决报告的数量。
 
 实测：2026-11-16 在运行中的 host 上以真实 Codex 成员跑完一轮（见审计记录的“验证”）。
+- **E15 持续是机制，不是提示。** 成员只有一个回合，模型一停就不会再被唤起。监督时钟发现成员的
+  回合已结束、离时限还有 3 分钟以上时叫醒它，而不是记为 idle：持有开放方向的从笔记本 State
+  继续；不持有方向的只被请一次去看板上找没人走过的路线。每个成员至多 3 次；叫醒不被受理、
+  时间不够或次数用尽时记 idle。叫醒消息同样以 `[From exploration …]` 开头。
+- **E16 读不经过 host。** 命令行的 `board`、`status`、`list` 直接折叠磁盘上的 journal，
+  沙箱里的成员不需要回环访问就能读；写操作经 host。命令行把 `--files`、`--proof` 按调用者的
+  当前目录转成绝对路径，引擎对相对路径同时接受相对探索目录与相对项目根两种写法。
+
 测试：`tests/lean-judge.test.ts`（L1–L8，真实 Lean 用例需 `NOEMA_LEAN_JUDGE_LIVE=1`）、
-`tests/exploration.test.ts`（E1–E14）、`tests/elisp/noema-exploration-tests.el`（E13）。
+`tests/exploration.test.ts`（E1–E16）、`tests/elisp/noema-exploration-tests.el`（E13）。
 
 ## 不做
 
