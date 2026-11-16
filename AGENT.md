@@ -515,6 +515,13 @@ This config already has maintenance and workflow entry points. Reuse them:
   Skill packs (`packs` in `etc/noema/capabilities.json`, `@@pack(id)`) are
   link lists over them, patched per project in membership and pack metadata,
   never member content; and
+  The agent catalog (`agent_catalog: true` packs) is one set for every Agent:
+  Noema discloses it to its sessions and the Skill Manager links the same Skills
+  into each native Agent library (sources marked `export: true`; `C-c A`,
+  `noema-skill-agents`), never touching an Agent's official or hand-installed
+  Skills (`docs/noema/design/capabilities.md`, "Agent libraries").  Make a system
+  available to all Agents by adding its Skill to a catalog pack, not by writing
+  into one Agent's directory.
   `skills.lock.json` beside that library is the single upstream record, maintained by
   `noema-skill-upstream` (install/check/diff/update/rollback).  Do not copy a
   Skill into a pack, hand-edit a locked Skill in place, or add another

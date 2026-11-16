@@ -106,8 +106,40 @@ as well. Normal `e`, `d`, `p`, and `E` operate on the active Noema page's scope,
 never on the linked native configuration itself.
 `G` edits the global Noema library config and `D` browses its Skill directory.
 Changes saved through a symlink invalidate the capability cache; `g` refreshes
-after changes made outside Emacs. Linking is not bidirectional installation:
-new Noema Skills do not automatically appear in each native client's catalog.
+after changes made outside Emacs. Reading a native library never writes to it;
+what the Agents themselves see is the next section's export.
+
+### Agent libraries
+
+Every Agent should use the system rather than its own habits, whoever started
+it. The agent catalog (packs marked `agent_catalog: true`) is therefore one
+set for all Agents: Noema discloses it to the sessions it starts, and the
+Skill Manager links the same Skills into each native Agent library. Code:
+`server/lib/noema-agent-libraries.mjs`; page `noema-skill-agents` (`C-c A` in
+the manager, or the Agents toolbar button).
+
+- **A1 Libraries are data.** A global source marked `export: true` is an Agent
+  library; its first Skill directory receives the links. No Agent brand is
+  named in code: every library holds Agent Skills (a directory with
+  `SKILL.md`), so a symlink is the whole installation. Sources without the
+  mark (an official extra directory, this repository's own Skills) are read
+  only. A library whose directory is missing is created when its parent
+  exists, as installing a first Skill would; otherwise it is `absent`.
+- **A2 The Agent's own entries are never touched.** Official Skills, ones the
+  person installed, and any non-link entry are listed as the library's own and
+  left exactly as they are. A catalog Skill the library already holds itself is
+  counted as linked. A name taken by a non-link entry is a reported conflict.
+- **A3 Only the manager's links change.** Links it made are recorded in
+  `var/noema/agent-libraries.json`. An existing link that already points to the
+  same Skill is adopted; one pointing elsewhere is a conflict and stays.
+- **A4 Leaving the catalog removes only recorded links,** and only while the
+  link is still exactly as recorded; anything else is dropped from the ledger.
+- **A5 One flag, everywhere at once.** `agents:status` previews, `agents:sync`
+  applies (`noema:api:research:capability:global:agents:*`). Toggling a pack's
+  `agent_catalog` on the Packs page syncs at once, so the catalog a Noema
+  session reads and the one a native Agent reads cannot drift.
+
+Tests: `tests/noema-agent-libraries.test.ts`.
 
 ### Project-owned definitions
 
@@ -385,6 +417,7 @@ retain their Evil meanings):
 | `C-c p` on a pack | patch this project's membership (`members_remove`, `members_add`, `preamble_append`) |
 | `C-c u` | insert `@@skill(id)` or `@@pack(id)` into the originating work block |
 | `C-c U` | upstream versions: `C-c g` check, `RET`/`C-c =` diff, `C-c u` update, `C-c R` pin/rollback, `C-c i` install, `C-c l` VC log |
+| `C-c A` | the agent catalog in every native Agent library: `RET` details, `C-c s` sync, `C-c o` open the library; official Skills are listed, never touched |
 
 `M-x noema-skill` opens the input-driven Skill and pack completion prompt for
 the opening buffer's project (the global library outside a project). Selecting

@@ -14,7 +14,8 @@
       "config": "linked/claude/config.json",
       "skills": [
         "linked/claude/skills"
-      ]
+      ],
+      "export": true
     },
     {
       "id": "codex",
@@ -23,7 +24,8 @@
       "skills": [
         "linked/codex/skills",
         "linked/codex/skills/.system"
-      ]
+      ],
+      "export": true
     },
     {
       "id": "codex-data",
@@ -52,7 +54,8 @@
       "config": "linked/opencode/config.json",
       "skills": [
         "linked/opencode/skills"
-      ]
+      ],
+      "export": true
     },
     {
       "id": "pi",
@@ -60,7 +63,8 @@
       "config": "linked/pi/mcp.json",
       "skills": [
         "linked/pi/skills"
-      ]
+      ],
+      "export": true
     }
   ],
   "skills": {
