@@ -15,6 +15,8 @@
 (defvar +agent-acp-run-owned-functions)
 (defvar +agent-acp--held-prompts)
 (declare-function +agent-acp-busy-p "tools/agent/acp" (buffer))
+(declare-function +agent-acp-structured-turn-p "tools/agent/acp" (buffer))
+(declare-function +agent-shell-structured-steer-p "tools/agent/config" (buffer))
 (declare-function +agent-acp-client-exited-p "tools/agent/acp" (buffer))
 (declare-function +agent-acp-held-prompt-count "tools/agent/acp" (buffer))
 (declare-function +agent-acp-pending-prompt-count "tools/agent/acp" (buffer))
@@ -69,6 +71,11 @@
          (hint (cond
                 ((+agent-acp-client-exited-p buffer) " Client exited · /restart to reconnect")
                 ((not (map-elt agent-shell--state :init-finished)) " Connecting · draft stays editable")
+                ;; Say what Cmd-RET will really do: a structured turn follows
+                ;; `+agent-shell--submit-a', not the busy-submit functions.
+                ((and busy (+agent-acp-structured-turn-p buffer)
+                      (not (+agent-shell-structured-steer-p buffer)))
+                 " Cmd-RET queue (this turn's input is frozen) · C-c C-c stop")
                 (busy
                  (format " Cmd-RET %s · Cmd-S-RET %s · C-c C-c stop"
                          (+agent-input--submission agent-shell-busy-submit-default-function)

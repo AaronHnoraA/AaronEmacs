@@ -498,6 +498,13 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   需要时由 agent 自己在文件里查找所需部分，以免占满长会话的上下文。
   已在运行的对话直接切过去。测试：`agent-c63-*`。
 
+- **C64 结构化回合里输入照常 steer。** Noema 页面发起的请求、带回执的 API 任务和 Research Run
+  都以结构化 ACP 请求发出，不经过 agent-shell 的输入层，所以普通提交会与它并发出第二个回合。
+  它仍是忙碌的回合：`Cmd-RET`、`Cmd-S-RET` 和其他回合一样按 `agent-shell-busy-submit-*`
+  的配置 steer 或排队；只有 Research Run（会话来源 `run`）的输入在 RunSpec 冻结，一律排队。
+  输入提示说出真实路径：冻结时显示 `Cmd-RET queue (this turn's input is frozen)`，不会写 steer
+  却排队。被拒的 steer 仍按 C37 放回挂起队列首位。测试：`agent-input-c64-*`。
+
 ## 实现位置
 
 | 职责 | 文件 |

@@ -870,6 +870,13 @@ Emacs owns which frontend shows a conversation."
                              (map-elt agent-shell--state :available-commands))))
       (cadr entry))))
 
+(defun +agent-shell-structured-steer-p (buffer)
+  "Whether input typed during BUFFER's structured turn may steer it.
+It may when the agent reports steering and no Research Run owns the turn,
+whose input is frozen at RunSpec time; the busy-submit functions decide."
+  (and (agent-shell-steering-supported-p :shell-buffer buffer)
+       (not (eq (buffer-local-value '+agent-acp-session-origin buffer) 'run))))
+
 (defun +agent-shell--submit-a (original &rest args)
   "Run local slash commands, or reconnect an exited client, before submission.
 Local commands come first: they never reach the agent, so /resume, /restart or
@@ -882,13 +889,20 @@ Local commands come first: they never reach the agent, so /resume, /restart or
         ((and (derived-mode-p 'agent-shell-mode)
               (+agent-shell--dead-client-p agent-shell--state))
          (+agent-shell/reconnect))
-        ;; A Run's input is frozen, so what is typed during it waits its turn
-        ;; rather than steering the Run or racing it with a second prompt.
+        ;; A structured turn (a Noema page's request, an API task, a Run) runs
+        ;; outside shell-maker, so a plain submit would race it with a second
+        ;; prompt.  It is still a busy turn: Cmd-RET and Cmd-S-RET do what they
+        ;; do during any turn, steering or queueing as configured (C64).  Only
+        ;; a Run's input is frozen; there everything waits.
         ((and (derived-mode-p 'agent-shell-mode)
               (+agent-acp-structured-turn-p (current-buffer)))
          (when-let* ((prompt (agent-shell--prompt-input)))
-           (agent-shell--prompt-queue-enqueue :prompt prompt)
-           (agent-shell--clear-prompt-input)))
+           (agent-shell--clear-prompt-input)
+           (if (+agent-shell-structured-steer-p (current-buffer))
+               (funcall (if (car args) agent-shell-busy-submit-override-function
+                          agent-shell-busy-submit-default-function)
+                        prompt)
+             (agent-shell--prompt-queue-enqueue :prompt prompt))))
         (t (apply original args))))
 
 (defun +agent-shell/here (agent)
@@ -1049,6 +1063,7 @@ double prefix ARG picks among the pool, new and saved conversations."
     (agent-shell-busy-submit-queue prompt)))
 
 (declare-function agent-shell--prompt-input-start "agent-shell-prompt" ())
+(defvar +agent-acp-session-origin)
 (declare-function agent-shell-list-edit-newline "agent-shell-list-edit" ())
 (declare-function agent-shell--save-clipboard-image "agent-shell" (&rest arguments))
 (declare-function agent-shell--dot-subdir "agent-shell" (subdir))

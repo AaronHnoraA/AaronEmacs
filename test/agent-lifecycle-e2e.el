@@ -416,6 +416,41 @@
     (should (equal (+agent-queue-items buffer) '("error this")))
     (should (= (+agent-acp-held-prompt-count buffer) 1))))
 
+;; C64: input typed during a structured turn steers it, as during any turn.
+(ert-deftest agent-input-c64-cmd-ret-steers-a-structured-turn ()
+  "A page's or an API's request runs outside shell-maker; Cmd-RET still steers it."
+  (agent-lifecycle-e2e--with-steering-session (buffer store directory)
+    (+agent-acp-prompt :buffer buffer :run-id "agent-task-1"
+                       :content (list '((type . "text") (text . "hold"))))
+    (agent-flow-e2e--wait (lambda () (+agent-acp-structured-turn-p buffer)))
+    (with-current-buffer buffer
+      (setq-local agent-shell-busy-submit-default-function #'+agent-shell-busy-submit-steer-or-queue))
+    (should (string-match-p "Cmd-RET steer" (with-current-buffer buffer (+agent-input--hint))))
+    (agent-flow-e2e--send buffer "steered into the task")
+    (agent-flow-e2e--wait (lambda () (string-match-p "Steered: steered into the task"
+                                                     (agent-flow-e2e--text buffer))))
+    (should-not (+agent-queue-items buffer))
+    ;; Cmd-S-RET still queues behind the task.
+    (with-current-buffer buffer (goto-char (point-max)) (insert "after the task") (agent-shell-submit '(4)))
+    (should (member "after the task" (+agent-queue-items buffer)))
+    (+agent-acp-interrupt buffer t)
+    (agent-flow-e2e--idle buffer)))
+
+(ert-deftest agent-input-c64-a-run-keeps-its-input-frozen-and-says-so ()
+  "A Research Run's input is frozen: typed text waits, and the hint says it will."
+  (agent-lifecycle-e2e--with-steering-session (buffer store directory)
+    (with-current-buffer buffer (setq-local +agent-acp-session-origin 'run))
+    (+agent-acp-prompt :buffer buffer :run-id "run-1"
+                       :content (list '((type . "text") (text . "hold"))))
+    (agent-flow-e2e--wait (lambda () (+agent-acp-structured-turn-p buffer)))
+    (should (string-match-p "Cmd-RET queue (this turn's input is frozen)"
+                            (with-current-buffer buffer (+agent-input--hint))))
+    (agent-flow-e2e--send buffer "waits")
+    (should (member "waits" (+agent-queue-items buffer)))
+    (should-not (string-match-p "Steered: waits" (agent-flow-e2e--text buffer)))
+    (+agent-acp-interrupt buffer t)
+    (agent-flow-e2e--idle buffer)))
+
 (ert-deftest agent-queue-c39-send-now-keeps-the-prompt-when-steering-is-called-off ()
   "Send now removes a prompt only once it has gone; a refused steer leaves it in place."
   (agent-lifecycle-e2e--with-steering-session (buffer store directory)
