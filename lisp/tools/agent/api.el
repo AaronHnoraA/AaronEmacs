@@ -3,7 +3,7 @@
 ;;; Commentary:
 ;; No registry or execution state lives here.  The Noema gateway exposes this
 ;; adapter to Pi through the same progressively disclosed API as editor actions.
-;; Contract: docs/design/agent-management.md C45, C50, C60–C62.
+;; Contract: docs/design/agent-management.md C45, C50, C60–C62, C65.
 
 ;;; Code:
 (require 'cl-lib)
@@ -12,6 +12,7 @@
 (require 'subr-x)
 (require 'tools/agent/acp)
 (require 'tools/agent/requests)
+(require 'tools/agent/binding)
 (declare-function +agent-context--reference "tools/agent/context" (file root &optional buffer region session))
 (declare-function +agent-context-content-blocks "tools/agent/context" (prompt references))
 (declare-function +agent-context--deliver "tools/agent/context" (buffer blocks &optional instructions no-focus))
@@ -36,7 +37,7 @@
      (let ((value (plist-get snapshot (cdr field))))
        (cons (car field) (if (and value (symbolp value)) (symbol-name value) value))))
    '((name . :name) (agent . :agent) (origin . :origin) (root . :root)
-     (target . :target) (workspace . :workspace) (nativeSessionId . :native-session-id)
+     (target . :target) (workspace . :workspace) (nativeSessionId . :native-session-id) (file . :file)
      (processState . :process-state) (turnState . :turn-state)
      (attention . :attention-kind) (stopReason . :stop-reason)
      (queued . :queued) (held . :queue-held) (changes . :changes))))
@@ -94,7 +95,11 @@ as zero."
   (let* ((root (+agent-api--string body "root"))
          (target (or (+agent-api--string body "target")
                      (and root (remote-file-name-target (remote-canonicalize-emacs-file-name root)))))
-         (buffers (+agent-pool-buffers root target 'all))
+         (file (+agent-binding-canonical (+agent-api--file body)))
+         (buffers (if file
+                      (seq-filter (lambda (buffer) (equal (+agent-binding-file buffer) file))
+                                  (+agent-pool-buffers root target 'all))
+                    (+agent-pool-buffers root target 'all)))
          (total (length buffers)))
     `((ok . t) (total . ,total)
       (sessions . ,(vconcat
@@ -110,6 +115,8 @@ as zero."
                                           :config (+agent-api--creation-config agent body)
                                           :background (eq (+agent-api--value body "background") t)
                                           :group (+agent-api--string body "group"))))
+    (when-let* ((file (+agent-api--file body)))
+      (+agent-binding-set (plist-get started :buffer) file))
     `((ok . t) (accepted . t)
       (worktree . ((branch . ,(plist-get started :branch))
                    (path . ,(plist-get started :path))))
@@ -161,7 +168,8 @@ as zero."
            (buffer (+agent-acp-start :config config :directory directory :focus nil
                                      :background background :origin origin)))
       (+agent-acp-adopt buffer :agent agent :origin origin :root root
-                        :name (and name (+agent-acp--unique-name name root)))
+                        :name (and name (+agent-acp--unique-name name root))
+                        :file (+agent-api--file body))
       `((ok . t) (accepted . t) (session . ,(+agent-api--describe (+agent-session-snapshot buffer)))))))
 
 (defun +agent-api--create (body)
@@ -179,6 +187,18 @@ as zero."
       (if (+agent-api--string body "worktree")
           (+agent-api--create-in-worktree root agent body)
         (+agent-api--create-in-workspace root agent directory body)))))
+
+(defun +agent-api--file (body)
+  "Return BODY's optional absolute document file, or nil when absent or null."
+  (when-let* ((file (+agent-api--string body "file")))
+    (unless (file-name-absolute-p file) (user-error "file must be absolute"))
+    file))
+
+(defun +agent-api--bind (snapshot body)
+  "Bind SNAPSHOT's session to BODY's file, or to project level when it is null."
+  (let ((buffer (plist-get snapshot :buffer)))
+    (+agent-binding-set buffer (+agent-api--file body))
+    (+agent-api--acknowledge buffer "bind")))
 
 (defun +agent-api-identified (body)
   "Return BODY's session row, proven by its buffer and native ID."
@@ -292,6 +312,7 @@ requestId before initialization; result uses that receipt even after exit."
       ("create" (+agent-api--create body))
       ("spawn" (+agent-api--spawn body))
       ("result" (+agent-requests-result (+agent-api--string body "requestId") offset limit))
+      ("bind" (+agent-api--bind (+agent-api-identified body) body))
       ((or "status" "send" "read" "stop" "show")
        (let* ((snapshot (+agent-api-identified body))
               (buffer (plist-get snapshot :buffer)))

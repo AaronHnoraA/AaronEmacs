@@ -211,4 +211,58 @@
           (should (equal call '("codex" "try" "g" "/tmp/")))
           (should (equal (alist-get 'path (alist-get 'worktree response)) "/tmp/try")))))))
 
+;;;; C65: Pi reads and changes collaborator bindings.
+
+(defmacro agent-api-tests--bound-session (&rest body)
+  "Run BODY in the API fixture with a snapshot that reports the live binding."
+  (declare (indent 0))
+  `(agent-api-tests--session
+     (let ((+agent-binding-store-file (make-temp-file "agent-bindings" nil ".eld"))
+           (+agent-binding--cache nil))
+       (unwind-protect
+           (cl-letf (((symbol-function '+agent-session-snapshot)
+                      (lambda (_) (append (list :file (buffer-local-value '+agent-acp-session-file buffer)) row)))
+                     ((symbol-function '+agent-pool-buffers) (lambda (&rest _) (list buffer)))
+                     ((symbol-function '+agent-binding--native-id) (lambda (_) "native-one")))
+             ,@body)
+         (delete-file +agent-binding-store-file)))))
+
+(ert-deftest agent-api-bind-sets-file-for-identified-session ()
+  (agent-api-tests--bound-session
+    (let* ((reply (+agent/api (append '((action . "bind") (file . "/tmp/x/SAI.md")) identity)))
+           (file (+agent-binding-canonical "/tmp/x/SAI.md")))
+      (should (alist-get 'ok reply))
+      (should (equal (alist-get 'file (alist-get 'session reply)) file))
+      (should (equal (buffer-local-value '+agent-acp-session-file buffer) file))
+      (should (= 1 (alist-get 'total (+agent/api '((action . "list") (file . "/tmp/x/SAI.md"))))))
+      (should (= 0 (alist-get 'total (+agent/api '((action . "list") (file . "/tmp/x/other.md")))))))))
+
+(ert-deftest agent-api-bind-null-moves-session-to-project-level ()
+  (agent-api-tests--bound-session
+    (+agent/api (append '((action . "bind") (file . "/tmp/x/SAI.md")) identity))
+    (+agent/api (append '((action . "bind") (file . :null)) identity))
+    (should-not (buffer-local-value '+agent-acp-session-file buffer))))
+
+(ert-deftest agent-api-bind-rejects-mismatched-native-id ()
+  (agent-api-tests--bound-session
+    (should-error (+agent/api `((action . "bind") (file . "/tmp/x/SAI.md")
+                                (buffer . ,(buffer-name buffer)) (nativeSessionId . "native-other")))
+                  :type 'user-error)
+    (should-error (+agent/api (append '((action . "bind") (file . "relative.md")) identity))
+                  :type 'user-error)
+    (should-not (buffer-local-value '+agent-acp-session-file buffer))))
+
+(ert-deftest agent-api-create-with-file-adopts-binding ()
+  (agent-api-tests--session
+    (let (adopted)
+      (cl-letf (((symbol-function '+agent-acp-config-for) (lambda (_) '((:identifier . codex))))
+                ((symbol-function '+agent-workspace) (lambda (_) "/tmp/"))
+                ((symbol-function '+agent-acp-start) (lambda (&rest _) buffer))
+                ((symbol-function '+agent-acp-adopt) (lambda (&rest args) (setq adopted args))))
+        (+agent/api `((action . "create") (root . ,temporary-file-directory) (agent . "codex")
+                      (file . "/tmp/x/SAI.md")))
+        (should (equal (plist-get (cdr adopted) :file) "/tmp/x/SAI.md"))
+        (+agent/api `((action . "create") (root . ,temporary-file-directory) (agent . "codex")))
+        (should-not (plist-get (cdr adopted) :file))))))
+
 (provide 'agent-api-tests)
