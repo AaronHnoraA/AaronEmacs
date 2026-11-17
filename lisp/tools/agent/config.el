@@ -1065,6 +1065,11 @@ collaborators, which are reached where they are shown."
   "Choose an agent session or start one, like `terminal-switcher'.")
 
 (autoload '+agent/panel "tools/agent/panel" nil t)
+(autoload '+agent-panel-display-pi "tools/agent/panel")
+;; A project Pi lives in the collaboration panel's Pi tab, apart from the
+;; other sessions (C78).
+(defvar noema-pi-router-project-display-function)
+(setq noema-pi-router-project-display-function #'+agent-panel-display-pi)
 (defalias 'agent-panel #'+agent/panel
   "Show or hide the collaboration panel: tasks, Pi and topology.")
 

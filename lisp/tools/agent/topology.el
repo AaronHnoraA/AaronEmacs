@@ -1,15 +1,12 @@
 ;;; tools/agent/topology.el --- Who collaborates on what: Pi, projects, files, agents -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; A read-only picture of the pool (C69): Pi above the projects it manages,
-;; each project's documents, and the collaborators bound to them, with the
-;; files they touched besides.  It is a projection of the session snapshots and
-;; the collaboration records; it never asks an agent anything and has no
-;; polling timer: state events redraw it, coalesced.
-;;
-;; The drawing engine is the retired research Graph Board's: Graphviz lays the
-;; graph out (`dot -Tjson') and the scene is drawn here as SVG.  Below the
-;; picture, the same nodes are a list the keyboard moves through.
+;; The model of the pool (C69): Pi above the projects it manages, each
+;; project's documents, the collaborators bound to them and the files they
+;; touched besides, with a Graphviz layout (`dot -Tjson').  It is a projection
+;; of the session snapshots and the collaboration records and never asks an
+;; agent anything.  The interactive graph that draws it is `tools/agent/board'
+;; (C78), shown in the collaboration panel; Treemacs marks use the same model.
 
 ;;; Code:
 
@@ -209,207 +206,19 @@ Graphviz is a client-side tool, run on this machine whatever buffer is current."
                          points)))
     (concat "M " (car shifted) " C " (string-join (cdr shifted) " "))))
 
-(defun +agent-topology--color (face attribute fallback)
-  "Return FACE's ATTRIBUTE colour, or FALLBACK."
-  (let ((value (face-attribute face attribute nil t)))
-    (if (and (stringp value) (not (string-prefix-p "unspecified" value))) value fallback)))
-
-(defun +agent-topology--palette ()
-  "Return the drawing colours, following the current theme."
-  (list :text (+agent-topology--color 'default :foreground "#333333")
-        :edge (+agent-topology--color 'shadow :foreground "#888888")
-        :background (+agent-topology--color 'default :background "#ffffff")
-        :selected (+agent-topology--color 'cursor :background "#2a7ae2")
-        :fills `((pi . ,(+agent-topology--color 'font-lock-keyword-face :foreground "#7a4ea8"))
-                 (project . ,(+agent-topology--color 'font-lock-type-face :foreground "#2a7a6a"))
-                 (file . ,(+agent-topology--color 'font-lock-string-face :foreground "#8a6a2a"))
-                 (agent . ,(+agent-topology--color 'font-lock-function-name-face :foreground "#2a5aa8")))))
-
-(defun +agent-topology--svg (model layout selected)
-  "Draw MODEL with LAYOUT, outlining the node SELECTED, and return the SVG."
-  (let* ((margin +agent-topology--margin)
-         (palette (+agent-topology--palette))
-         (svg (svg-create (ceiling (+ (* 2 margin) (plist-get layout :width)))
-                          (ceiling (+ (* 2 margin) (plist-get layout :height)))))
-         (by-id (make-hash-table :test #'equal)))
-    (dolist (node (plist-get model :nodes)) (puthash (plist-get node :id) node by-id))
-    (dolist (edge (plist-get layout :edges))
-      (when-let* ((points (plist-get edge :points)))
-        (dom-append-child
-         svg (dom-node 'path `((d . ,(+agent-topology--path points margin)) (fill . "none")
-                               (stroke . ,(plist-get palette :edge)) (stroke-width . "1.2")
-                               ,@(pcase (plist-get edge :style)
-                                   ("dashed" '((stroke-dasharray . "5 4")))
-                                   ("dotted" '((stroke-dasharray . "2 4"))))))))
-      (when-let* ((arrow (plist-get edge :arrow)))
-        (svg-polygon svg (mapcar (lambda (point) (cons (+ margin (car point)) (+ margin (cdr point)))) arrow)
-                     :fill (plist-get palette :edge) :stroke (plist-get palette :edge))))
-    (dolist (box (plist-get layout :nodes))
-      (let* ((node (gethash (plist-get box :id) by-id))
-             (width (plist-get box :width)) (height (plist-get box :height))
-             (x0 (+ margin (- (plist-get box :x) (/ width 2.0))))
-             (y0 (+ margin (- (plist-get box :y) (/ height 2.0))))
-             (color (alist-get (plist-get node :kind) (plist-get palette :fills)))
-             (stroke (if (equal (plist-get box :id) selected) (plist-get palette :selected) color))
-             (lines (split-string (plist-get node :label) "\n"))
-             (text-y (+ y0 (/ height 2.0) 4 (- (/ (* (1- (length lines)) 13) 2.0)))))
-        (if (eq (plist-get node :kind) 'pi)
-            (svg-ellipse svg (+ x0 (/ width 2.0)) (+ y0 (/ height 2.0)) (/ width 2.0) (/ height 2.0)
-                         :fill (plist-get palette :background) :stroke stroke
-                         :stroke-width (if (equal (plist-get box :id) selected) 2.5 1.2))
-          (svg-rectangle svg x0 y0 width height :rx 6 :ry 6
-                         :fill (plist-get palette :background) :stroke stroke
-                         :stroke-width (if (equal (plist-get box :id) selected) 2.5 1.2)))
-        (cl-loop for line in lines for index from 0
-                 do (svg-text svg line :x (+ x0 (/ width 2.0)) :y (+ text-y (* index 13))
-                              :text-anchor "middle" :font-family "Helvetica"
-                              :font-size (if (zerop index) 11 9.5)
-                              :font-weight (if (zerop index) "600" "400")
-                              :fill (if (zerop index) color (plist-get palette :text))))))
-    svg))
-
 ;;;; View
-
-(defvar-local +agent-topology--model nil "The model this view shows.")
-(defvar-local +agent-topology--layout nil "Its layout, or nil without Graphviz.")
-(defvar-local +agent-topology--selected nil "Id of the selected node.")
-(defvar-local +agent-topology--timer nil "Pending coalesced redraw.")
-
-(defun +agent-topology--render ()
-  "Draw the current view from its model."
-  (let ((inhibit-read-only t) (selected +agent-topology--selected))
-    (erase-buffer)
-    (if (not +agent-topology--layout)
-        (insert (propertize "Graphviz (dot) is not available; the nodes are listed below.\n\n"
-                            'face 'shadow))
-      (insert-image (svg-image (+agent-topology--svg +agent-topology--model +agent-topology--layout selected)
-                               :ascent 'center))
-      (insert "\n\n"))
-    (dolist (node (plist-get +agent-topology--model :nodes))
-      (let ((start (point)))
-        (insert (format "%-8s %s\n" (symbol-name (plist-get node :kind))
-                        (replace-regexp-in-string "\n" "  " (plist-get node :label))))
-        (put-text-property start (point) '+agent-topology-node (plist-get node :id))
-        (when (equal (plist-get node :id) selected)
-          (add-face-text-property start (1- (point)) 'highlight))))
-    (insert (propertize "\nn/p select · RET open · S-RET chat · g refresh · q quit\n" 'face 'shadow))
-    (if-let* ((at (text-property-any (point-min) (point-max) '+agent-topology-node selected)))
-        (goto-char at)
-      (goto-char (point-min)))))
-
-(defun +agent-topology-refresh ()
-  "Rebuild the model and layout, then redraw."
-  (interactive)
-  (setq +agent-topology--model (+agent-topology-model (+agent-topology--sessions)
-                                                      #'+agent-topology-file-counts)
-        +agent-topology--layout (+agent-topology--layout +agent-topology--model))
-  (unless (seq-find (lambda (node) (equal (plist-get node :id) +agent-topology--selected))
-                    (plist-get +agent-topology--model :nodes))
-    (setq +agent-topology--selected (plist-get (car (plist-get +agent-topology--model :nodes)) :id)))
-  (+agent-topology--render))
-
-(defun +agent-topology--select (direction)
-  "Move the selection by DIRECTION nodes."
-  (let* ((ids (mapcar (lambda (node) (plist-get node :id)) (plist-get +agent-topology--model :nodes)))
-         (index (or (cl-position +agent-topology--selected ids :test #'equal) 0)))
-    (when ids
-      (setq +agent-topology--selected (nth (mod (+ index direction) (length ids)) ids))
-      (+agent-topology--render))))
-
-(defun +agent-topology-next () "Select the next node." (interactive) (+agent-topology--select 1))
-(defun +agent-topology-previous () "Select the previous node." (interactive) (+agent-topology--select -1))
-
-(defun +agent-topology--node ()
-  "Return the node at point or the selected one."
-  (let ((id (or (get-text-property (point) '+agent-topology-node) +agent-topology--selected)))
-    (seq-find (lambda (node) (equal (plist-get node :id) id)) (plist-get +agent-topology--model :nodes))))
-
-(defun +agent-topology--open-file (file)
-  "Open FILE in another window, at its first pending review card."
-  (require 'tools/agent/collab)
-  (find-file-other-window (+agent-collab--client-file file))
-  (goto-char (point-min))
-  (if (re-search-forward "^#\\+begin ediff\\b" nil t)
-      (beginning-of-line)
-    (goto-char (point-min))))
-
-(defun +agent-topology-visit ()
-  "Open the node: a file at its first card, a collaborator at its document."
-  (interactive)
-  (let* ((node (or (+agent-topology--node) (user-error "No node here")))
-         (target (plist-get node :target)))
-    (setq +agent-topology--selected (plist-get node :id))
-    (cond ((plist-get target :file) (+agent-topology--open-file (plist-get target :file)))
-          ((and (plist-get target :buffer) (+agent-binding-file (plist-get target :buffer)))
-           (+agent-topology--open-file (+agent-binding-file (plist-get target :buffer))))
-          ((plist-get target :buffer) (+agent-acp-show-buffer (plist-get target :buffer)))
-          ((plist-get target :root) (dired-other-window (plist-get target :root))))))
-
-(defun +agent-topology-chat ()
-  "Open the selected collaborator's chat for a longer discussion."
-  (interactive)
-  (let ((buffer (plist-get (plist-get (or (+agent-topology--node) (user-error "No node here")) :target)
-                           :buffer)))
-    (unless (buffer-live-p buffer) (user-error "Not a session"))
-    (+agent-acp-show-buffer buffer)))
-
-(defun +agent-topology--changed-h (&rest _)
-  "Redraw every topology view once, shortly after a burst of state events."
-  (dolist (buffer (buffer-list))
-    (with-current-buffer buffer
-      (when (and (derived-mode-p '+agent-topology-mode) (not +agent-topology--timer))
-        (setq +agent-topology--timer
-              (run-with-idle-timer
-               0.5 nil
-               (lambda (view)
-                 (when (buffer-live-p view)
-                   (with-current-buffer view
-                     (setq +agent-topology--timer nil)
-                     (+agent-topology-refresh))))
-               buffer))))))
-
-(defun +agent-topology--teardown-h ()
-  "Cancel this view's pending redraw, and stop listening after the last view."
-  (when (timerp +agent-topology--timer) (cancel-timer +agent-topology--timer))
-  (setq +agent-topology--timer nil)
-  (unless (seq-some (lambda (buffer)
-                      (and (not (eq buffer (current-buffer)))
-                           (eq (buffer-local-value 'major-mode buffer) '+agent-topology-mode)))
-                    (buffer-list))
-    (remove-hook '+agent-acp-changed-functions #'+agent-topology--changed-h)
-    (remove-hook '+agent-collab-changed-functions #'+agent-topology--changed-h)))
-
-(defvar-keymap +agent-topology-mode-map
-  :parent special-mode-map
-  "n" #'+agent-topology-next
-  "p" #'+agent-topology-previous
-  "j" #'+agent-topology-next
-  "k" #'+agent-topology-previous
-  "RET" #'+agent-topology-visit
-  "S-<return>" #'+agent-topology-chat
-  "S-RET" #'+agent-topology-chat
-  "g" #'+agent-topology-refresh)
-
-(define-derived-mode +agent-topology-mode special-mode "Agent topology"
-  "The pool as Pi, projects, documents and their collaborators (C69)."
-  (setq truncate-lines t)
-  (add-hook 'kill-buffer-hook #'+agent-topology--teardown-h nil t))
 
 ;;;###autoload
 (defun +agent/topology ()
-  "Show who collaborates on what: Pi, projects, documents and agents (C69)."
+  "Show who collaborates on what: the collaboration panel's graph (C78)."
   (interactive)
-  (require 'tools/agent/collab)
-  (let ((buffer (get-buffer-create "*Agent Topology*")))
-    (with-current-buffer buffer
-      (unless (derived-mode-p '+agent-topology-mode) (+agent-topology-mode))
-      (add-hook '+agent-acp-changed-functions #'+agent-topology--changed-h)
-      (add-hook '+agent-collab-changed-functions #'+agent-topology--changed-h)
-      (+agent-topology-refresh))
-    (pop-to-buffer buffer)))
+  (require 'tools/agent/panel)
+  (+agent-panel--show-tab 'graph))
+
+(declare-function +agent-panel--show-tab "tools/agent/panel" (tab))
 
 (defalias 'agent-topology #'+agent/topology
-  "Show the collaborator topology of the agent pool.")
+  "Show the collaborator graph of the agent pool.")
 
 (provide 'tools/agent/topology)
 ;;; topology.el ends here

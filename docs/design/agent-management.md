@@ -540,13 +540,12 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   `C-c A Z` 列出这篇文档上的直接改动，`RET` 看 diff，`u` 放回旧文：仅当新文在文件中恰好出现
   一次；Markdown 笔记经 `agent:document:edit` 写回，打开的页面随之更新，其余文件走 C67 的
   同一写入规则。新建整文件的改动不提供放回。测试：`agent-collab-c68-*`。
-- **C69 全局可见性。** `C-c A H`（`+agent/topology`，`M-x agent-topology`）是会话池的只读拓扑：
+- **C69 全局可见性。** 会话池的模型（`tools/agent/topology.el`）：
   Pi 在上，管理它所在的项目；项目下是文档，文档下是绑定它的协作者，协作者到它另外改过的文件
   是虚线。节点标出状态（working / needs you / idle / disconnected）与文档的待审项（未拒绝的卡片
-  加修订）和未结线程。模型来自会话快照与协作记录，不向 Agent 发查询；状态事件合并后重画，
-  没有轮询计时器，视图关掉即解除监听。布局沿用已退役研究 Graph Board 的引擎：客户端的
-  Graphviz `dot -Tjson` 排版，SVG 自绘；没有 Graphviz 时只列节点。`n`/`p` 选择，`RET` 打开
-  （文档停在第一张卡片，协作者回到其主文件），`S-RET` 进入聊天。Treemacs 用自带注解接口
+  加修订）和未结线程。模型来自会话快照与协作记录，不向 Agent 发查询；客户端 Graphviz
+  `dot -Tjson` 排版。它画在协作面板的图谱页（C78，`C-c A H` 与 `M-x agent-topology` 也打开那里）。
+  Treemacs 用自带注解接口
   （来源 `agent-collab`）标记：绑定的文件 ` ◆N`、待审 ` ✎M`、只被改过 ` ◇`，文件夹汇总其下文件
   （每个文件只计一次），正在被改的文件用 `+agent-presence-working`；同样随事件合并刷新，
   只在 Treemacs 与会话层都已加载后启用。测试：`agent-topology-c69-*`、`agent-presence-c69-*`。
@@ -576,6 +575,18 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   文档（`+agent-binding-last-document`，由 `aaron-switch-buffer-hook` 记录）；只在显示时监听状态
   事件并合并为一次重绘，隐藏后什么都不挂。`H-T` 是原来的 Agent 选择器，默认针对同一篇文档。
   页面里没有打开 Agent 的按钮。测试：`agent-panel-c75-*`。
+- **C78 面板里的 Pi 与图谱。** 面板三页是同一侧窗里的三个 buffer。Pi 页就是这个项目 Pi 的
+  agent-shell 会话本身：项目 Pi 的 `+agent-acp-display-buffer-function` 是 `+agent-panel-display-pi`
+  （由 `noema-pi-router-project-display-function` 在挂接时设上，重启后保留），所以 `pi`、Pi 的提醒
+  等任何地方打开它都落在面板里，不进普通的 Agent 视图，也不在 `H-T` 的会话列表里；全局 Pi 不变。
+  图谱页是 `tools/agent/board.el`，手感沿用研究 Graph Board：窗口大小的一张 SVG，场景组带
+  translate/scale 变换，平移缩放只改变换；单击选中、拖动平移、双击打开、右键菜单，滚轮平移、
+  `C-` 滚轮以指针为中心缩放；`h/j/k/l` 按方位移动，`H`/`L` 沿边，`/` 跳转，`TAB` 折叠分支
+  （标出藏了几个），`+ - 0 = .` 缩放、适配、居中，`?` 列出全部命令。对选中节点：`RET` 打开文档
+  或项目、`o` 进聊天、`t` 看它的任务、`n` 为它新建 Agent、`s` 停止、`r` 重启客户端、`x` 关闭。
+  正在工作的描蓝边，等你的描红边，断开的变淡。面板显示时才随事件合并重绘。在三页里
+  `C-c 1/2/3` 切换（任务页与图谱页也可直接按 `1/2/3`），页签可点。测试：`agent-panel-c78-*`、
+  `agent-board-c78-*`。
 - **C76 发送即任务。** 指向文档某处的发送（`C-c A c` 的区域/整篇/光标处、页面选区、旧的
   `noema-interaction-send-*`）经 `+agent-collab-task-delivery` 变成该处的批注线程、指派给选中会话
   并立即交出，不夺键盘；聊天与草稿、剪贴板路径不变。测试：`agent-collab-c76-*`。

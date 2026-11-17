@@ -51,14 +51,13 @@
     (should (string-match-p "n0 \\[shape=note, label=\"a \\\\\"b\\\\\"\\\\nc\"\\]" source))
     (should (equal (gethash "x" names) "n0"))))
 
-(ert-deftest agent-topology-c69-layout-and-svg-with-graphviz ()
+(ert-deftest agent-topology-c69-layout-with-graphviz ()
   (skip-unless (executable-find "dot"))
   (let* ((model (+agent-topology-model (agent-topology-tests--sessions) (lambda (_) nil)))
          (layout (+agent-topology--layout model)))
     (should (= (length (plist-get layout :nodes)) (length (plist-get model :nodes))))
     (should (> (plist-get layout :width) 0))
-    (let ((svg (+agent-topology--svg model layout "session:a")))
-      (should (string-match-p "claude&#183;SAI" (with-temp-buffer (svg-print svg) (buffer-string)))))))
+    (should (plist-get (car (plist-get layout :edges)) :points))))
 
 (ert-deftest agent-topology-c69-file-counts-come-from-cards-suggestions-and-threads ()
   (let ((file (make-temp-file "topology" nil ".md")))

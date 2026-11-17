@@ -74,21 +74,54 @@
 
 (ert-deftest agent-panel-c75-h-t-shows-a-right-side-window-and-hides-it ()
   (agent-panel-tests--tree root
-    (let ((+agent-binding-last-document (expand-file-name "notes/a.md" root)))
+    (let ((+agent-binding-last-document (expand-file-name "notes/a.md" root))
+          (+agent-panel--tab 'tasks))
       (unwind-protect
           (progn
             (+agent/panel)
-            (let ((window (get-buffer-window +agent-panel-buffer-name)))
+            (let ((window (+agent-panel--window)))
               (should window)
               (should (eq (window-parameter window 'window-side) 'right))
+              (should (eq (window-buffer window) (get-buffer +agent-panel-buffer-name)))
               (should (memq #'+agent-panel--comments-changed-h +agent-collab-changed-functions)))
             (+agent/panel)
-            (should-not (get-buffer-window +agent-panel-buffer-name))
+            (should-not (+agent-panel--window))
             ;; Hidden, it follows nothing.
             (should-not (memq #'+agent-panel--comments-changed-h +agent-collab-changed-functions))
             (should-not (memq #'+agent-panel--changed-h +agent-acp-changed-functions))
             (should-not (memq #'+agent-panel--window-change-h window-buffer-change-functions)))
+        (when-let* ((window (+agent-panel--window))) (delete-window window))
         (when (get-buffer +agent-panel-buffer-name) (kill-buffer +agent-panel-buffer-name))))))
+
+(ert-deftest agent-panel-c78-tabs-are-buffers-in-one-side-window ()
+  (agent-panel-tests--tree root
+    (let ((+agent-binding-last-document (expand-file-name "notes/a.md" root))
+          (+agent-panel--tab 'tasks)
+          (pi (generate-new-buffer "*pi fixture*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'noema-pi-project-ensure) (lambda (_directory) pi))
+                    ((symbol-function '+agent-topology--sessions) (lambda () nil)))
+            (provide 'noema-pi-router)
+            (+agent/panel)
+            (let ((window (+agent-panel--window)))
+              (+agent-panel--show-tab 'pi)
+              (should (eq (+agent-panel--window) window))
+              (should (eq (window-buffer window) pi))
+              (should (buffer-local-value '+agent-panel-pi-mode pi))
+              (should (string-match-p "2 Pi" (with-current-buffer pi (eval (cadr header-line-format) t))))
+              (+agent-panel--show-tab 'graph)
+              (should (eq (window-buffer window) (get-buffer "*Agent Graph*")))
+              (+agent-panel--show-tab 'tasks)
+              (should (eq (window-buffer window) (get-buffer +agent-panel-buffer-name)))
+              ;; A project Pi shown from anywhere lands in the panel.
+              (delete-window window)
+              (+agent-panel-display-pi pi)
+              (should (eq (window-buffer (+agent-panel--window)) pi))
+              (should (eq +agent-panel--tab 'pi))))
+        (when-let* ((window (+agent-panel--window))) (delete-window window))
+        (dolist (name (list +agent-panel-buffer-name "*Agent Graph*"))
+          (when (get-buffer name) (kill-buffer name)))
+        (kill-buffer pi)))))
 
 (ert-deftest agent-panel-c75-the-last-focused-document-is-remembered ()
   (let ((+agent-binding-last-document nil)

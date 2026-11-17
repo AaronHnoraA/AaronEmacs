@@ -2,13 +2,15 @@
 
 ;;; Commentary:
 ;; `H-t' (C75) opens a side window on the right that stays until `H-t' or `q'
-;; hides it.  Three tabs:
+;; hides it.  Its three tabs are three buffers shown in that one window:
 ;;
 ;;   Tasks  the comments of the focused document, its folder, the folder and
 ;;          its subfolders, or the whole Project, as a task list.  New comments
 ;;          land here; a task is handed to an agent from here (C73).
-;;   Pi     the Project's Pi, the project-level agent.
-;;   Graph  Pi, projects, documents and their agents (the C69 topology).
+;;   Pi     the Project's own Pi, its chat embedded here: a project Pi is shown
+;;          only in this panel, never among the other sessions (C78).
+;;   Graph  the interactive graph of Pi, projects, documents and agents
+;;          (`tools/agent/board', C78).
 ;;
 ;; The panel listens to state events only while it is shown and redraws once
 ;; per burst; closed, it costs nothing.  The task list reads the folders'
@@ -24,22 +26,14 @@
 (require 'tools/agent/binding)
 (require 'tools/agent/collab)
 
-(declare-function +agent-topology-model "tools/agent/topology" (sessions counts))
-(declare-function +agent-topology--sessions "tools/agent/topology" ())
-(declare-function +agent-topology--layout "tools/agent/topology" (model))
-(declare-function +agent-topology--render "tools/agent/topology" ())
-(declare-function +agent-topology-file-counts "tools/agent/topology" (file))
-(declare-function +agent-topology-visit "tools/agent/topology" ())
-(declare-function +agent-topology-chat "tools/agent/topology" ())
-(declare-function +agent-topology-next "tools/agent/topology" ())
-(declare-function +agent-topology-previous "tools/agent/topology" ())
+(declare-function +agent-board-buffer "tools/agent/board" ())
+(declare-function +agent-board-refresh "tools/agent/board" (&optional keep-view))
+(declare-function +agent-board-changed-h "tools/agent/board" (&rest _))
 (declare-function +noema/open-file "noema/bridge/config" (file &optional origin-window))
 (declare-function +noema/command "noema/bridge/config" (command &optional params))
-(declare-function noema-pi-open "noema-pi-router" (&rest args))
+(declare-function noema-pi-project-ensure "noema-pi-router" (directory))
 (declare-function noema-pi-emacs-open "noema-pi-router" (&rest args))
-(defvar +agent-topology--model)
-(defvar +agent-topology--layout)
-(defvar +agent-topology--selected)
+(declare-function +agent-shell/here "tools/agent/config" (agent &optional file))
 
 (defgroup +agent-panel nil
   "The collaboration side panel."
@@ -74,10 +68,10 @@
 (defface +agent-panel-meta '((t :inherit shadow))
   "Authors, times and places in the task list." :group '+agent-panel)
 
-(defvar-local +agent-panel--tab 'tasks "The shown tab: tasks, pi or graph.")
+(defvar +agent-panel--tab 'tasks "The shown tab: tasks, pi or graph.")
+(defvar +agent-panel--document nil "The document the panel speaks about.")
 (defvar-local +agent-panel--scope 'file "The task scope.")
 (defvar-local +agent-panel--show-resolved nil "Whether resolved tasks are listed.")
-(defvar-local +agent-panel--document nil "The document the panel speaks about.")
 (defvar-local +agent-panel--timer nil "Pending coalesced redraw.")
 
 (defvar +agent-panel--journal-cache (make-hash-table :test #'equal)
@@ -131,15 +125,25 @@
 
 ;;;; Drawing
 
-(defun +agent-panel--tabs ()
-  "Return the header line with the tabs."
+(defconst +agent-panel--tabs '((tasks "1" "Tasks") (pi "2" "Pi") (graph "3" "Graph"))
+  "The tabs: symbol, key and title.")
+
+(defun +agent-panel--tab-map (tab)
+  "Return the header keymap that shows TAB on a click."
+  (let ((map (make-sparse-keymap)))
+    (define-key map [header-line mouse-1] (lambda () (interactive) (+agent-panel--show-tab tab)))
+    map))
+
+(defun +agent-panel-header (&optional status)
+  "Return the panel's header line: the tabs, then STATUS."
   (concat " "
-          (mapconcat (lambda (tab)
-                       (propertize (format " %s %s " (car tab) (cdr tab))
-                                   'face (if (eq +agent-panel--tab (cadr (assoc (car tab) '(("1" tasks) ("2" pi) ("3" graph)))))
-                                             '+agent-panel-tab-active '+agent-panel-tab)))
-                     '(("1" . "Tasks") ("2" . "Pi") ("3" . "Graph"))
-                     "  ")))
+          (mapconcat (pcase-lambda (`(,tab ,key ,title))
+                       (propertize (format " %s %s " key title)
+                                   'face (if (eq tab +agent-panel--tab) '+agent-panel-tab-active '+agent-panel-tab)
+                                   'mouse-face 'highlight 'keymap (+agent-panel--tab-map tab)
+                                   'help-echo (format "%s (C-c %s)" title key)))
+                     +agent-panel--tabs "  ")
+          (if status (propertize (concat "   " status) 'face '+agent-panel-meta) "")))
 
 (defun +agent-panel--age (at)
   "Return how long ago AT was, briefly."
@@ -212,40 +216,64 @@
         (insert (propertize "\n  RET open  a hand to an agent  r reply  c resolve  g refresh\n"
                             'face '+agent-panel-meta))))))
 
-(defun +agent-panel--pi-sessions ()
-  "Return the Pi sessions of the document's project and the global one."
-  (seq-filter (lambda (session) (eq (+agent-session-kind (plist-get session :buffer)) 'pi))
-              (+agent-pool-sessions nil nil 'all)))
+;;;; The panel window and its tabs
 
-(defun +agent-panel--draw-pi ()
-  "Draw the Pi tab."
-  (insert (propertize "\n  Pi — the project's agent\n" 'face 'bold))
-  (let ((sessions (+agent-panel--pi-sessions)))
-    (if (not sessions)
-        (insert "\n  No Pi is running.\n")
-      (dolist (session sessions)
-        (let ((start (point)))
-          (insert (format "\n  %s  %s\n" (or (plist-get session :name) "pi")
-                          (propertize (format "%s · %s" (or (plist-get session :root) "")
-                                              (symbol-name (or (plist-get session :turn-state) 'idle)))
-                                      'face '+agent-panel-meta)))
-          (put-text-property start (point) '+agent-panel-pi (plist-get session :buffer))))))
-  (insert (propertize "\n  RET open the project's Pi   E the global Pi\n" 'face '+agent-panel-meta)))
+(defun +agent-panel--window ()
+  "Return the panel's side window, or nil when it is hidden."
+  (seq-find (lambda (window) (window-parameter window '+agent-panel))
+            (window-list-1 nil 'nomini t)))
 
-(defun +agent-panel--draw-graph ()
-  "Draw the topology tab."
-  (require 'tools/agent/topology)
-  (setq +agent-topology--model (+agent-topology-model (+agent-topology--sessions) #'+agent-topology-file-counts)
-        +agent-topology--layout (+agent-topology--layout +agent-topology--model))
-  (unless (seq-find (lambda (node) (equal (plist-get node :id) +agent-topology--selected))
-                    (plist-get +agent-topology--model :nodes))
-    (setq +agent-topology--selected (plist-get (car (plist-get +agent-topology--model :nodes)) :id)))
-  (if (plist-get +agent-topology--model :nodes)
-      (+agent-topology--render)
-    (insert "\n  No agents yet.  H-T starts one for the document you are on.\n")))
+(defun +agent-panel--visible-p ()
+  "Whether the panel is on screen."
+  (+agent-panel--window))
+
+(defun +agent-panel--tasks-buffer ()
+  "Return the task list buffer."
+  (let ((buffer (get-buffer-create +agent-panel-buffer-name)))
+    (with-current-buffer buffer
+      (unless (derived-mode-p '+agent-panel-mode) (+agent-panel-mode)))
+    buffer))
+
+(defun +agent-panel--open-window (buffer)
+  "Show the panel's side window with BUFFER and return it."
+  (or (when-let* ((window (+agent-panel--window)))
+        (set-window-dedicated-p window nil)
+        (set-window-buffer window buffer)
+        window)
+      (display-buffer-in-side-window
+       buffer `((side . right) (slot . 0) (window-width . ,+agent-panel-width)
+                (preserve-size . (t . nil))
+                (window-parameters . ((no-delete-other-windows . t) (+agent-panel . t)))))))
+
+(defun +agent-panel--put (buffer)
+  "Show BUFFER in the panel, open it when hidden, and select it."
+  (let ((window (+agent-panel--open-window buffer)))
+    (set-window-dedicated-p window t)
+    (+agent-panel--listen t)
+    (select-window window)
+    window))
+
+(defun +agent-panel--pi-directory ()
+  "Return the directory whose project Pi the panel shows."
+  (if +agent-panel--document (file-name-directory (+agent-collab--client-file +agent-panel--document))
+    default-directory))
+
+(defun +agent-panel--show-tab (tab)
+  "Show TAB in the panel."
+  (setq +agent-panel--tab tab)
+  (pcase tab
+    ('tasks (+agent-panel--put (+agent-panel--tasks-buffer)) (+agent-panel-redraw))
+    ('pi (require 'noema-pi-router)
+         ;; The display function routes the project Pi into this panel (C78).
+         (let ((buffer (noema-pi-project-ensure (+agent-panel--pi-directory))))
+           (+agent-panel-display-pi buffer)))
+    ('graph (require 'tools/agent/board)
+            (+agent-panel--put (+agent-board-buffer))
+            (+agent-board-refresh t)))
+  (force-mode-line-update t))
 
 (defun +agent-panel-redraw ()
-  "Redraw the panel."
+  "Redraw the task list."
   (interactive)
   (when-let* ((buffer (get-buffer +agent-panel-buffer-name)))
     (with-current-buffer buffer
@@ -253,29 +281,48 @@
       (setq +agent-panel--timer nil)
       (let ((inhibit-read-only t)
             (line (line-number-at-pos)))
-        (setq header-line-format (+agent-panel--tabs))
         (erase-buffer)
-        (pcase +agent-panel--tab
-          ('tasks (+agent-panel--draw-tasks))
-          ('pi (+agent-panel--draw-pi))
-          ('graph (+agent-panel--draw-graph)))
-        (unless (eq +agent-panel--tab 'graph)
-          (goto-char (point-min))
-          (forward-line (1- line)))))))
+        (+agent-panel--draw-tasks)
+        (goto-char (point-min))
+        (forward-line (1- line))))))
+
+;;;; The project Pi, embedded (C78)
+
+(defvar-keymap +agent-panel-pi-mode-map
+  "C-c 1" #'+agent-panel-tasks-tab
+  "C-c 2" #'+agent-panel-pi-tab
+  "C-c 3" #'+agent-panel-graph-tab)
+
+(define-minor-mode +agent-panel-pi-mode
+  "A project Pi shown in the collaboration panel."
+  :lighter nil
+  (if +agent-panel-pi-mode
+      (setq-local header-line-format '(:eval (+agent-panel-header "the project's Pi")))
+    (kill-local-variable 'header-line-format)))
+
+;;;###autoload
+(defun +agent-panel-display-pi (buffer)
+  "Show the project Pi BUFFER in the collaboration panel's Pi tab (C78).
+This is a project Pi's `+agent-acp-display-buffer-function': it lives in the
+panel and never in the ordinary agent views."
+  (with-current-buffer buffer (unless +agent-panel-pi-mode (+agent-panel-pi-mode 1)))
+  (setq +agent-panel--tab 'pi)
+  (+agent-panel--put buffer)
+  (with-current-buffer buffer (goto-char (point-max)))
+  (force-mode-line-update t)
+  buffer)
 
 ;;;; Following state, only while shown
 
-(defun +agent-panel--visible-p ()
-  "Whether the panel is on screen."
-  (when-let* ((buffer (get-buffer +agent-panel-buffer-name))) (get-buffer-window buffer t)))
-
 (defun +agent-panel--changed-h (&rest _)
-  "Redraw the panel once after a burst of events, when it is shown."
-  (when-let* ((buffer (get-buffer +agent-panel-buffer-name))
-              ((+agent-panel--visible-p)))
-    (with-current-buffer buffer
-      (unless +agent-panel--timer
-        (setq +agent-panel--timer (run-with-idle-timer 0.4 nil #'+agent-panel-redraw))))))
+  "Redraw the shown tab once after a burst of events."
+  (when (+agent-panel--visible-p)
+    (pcase +agent-panel--tab
+      ('tasks (when-let* ((buffer (get-buffer +agent-panel-buffer-name)))
+                (with-current-buffer buffer
+                  (unless +agent-panel--timer
+                    (setq +agent-panel--timer (run-with-idle-timer 0.4 nil #'+agent-panel-redraw))))))
+      ('graph (+agent-board-changed-h)))))
 
 (defun +agent-panel--comments-changed-h (file)
   "A comment changed in FILE: forget a tree cache that does not know its folder."
@@ -297,7 +344,7 @@
     (if on (add-hook (car spec) (cdr spec)) (remove-hook (car spec) (cdr spec)))))
 
 (defun +agent-panel--teardown-h ()
-  "Stop following state when the panel buffer goes."
+  "Stop following state when the task list goes."
   (when (timerp +agent-panel--timer) (cancel-timer +agent-panel--timer))
   (+agent-panel--listen nil))
 
@@ -305,14 +352,12 @@
   "Follow the focused document, and stop listening while the panel is hidden."
   (if (not (+agent-panel--visible-p))
       (+agent-panel--listen nil)
-    (when-let* ((buffer (get-buffer +agent-panel-buffer-name))
-                (document +agent-binding-last-document))
-      (with-current-buffer buffer
-        (unless (equal document +agent-panel--document)
-          (setq +agent-panel--document document)
-          (+agent-panel--changed-h))))))
+    (when-let* ((document +agent-binding-last-document)
+                ((not (equal document +agent-panel--document))))
+      (setq +agent-panel--document document)
+      (when (eq +agent-panel--tab 'tasks) (+agent-panel--changed-h)))))
 
-;;;; Commands
+;;;; Task commands
 
 (defun +agent-panel--at (property)
   "Return PROPERTY at point or on the nearest item line above."
@@ -332,43 +377,39 @@
 (defun +agent-panel--editing-window ()
   "Return a window to open documents in: not the panel."
   (or (get-mru-window nil nil t)
-      (let ((window (selected-window))) (split-window window nil 'left))))
+      (split-window (selected-window) nil 'left)))
 
 (defun +agent-panel-visit ()
-  "Open the item at point."
+  "Open the task at point at its place."
   (interactive)
-  (pcase +agent-panel--tab
-    ('graph (+agent-topology-visit))
-    ('pi (let ((buffer (ignore-errors (+agent-panel--at '+agent-panel-pi))))
-           (if (buffer-live-p buffer) (+agent-acp-show-buffer buffer) (+agent-panel-open-pi))))
-    (_ (let* ((thread (+agent-panel--task))
-              (file (alist-get 'file thread))
-              (line (+agent-collab--thread-line thread)))
-         (select-window (+agent-panel--editing-window))
-         (if (and (string-match-p "\\.\\(?:md\\|markdown\\)\\'" file) (fboundp '+noema/open-file))
-             (progn (+noema/open-file file)
-                    (when (and line (fboundp '+noema/command))
-                      (run-at-time 0.3 nil (lambda () (ignore-errors (+noema/command "goto-line" `((value . ,line))))))))
-           (find-file file)
-           (when line (goto-char (point-min)) (forward-line (1- line))))))))
+  (let* ((thread (+agent-panel--task))
+         (file (alist-get 'file thread))
+         (line (+agent-collab--thread-line thread)))
+    (select-window (+agent-panel--editing-window))
+    (if (and (string-match-p "\\.\\(?:md\\|markdown\\)\\'" file) (fboundp '+noema/open-file))
+        (progn (+noema/open-file file)
+               (when (and line (fboundp '+noema/command))
+                 (run-at-time 0.3 nil #'+agent-panel--goto-page-line line)))
+      (find-file file)
+      (when line (goto-char (point-min)) (forward-line (1- line))))))
+
+(defun +agent-panel--goto-page-line (line)
+  "Move the selected Noema page to LINE."
+  (ignore-errors (+noema/command "goto-line" `((value . ,line)))))
 
 (defun +agent-panel-chat ()
-  "Open the agent of the item at point for a longer discussion."
+  "Open the agent of the task at point."
   (interactive)
-  (pcase +agent-panel--tab
-    ('graph (+agent-topology-chat))
-    (_ (let ((session (+agent-collab--thread-session (+agent-panel--task))))
-         (select-window (+agent-panel--editing-window))
-         (+agent-acp-show-buffer session)))))
+  (let ((session (+agent-collab--thread-session (+agent-panel--task))))
+    (select-window (+agent-panel--editing-window))
+    (+agent-acp-show-buffer session)))
 
 (defun +agent-panel--choose-agent (file)
   "Read which session takes a task on FILE: its collaborators first."
   (let* ((collaborators (mapcar (lambda (s) (plist-get s :buffer)) (+agent-binding-sessions file)))
          (others (seq-remove (lambda (b) (memq b collaborators))
                              (seq-filter #'buffer-live-p
-                                         (mapcar (lambda (s) (plist-get s :buffer))
-                                                 (seq-remove (lambda (s) (eq (+agent-session-kind (plist-get s :buffer)) 'pi))
-                                                             (+agent-pool-sessions nil nil 'all))))))
+                                         (mapcar (lambda (s) (plist-get s :buffer)) (+agent-pool-sessions)))))
          (choices (append (mapcar (lambda (b) (cons (format "◆ %s" (buffer-local-value '+agent-acp-session-name b)) b))
                                   collaborators)
                           (mapcar (lambda (b) (cons (format "  %s" (buffer-local-value '+agent-acp-session-name b)) b))
@@ -381,8 +422,6 @@
       (save-window-excursion
         (with-current-buffer (find-file-noselect file)
           (+agent-shell/here choice (+agent-binding-canonical file)))))))
-
-(declare-function +agent-shell/here "tools/agent/config" (agent &optional file))
 
 (defun +agent-panel-dispatch ()
   "Hand the task at point to an agent; its work comes back through the API."
@@ -428,67 +467,52 @@
   (clrhash +agent-panel--journal-cache)
   (+agent-panel-redraw))
 
-(defun +agent-panel-open-pi ()
-  "Open the document's project Pi."
-  (interactive)
-  (require 'noema-pi-router nil t)
-  (let ((default-directory (if +agent-panel--document (file-name-directory +agent-panel--document) default-directory)))
-    (select-window (+agent-panel--editing-window))
-    (call-interactively #'noema-pi-open)))
+(defun +agent-panel-show-tasks (file scope)
+  "Show the tasks of SCOPE around FILE in the panel."
+  (setq +agent-panel--document file)
+  (with-current-buffer (+agent-panel--tasks-buffer) (setq +agent-panel--scope scope))
+  (+agent-panel--show-tab 'tasks))
 
 (defun +agent-panel-open-global-pi ()
-  "Open the global Pi."
+  "Open the global Pi, outside the panel."
   (interactive)
-  (require 'noema-pi-router nil t)
+  (require 'noema-pi-router)
   (select-window (+agent-panel--editing-window))
   (call-interactively #'noema-pi-emacs-open))
 
-(defun +agent-panel--select (tab)
-  "Show TAB."
-  (setq +agent-panel--tab tab)
-  (+agent-panel-redraw))
-
-(defun +agent-panel-tasks-tab () "Show the tasks." (interactive) (+agent-panel--select 'tasks))
-(defun +agent-panel-pi-tab () "Show Pi." (interactive) (+agent-panel--select 'pi))
-(defun +agent-panel-graph-tab () "Show the topology." (interactive) (+agent-panel--select 'graph))
-
-(defun +agent-panel-next-tab ()
-  "Show the next tab."
-  (interactive)
-  (+agent-panel--select (pcase +agent-panel--tab ('tasks 'pi) ('pi 'graph) (_ 'tasks))))
+(defun +agent-panel-tasks-tab () "Show the tasks." (interactive) (+agent-panel--show-tab 'tasks))
+(defun +agent-panel-pi-tab () "Show the project's Pi." (interactive) (+agent-panel--show-tab 'pi))
+(defun +agent-panel-graph-tab () "Show the graph." (interactive) (+agent-panel--show-tab 'graph))
 
 (defun +agent-panel-next ()
-  "Move to the next item."
+  "Move to the next task."
   (interactive)
-  (if (eq +agent-panel--tab 'graph) (+agent-topology-next)
-    (let ((property (if (eq +agent-panel--tab 'pi) '+agent-panel-pi '+agent-panel-task))
-          (here (get-text-property (point) (if (eq +agent-panel--tab 'pi) '+agent-panel-pi '+agent-panel-task))))
-      (let ((next (next-single-property-change (point) property)))
-        (while (and next (equal (get-text-property next property) here) (setq next (next-single-property-change next property))))
-        (when-let* ((target (and next (if (get-text-property next property) next
-                                         (next-single-property-change next property)))))
-          (goto-char target))))))
+  (let* ((here (get-text-property (point) '+agent-panel-task))
+         (next (next-single-property-change (point) '+agent-panel-task)))
+    (while (and next (equal (get-text-property next '+agent-panel-task) here))
+      (setq next (next-single-property-change next '+agent-panel-task)))
+    (when-let* ((target (and next (if (get-text-property next '+agent-panel-task) next
+                                     (next-single-property-change next '+agent-panel-task)))))
+      (goto-char target))))
 
 (defun +agent-panel-previous ()
-  "Move to the previous item."
+  "Move to the previous task."
   (interactive)
-  (if (eq +agent-panel--tab 'graph) (+agent-topology-previous)
-    (let* ((property (if (eq +agent-panel--tab 'pi) '+agent-panel-pi '+agent-panel-task))
-           (here (get-text-property (point) property))
-           (prev (previous-single-property-change (point) property)))
-      (while (and prev (> prev (point-min)) (equal (get-text-property (1- prev) property) here))
-        (setq prev (previous-single-property-change prev property)))
-      (when prev
-        (let ((item (get-text-property (max (point-min) (1- prev)) property)))
-          (when item
-            (goto-char (or (previous-single-property-change prev property) (point-min)))))))))
+  (let ((start (previous-single-property-change (point) '+agent-panel-task)))
+    (when (and start (get-text-property (point) '+agent-panel-task))
+      (setq start (previous-single-property-change start '+agent-panel-task)))
+    (when start
+      (goto-char (if (get-text-property start '+agent-panel-task) start
+                   (or (previous-single-property-change start '+agent-panel-task) (point-min)))))))
 
 (defvar-keymap +agent-panel-mode-map
   :parent special-mode-map
   "1" #'+agent-panel-tasks-tab
   "2" #'+agent-panel-pi-tab
   "3" #'+agent-panel-graph-tab
-  "TAB" #'+agent-panel-next-tab
+  "C-c 1" #'+agent-panel-tasks-tab
+  "C-c 2" #'+agent-panel-pi-tab
+  "C-c 3" #'+agent-panel-graph-tab
   "RET" #'+agent-panel-visit
   "S-<return>" #'+agent-panel-chat
   "n" #'+agent-panel-next
@@ -505,33 +529,34 @@
   "q" #'+agent/panel)
 
 (define-derived-mode +agent-panel-mode special-mode "Collaboration"
-  "The collaboration panel: tasks, Pi and topology (C75)."
+  "The collaboration panel's task list (C75)."
   (setq truncate-lines t)
   (setq-local cursor-type 'bar)
+  (setq-local header-line-format '(:eval (+agent-panel-header)))
   (add-hook 'kill-buffer-hook #'+agent-panel--teardown-h nil t))
 
 (when (fboundp 'set-evil-initial-state!) (set-evil-initial-state! '+agent-panel-mode 'emacs))
+
+(with-eval-after-load 'tools/agent/board
+  (define-key +agent-board-mode-map (kbd "C-c 1") #'+agent-panel-tasks-tab)
+  (define-key +agent-board-mode-map (kbd "C-c 2") #'+agent-panel-pi-tab)
+  (define-key +agent-board-mode-map (kbd "C-c 3") #'+agent-panel-graph-tab)
+  (define-key +agent-board-mode-map (kbd "1") #'+agent-panel-tasks-tab)
+  (define-key +agent-board-mode-map (kbd "2") #'+agent-panel-pi-tab)
+  (define-key +agent-board-mode-map (kbd "3") #'+agent-panel-graph-tab)
+  (define-key +agent-board-mode-map (kbd "q") #'+agent/panel))
+
+(defvar +agent-board-mode-map)
 
 ;;;###autoload
 (defun +agent/panel ()
   "Show or hide the collaboration panel on the right (C75)."
   (interactive)
-  (if-let* ((window (+agent-panel--visible-p)))
+  (if-let* ((window (+agent-panel--window)))
       (progn (delete-window window) (+agent-panel--listen nil))
-    (let ((buffer (get-buffer-create +agent-panel-buffer-name))
-          (document (or (+agent-document-file) +agent-binding-last-document)))
-      (with-current-buffer buffer
-        (unless (derived-mode-p '+agent-panel-mode) (+agent-panel-mode))
-        (setq +agent-panel--document document))
-      (let ((window (display-buffer-in-side-window
-                     buffer `((side . right) (slot . 0) (window-width . ,+agent-panel-width)
-                              (preserve-size . (t . nil))
-                              (window-parameters . ((no-delete-other-windows . t)))))))
-        (set-window-dedicated-p window t)
-        (+agent-panel--listen t)
-        (+agent-panel-redraw)
-        (select-window window)))))
-
+    (setq +agent-panel--document (or (+agent-document-file) +agent-binding-last-document
+                                     +agent-panel--document))
+    (+agent-panel--show-tab (if (eq +agent-panel--tab 'pi) 'pi +agent-panel--tab))))
 
 (provide 'tools/agent/panel)
 ;;; panel.el ends here
