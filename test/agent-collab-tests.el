@@ -232,15 +232,42 @@
                                          (setq handed (list buffer question (length blocks))))))
       (should (equal handed (list agent "Why?" 1))))))
 
-(ert-deftest agent-collab-c67-a-page-request-becomes-a-thread ()
+(ert-deftest agent-collab-c76-a-send-about-a-place-becomes-a-task ()
   (agent-collab-tests--project root
     (agent-collab-tests--agent-buffer agent
       (let ((file (expand-file-name "src/SAI.md" root)) sent)
-        (+agent-collab-thread-deliver :file file :line 3 :anchor "alpha" :session agent :text "Why?"
-                                      :send (lambda () (setq sent t)))
-        ;; Sent at once: agent-shell queues it for a busy session (C73).
-        (should sent)
-        (should (equal (alist-get 'state (car (+agent-collab-threads file))) "waiting"))))))
+        (cl-letf (((symbol-function '+agent-context--deliver)
+                   (lambda (buffer blocks _instructions no-focus &rest _)
+                     (setq sent (list buffer (alist-get 'text (car blocks)) no-focus)))))
+          (funcall (+agent-collab-task-delivery file 3 "alpha")
+                   agent '(((type . "text") (text . "Why?")) ((type . "resource_link"))) nil "Why?"))
+        (let ((thread (car (+agent-collab-threads file))))
+          (should (equal (alist-get 'text (car (alist-get 'messages thread))) "Why?"))
+          (should (equal (alist-get 'quote thread) "alpha"))
+          (should (equal (alist-get 'session (alist-get 'assignee thread)) (+agent-acp-session-token agent)))
+          ;; Sent at once, without taking the keyboard; the turn names the thread.
+          (should (eq (nth 0 sent) agent))
+          (should (string-prefix-p "Why?\n\n(Task from comment " (nth 1 sent)))
+          (should (string-match-p (regexp-quote (alist-get 'id thread)) (nth 1 sent)))
+          (should (nth 2 sent)))))))
+
+(ert-deftest agent-collab-c76-sends-from-a-document-carry-a-task-delivery ()
+  (agent-collab-tests--project root
+    (agent-collab-tests--agent-buffer agent
+      (let ((file (expand-file-name "src/SAI.md" root)) seen)
+        (with-current-buffer (find-file-noselect file)
+          (unwind-protect
+              (cl-letf (((symbol-function '+agent-context--send)
+                         (lambda (&rest args) (setq seen (plist-get args :deliver)))))
+                (+agent-context-send-buffer)
+                (should (functionp seen))
+                (setq seen nil)
+                (goto-char (point-min)) (set-mark (point)) (forward-line 1) (activate-mark)
+                (+agent-context-send-region)
+                (should (functionp seen)))
+            (set-buffer-modified-p nil) (kill-buffer)))
+        ;; A chat is not a document: no task.
+        (should-not (+agent-context--task-delivery agent))))))
 
 (ert-deftest agent-collab-c67-a-collaborator-chat-means-its-primary-file ()
   (agent-collab-tests--agent-buffer agent
@@ -282,6 +309,19 @@
         (let ((+agent-collab-session-instructions-function nil))
           (+agent-collab--deliver agent "q"))
         (should (equal (nth 2 delivered) nil))))))
+
+(ert-deftest agent-collab-c75-resolving-one-thread-leaves-the-others-open ()
+  "Each folded thread is its own structure: no state leaks between threads."
+  (agent-collab-tests--project root
+    (let ((file (expand-file-name "src/SAI.md" root)))
+      (with-temp-file (expand-file-name "src/.noema-comments.jsonl" root)
+        (insert "{\"v\":1,\"op\":\"thread\",\"id\":\"c-1111\",\"note\":\"SAI.md\",\"quote\":\"a\",\"author\":{\"name\":\"You\",\"kind\":\"person\"},\"text\":\"one\",\"at\":\"2026-11-17T08:00:00.000Z\"}\n"
+                "{\"v\":1,\"op\":\"thread\",\"id\":\"c-2222\",\"note\":\"SAI.md\",\"quote\":\"b\",\"author\":{\"name\":\"You\",\"kind\":\"person\"},\"text\":\"two\",\"at\":\"2026-11-17T08:01:00.000Z\"}\n"
+                "{\"v\":1,\"op\":\"resolve\",\"id\":\"c-1111\",\"at\":\"2026-11-17T09:00:00.000Z\"}\n"
+                "{\"v\":1,\"op\":\"edit\",\"id\":\"c-1111\",\"text\":\"ONE\",\"at\":\"2026-11-17T09:01:00.000Z\"}\n"))
+      (should (equal (alist-get 'status (+agent-collab-thread file "c-1111")) "resolved"))
+      (should (equal (alist-get 'status (+agent-collab-thread file "c-2222")) "open"))
+      (should (equal (alist-get 'text (car (alist-get 'messages (+agent-collab-thread file "c-2222")))) "two")))))
 
 (provide 'agent-collab-tests)
 ;;; agent-collab-tests.el ends here

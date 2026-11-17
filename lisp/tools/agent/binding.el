@@ -184,6 +184,20 @@ page's header) refreshes from here.")
 
 (add-hook '+agent-acp-changed-functions #'+agent-binding--announce-h)
 
+;;;; The document the person works on
+
+(defvar +agent-binding-last-document nil
+  "The document file the person focused last (C75).
+`H-T' binds a new agent to it and the panel speaks about it, even when they
+are invoked from a chat or the panel itself.")
+
+(defun +agent-binding--track-document-h (&rest _)
+  "Remember the selected window's document, when it shows one."
+  (when-let* ((file (+agent-document-file)))
+    (setq +agent-binding-last-document file)))
+
+(add-hook 'aaron-switch-buffer-hook #'+agent-binding--track-document-h)
+
 ;;;; Queries
 
 (defun +agent-binding-sessions (file &optional root)

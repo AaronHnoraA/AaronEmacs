@@ -71,8 +71,26 @@ task is done. It can also open a comment of its own on the text it names.
 Emacs collects nothing from the agent's chat. The person reads the chat when
 they want to. agent-shell's own queue holds a prompt for a busy session.
 
+## Sends are tasks, and the Agenda lists them (C76, C77)
+
+Any send that names one place of one document — a region, a whole file, the
+line at point, from `C-c A c`, the page's saved selection or the old
+`noema-interaction-send-*` commands — becomes a comment thread on that place,
+assigned to the chosen session, and is handed over as above without taking the
+keyboard. The page has no button that opens an agent; ⌘⌥M comments, and the
+comment is handed on from `H-t`.
+
+Open threads are tasks of the note's Agenda scope (`server/lib/agenda-comments.mjs`):
+`sourceKind: "comment"`, tagged `comment`, at their anchor's line. The first
+message is the title and may end in DSL attributes (`Prove it {ddl: fri, prio: A}`),
+so a comment is searched, filtered and scheduled like an `@@todo`. Marking it
+done (or `complete`) resolves the thread and `todo` reopens it; other patches,
+clocks and dependencies are refused. Every comment write invalidates the note
+in the Agenda index, so nothing polls.
+
 ## Tests
 
+`C77 *` in `tests/agenda-comments.test.ts`; `agent-collab-c76-*` in Emacs;
 `C70 *` in `tests/note-comments.test.ts`, `tests/comment-anchor-editor.test.ts`
 and `tests/comment-rail.test.ts`; `agent-collab-c70-*` in Emacs;
 `scripts/check-comments.mjs` in WebKit (the card level with its text, active

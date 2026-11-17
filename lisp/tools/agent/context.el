@@ -466,6 +466,19 @@ A region covering the whole buffer is a plain file reference."
   (lambda (root session)
     (list (+agent-context--reference file root nil nil session))))
 
+;;;; ── A send that names one place of a document is a task (C76) ──────────
+
+(defun +agent-context--task-delivery (buffer &optional begin end)
+  "Return the delivery making a send about BUFFER a task, or nil.
+BEGIN..END is the place; without it the task is about the whole file.  Only a
+document (a file the person works on, not an agent chat) takes tasks."
+  (when-let* ((file (with-current-buffer buffer (+agent-document-file))))
+    (require 'tools/agent/collab)
+    (with-current-buffer buffer
+      (+agent-collab-task-delivery
+       file (and begin (line-number-at-pos begin t))
+       (and begin (buffer-substring-no-properties begin (min end (+ begin 200))))))))
+
 ;;;; ── Commands ─────────────────────────────────────────────────────────────
 
 ;;;###autoload
@@ -520,9 +533,10 @@ selection is used.  PICK is as for `+agent-context-send'."
       nil
     (unless (use-region-p) (user-error "No active region"))
     (let ((references (+agent-context--region-references
-                       (current-buffer) (region-beginning) (region-end))))
+                       (current-buffer) (region-beginning) (region-end)))
+          (deliver (+agent-context--task-delivery (current-buffer) (region-beginning) (region-end))))
       (deactivate-mark)
-      (+agent-context--send :pick pick :references references))))
+      (+agent-context--send :pick pick :references references :deliver deliver))))
 
 ;;;###autoload
 (defun +agent-context-send-buffer (&optional pick)
@@ -532,11 +546,12 @@ In a Noema Markdown pane this is the note the pane shows.  PICK is as for
   (interactive "P")
   (if (+agent-editor-action 'send-buffer pick)
       nil
-    (+agent-context--send
-     :pick pick
-     :references (+agent-context--file-references
-                  (or (+agent-context--buffer-file (current-buffer))
-                    (user-error "%s is not a saved file" (buffer-name)))))))
+    (let ((file (or (+agent-context--buffer-file (current-buffer))
+                    (user-error "%s is not a saved file" (buffer-name)))))
+      (+agent-context--send
+       :pick pick
+       :references (+agent-context--file-references file)
+       :deliver (+agent-context--task-delivery (current-buffer))))))
 
 ;;;###autoload
 (defun +agent-context-send-file (file &optional pick)
@@ -587,9 +602,11 @@ PICK is as for `+agent-context-send-at-point'."
     (if clipboard
         (progn (kill-new text)
                (message "Agent: prompt copied to clipboard"))
-      (+agent-context--deliver
-       buffer (list (list (cons 'type "text") (cons 'text text))
-                    (car (+agent-context--file-blocks (list reference))))))))
+      (let ((blocks (list (list (cons 'type "text") (cons 'text text))
+                          (car (+agent-context--file-blocks (list reference))))))
+        (if-let* ((deliver (+agent-context--task-delivery (current-buffer) (line-beginning-position) (line-end-position))))
+            (funcall deliver buffer blocks nil prompt)
+          (+agent-context--deliver buffer blocks))))))
 
 (defun +agent-context-review-send ()
   "Send the reviewed references through the normal session chooser."

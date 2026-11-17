@@ -967,7 +967,7 @@ it (C65)."
 In a document, its collaborators come first, on screen or not, then a new
 collaborator of each agent for it (C65); the ordinary list follows without
 them.  A CHOICE is a buffer, (new . AGENT), (new AGENT . FILE) or `history'."
-  (let ((file (+agent-binding-canonical (+agent-document-file)))
+  (let ((file (+agent-binding-canonical (or (+agent-document-file) +agent-binding-last-document)))
         (base (+agent-switcher--base-candidates)))
     (if (not file)
         base
@@ -1064,8 +1064,15 @@ collaborators, which are reached where they are shown."
 (defalias 'agent-switcher #'+agent/switcher
   "Choose an agent session or start one, like `terminal-switcher'.")
 
+(autoload '+agent/panel "tools/agent/panel" nil t)
+(defalias 'agent-panel #'+agent/panel
+  "Show or hide the collaboration panel: tasks, Pi and topology.")
+
+;; H-t is the collaboration panel (C75); H-T (H-S-t) picks or starts an agent,
+;; bound by default to the document focused last.
 (general-define-key :keymaps 'global
-                    "H-t" #'+agent/switcher
+                    "H-t" #'+agent/panel
+                    "H-T" #'+agent/switcher
                     "C-S-t" #'+agent/switcher
                     "M-T" #'+agent/switcher)
 

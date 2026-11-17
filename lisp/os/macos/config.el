@@ -313,7 +313,7 @@ With positive ARG, enable it.  With zero or negative ARG, disable it."
                      ("H-g" . +telescope/ripgrep)
                      ("H-p" . project-menu)
                      ("H-P" . workspace-menu)
-                     ("H-T" . test-menu)
+                     ;; H-T is the agent switcher (C75); tests stay on <f6> and SPC c t.
                      ("H-m" . magit-status)
                      ("H-a" . noema-agenda)
                      ("H-h" . help-command)

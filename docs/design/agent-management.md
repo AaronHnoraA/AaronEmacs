@@ -570,6 +570,15 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   每处原文守护应用，变了就是冲突、由 host 重试。改写大半篇（`LARGE_CHANGE`）或反复冲突时拒绝并返回
   `needsPerson`，host 发 `agent-needs-person`，Emacs 把该会话标为等你并系统通知（点击打开聊天）；
   Agent 只在人于聊天里同意后才可带 `allowLarge`。测试：`C74 *`、`agent-edit-c74-*`。
+- **C75 协作面板。** `H-t`（`agent-panel`，`tools/agent/panel.el`）在右侧开固定侧窗，`H-t` 或 `q`
+  收起，点击别处不关。标签：任务（默认；批注即任务，范围本文件→本目录→目录及子目录→项目，
+  `s` 切换；`a` 交给 Agent、`r` 回复、`c` 结案、`R` 显示已结案）、Pi、拓扑。面板说的是最近聚焦的
+  文档（`+agent-binding-last-document`，由 `aaron-switch-buffer-hook` 记录）；只在显示时监听状态
+  事件并合并为一次重绘，隐藏后什么都不挂。`H-T` 是原来的 Agent 选择器，默认针对同一篇文档。
+  页面里没有打开 Agent 的按钮。测试：`agent-panel-c75-*`。
+- **C76 发送即任务。** 指向文档某处的发送（`C-c A c` 的区域/整篇/光标处、页面选区、旧的
+  `noema-interaction-send-*`）经 `+agent-collab-task-delivery` 变成该处的批注线程、指派给选中会话
+  并立即交出，不夺键盘；聊天与草稿、剪贴板路径不变。测试：`agent-collab-c76-*`。
 
 ## 实现位置
 

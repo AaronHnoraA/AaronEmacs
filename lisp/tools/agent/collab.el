@@ -156,13 +156,16 @@
               (pcase (alist-get 'op event)
                 ("thread"
                  (unless thread
-                   (puthash id `((id . ,id) (note . ,(alist-get 'note event))
+                   ;; `copy-tree': the template's constant conses would
+                   ;; otherwise be shared by every thread, and `setf' on one
+                   ;; thread's status would change them all.
+                   (puthash id (copy-tree `((id . ,id) (note . ,(alist-get 'note event))
                                  (quote . ,(or (alist-get 'quote event) ""))
                                  (line . ,(alist-get 'line event))
                                  (status . "open") (assignee . ,(alist-get 'assignee event))
                                  (createdAt . ,(alist-get 'at event))
                                  (messages . (((mid . "m0") (author . ,(+agent-collab--author (alist-get 'author event)))
-                                               (text . ,(or (alist-get 'text event) "")) (at . ,(alist-get 'at event))))))
+                                               (text . ,(or (alist-get 'text event) "")) (at . ,(alist-get 'at event)))))))
                             threads)))
                 ("reply"
                  (when thread
@@ -300,12 +303,31 @@ The first task of a native session carries the tools guide."
     (+agent-collab--deliver session (+agent-collab--task-prompt thread))
     (message "Handed to %s" (buffer-local-value '+agent-acp-session-name session))))
 
-(cl-defun +agent-collab-thread-deliver (&key file line anchor session text send)
-  "Open a task on FILE at LINE about ANCHOR for SESSION with TEXT; SEND delivers it."
-  (let ((thread (+agent-collab-thread-create :file file :line line :anchor anchor
-                                             :session session :text text)))
-    (funcall send)
-    thread))
+(defun +agent-collab-task-delivery (file line anchor)
+  "Return a `+agent-context--send' delivery that makes the send a task (C76).
+The request becomes a comment thread on FILE at LINE about ANCHOR, assigned to
+the session; the turn carries the references, the request and the thread, and
+the keyboard stays in the document."
+  (lambda (session blocks session-instructions question)
+    (let* ((text (if (string-empty-p (string-trim (or question ""))) "Look at this place" question))
+           (thread (+agent-collab-thread-create :file file :line line :anchor (or anchor "")
+                                                :session session :text text))
+           (note (string-trim (format +agent-collab-task-prompt "" (alist-get 'id thread)
+                                      (alist-get 'file thread) (or line 0)
+                                      (truncate-string-to-width (or anchor "") 200 nil nil "…"))))
+           (content (copy-tree blocks)))
+      (setf (alist-get 'text (car content)) (concat (alist-get 'text (car content)) "\n\n" note))
+      (+agent-context--deliver
+       session content
+       (or session-instructions
+           (and +agent-collab-session-instructions-function
+                (ignore-errors (funcall +agent-collab-session-instructions-function))))
+       t
+       (lambda () (message "%s refused the task: %s" (buffer-local-value '+agent-acp-session-name session)
+                           (or (buffer-local-value '+agent-acp-last-error session) "see its chat"))))
+      (message "Handed to %s as a task on %s" (buffer-local-value '+agent-acp-session-name session)
+               (file-name-nondirectory (+agent-collab--client-file file)))
+      thread)))
 
 (cl-defun +agent-collab-ask-region (&key file line anchor session text)
   "Open a task TEXT about ANCHOR at LINE of FILE and hand it to SESSION."

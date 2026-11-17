@@ -187,9 +187,11 @@
 - `H-r` / `H-s` / `H-g`
   最近文件 / 当前 buffer 搜索 / 项目 ripgrep
 - `H-t`
-  Agent 选择器：切换会话、新建或打开历史；在文档里先列这篇的协作者，可为这篇新建一个绑定它的 Agent
-- `H-p` / `H-P` / `H-R` / `H-T`
-  项目菜单 / workspace 菜单 / run profile 菜单 / test 菜单
+  协作面板（右侧固定侧窗，再按一次收起）：任务（批注，按文件/目录/子树/项目）、Pi、拓扑
+- `H-T`
+  Agent 选择器：切换会话、新建或打开历史；默认绑定最近聚焦的文档，先列它的协作者，可为它新建 Agent
+- `H-p` / `H-P` / `H-R`
+  项目菜单 / workspace 菜单 / run profile 菜单（test 菜单：`<f6>`、`SPC c t`）
 - `H-m` / `H-a`
   `magit-status` / Noema 日程
 - `H-h` / `H-H` / `H-z` / `H-Z`
@@ -1794,7 +1796,8 @@ Emacs 通用 agent 层统一管理轻量模型交互与结构化 coding-agent �
 | 键 | 功能 |
 |----|------|
 | `H-A` / `SPC a a` / `C-c A RET` | Agent Manager 浮窗；再次调用隐藏返回 |
-| `H-t`（macOS `Option-T`，Noema 页面和 Portal 终端里也可用；`C-S-t` 保留为备用）/ `M-x agent-switcher` | 像 `Cmd-T` 选终端一样选 agent：列出不在屏幕上的会话、新建 Claude/Codex/OpenCode 和历史；`RET` 当前窗口，`S-RET` 右侧，`Cmd-RET` 下方。在文档（文件 buffer 或 Noema 页面）里，最前面是这篇的协作者（`◆`，在屏幕上的直接跳过去），然后是“＋ New … for 文件名”，新建的 Agent 绑定这篇 |
+| `H-t` / `M-x agent-panel` | 协作面板：右侧固定侧窗，`H-t` 或 `q` 收起。`1` 任务（批注即任务；`s` 切换范围：本文件、本目录、目录及子目录、项目；`RET` 打开，`a` 交给 Agent，`r` 回复，`c` 结案，`R` 显示已结案），`2` Pi，`3` 拓扑；`Tab` 轮换 |
+| `H-T`（macOS `Option-Shift-T`；`C-S-t` 保留为备用）/ `M-x agent-switcher` | 像 `Cmd-T` 选终端一样选 agent：列出不在屏幕上的会话、新建 Claude/Codex/OpenCode 和历史；`RET` 当前窗口，`S-RET` 右侧，`Cmd-RET` 下方。默认针对最近聚焦的文档（文件 buffer 或 Noema 页面），最前面是它的协作者（`◆`，在屏幕上的直接跳过去），然后是“＋ New … for 文件名”，新建的 Agent 绑定这篇 |
 | `C-c A d` / `C-c A k` | 在文档里就选区或当前行向这篇的协作者提问，成为一条线程；`k` 列出线程，回复自动回到线程（`RET` 回到位置，`r` 追问，`c` 结案，`o` 进聊天深谈） |
 | `C-c A H` / `M-x agent-topology` | 拓扑图：Pi、项目、文档、协作者及其状态；`RET` 打开文档或协作者的主文件，`S-RET` 进聊天。Treemacs 里文件旁的 `◆N` 是协作者数、`✎M` 是待审项、`◇` 是只被 Agent 改过 |
 | `C-c A Y` / `C-c A Z` | 审阅协作者对非 Markdown 文件的修订（`a` 接受、`x` 拒绝）；列出 Agent 直接改过这篇的地方（`u` 放回） |

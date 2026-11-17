@@ -101,6 +101,10 @@ adapter. ECA is a source study, not a
 runtime dependency. Preserve Remote, Aaron UI and window lifecycle contracts
 when adapting upstream interaction logic. Notifications go through
 `tools/agent/notifications` and `aaron-notify`; routine completion is quiet.
+Beside a document, `H-t` (`agent-panel`) is the collaboration panel: comments
+as tasks, the Project's Pi and the topology (agent-management C75); a send that
+names a place of a document becomes a task there (C76), and open comments are
+Agenda tasks (C77).
 The daily front door is `agent-manager` (`H-A`, `SPC a a`), an Aaron ETAF
 float over the shared registry; closing its view must never end execution.
 Sessions and Inbox preview the real chat; Usage uses the same selection for
