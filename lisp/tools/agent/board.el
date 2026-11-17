@@ -655,7 +655,6 @@ A folded node's label says how much it hides."
               scroll-margin 0
               auto-hscroll-mode nil
               mwheel-coalesce-scroll-events nil)
-  (setq-local header-line-format '(:eval (+agent-panel-header (+agent-board--status))))
   (add-hook 'window-size-change-functions #'+agent-board--window-size-h nil t)
   (add-hook 'kill-buffer-hook #'+agent-board--teardown-h nil t)
   (when (fboundp 'evil-local-set-key)

@@ -106,6 +106,7 @@
 
 (defun +agent-panel-tasks (file scope)
   "Return the tasks of SCOPE around document FILE, grouped as ((FILE . THREADS) ...)."
+  (setq file (+agent-collab--client-file file))
   (let* ((directory (file-name-directory (expand-file-name file)))
          (threads
           (pcase scope
@@ -134,8 +135,17 @@
     (define-key map [header-line mouse-1] (lambda () (interactive) (+agent-panel--show-tab tab)))
     map))
 
+(defun +agent-panel--status ()
+  "Return the shown buffer's status for the tab line."
+  (cond ((derived-mode-p '+agent-board-mode) (+agent-board--status))
+        ((derived-mode-p 'agent-shell-mode)
+         (format "%s · %s" (or (bound-and-true-p +agent-acp-session-name) "Pi")
+                 (if (+agent-acp-busy-p (current-buffer)) "working" "idle")))))
+
+(declare-function +agent-board--status "tools/agent/board" ())
+
 (defun +agent-panel-header (&optional status)
-  "Return the panel's header line: the tabs, then STATUS."
+  "Return the panel's tab line: the tabs, then STATUS."
   (concat " "
           (mapconcat (pcase-lambda (`(,tab ,key ,title))
                        (propertize (format " %s %s " key title)
@@ -187,7 +197,8 @@
 
 (defun +agent-panel--draw-tasks ()
   "Draw the task tab."
-  (let* ((file +agent-panel--document))
+  ;; A Noema page names its document `/fs:local:...'; threads name client paths.
+  (let* ((file (and +agent-panel--document (+agent-collab--client-file +agent-panel--document))))
     (if (not file)
         (insert "\n  Open a document (a note or a file) to see its tasks.\n")
       (let* ((groups (+agent-panel-tasks file +agent-panel--scope))
@@ -243,7 +254,10 @@
       (display-buffer-in-side-window
        buffer `((side . right) (slot . 0) (window-width . ,+agent-panel-width)
                 (preserve-size . (t . nil))
-                (window-parameters . ((no-delete-other-windows . t) (+agent-panel . t)))))))
+                ;; The tabs belong to the window, so no shown buffer (an
+                ;; agent-shell rewrites its own header line) can take them.
+                (window-parameters . ((no-delete-other-windows . t) (+agent-panel . t)
+                                      (tab-line-format . (:eval (+agent-panel-header (+agent-panel--status))))))))))
 
 (defun +agent-panel--put (buffer)
   "Show BUFFER in the panel, open it when hidden, and select it."
@@ -282,7 +296,11 @@
       (let ((inhibit-read-only t)
             (line (line-number-at-pos)))
         (erase-buffer)
-        (+agent-panel--draw-tasks)
+        (condition-case failure
+            (+agent-panel--draw-tasks)
+          ;; Never a silently half-drawn list: say what failed.
+          (error (insert (propertize (format "\n  The task list failed: %s\n" (error-message-string failure))
+                                     'face 'error))))
         (goto-char (point-min))
         (forward-line (1- line))))))
 
@@ -295,17 +313,28 @@
 
 (define-minor-mode +agent-panel-pi-mode
   "A project Pi shown in the collaboration panel."
-  :lighter nil
-  (if +agent-panel-pi-mode
-      (setq-local header-line-format '(:eval (+agent-panel-header "the project's Pi")))
-    (kill-local-variable 'header-line-format)))
+  :lighter nil)
+
+(defvar +portal-popup-buffers)
+(declare-function +portal-popup-agent-keys-mode "term/portal/popup" (&optional arg))
+
+(defun +agent-panel--adopt-pi (buffer)
+  "Make BUFFER the panel's Pi: shown only by the panel, never by the popup."
+  (with-current-buffer buffer
+    (setq-local +agent-acp-display-buffer-function #'+agent-panel-display-pi)
+    (when (bound-and-true-p +portal-popup-instance-p)
+      (setq-local +portal-popup-instance-p nil)
+      (when (bound-and-true-p +portal-popup-agent-keys-mode) (+portal-popup-agent-keys-mode -1))
+      (when (boundp '+portal-popup-buffers)
+        (setq +portal-popup-buffers (delq buffer +portal-popup-buffers))))
+    (unless +agent-panel-pi-mode (+agent-panel-pi-mode 1))))
 
 ;;;###autoload
 (defun +agent-panel-display-pi (buffer)
   "Show the project Pi BUFFER in the collaboration panel's Pi tab (C78).
 This is a project Pi's `+agent-acp-display-buffer-function': it lives in the
 panel and never in the ordinary agent views."
-  (with-current-buffer buffer (unless +agent-panel-pi-mode (+agent-panel-pi-mode 1)))
+  (+agent-panel--adopt-pi buffer)
   (setq +agent-panel--tab 'pi)
   (+agent-panel--put buffer)
   (with-current-buffer buffer (goto-char (point-max)))
@@ -532,7 +561,6 @@ panel and never in the ordinary agent views."
   "The collaboration panel's task list (C75)."
   (setq truncate-lines t)
   (setq-local cursor-type 'bar)
-  (setq-local header-line-format '(:eval (+agent-panel-header)))
   (add-hook 'kill-buffer-hook #'+agent-panel--teardown-h nil t))
 
 (when (fboundp 'set-evil-initial-state!) (set-evil-initial-state! '+agent-panel-mode 'emacs))

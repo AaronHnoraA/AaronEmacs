@@ -46,6 +46,18 @@
       (should (equal (mapcar #'car (+agent-panel-tasks file 'dir))
                      (list (expand-file-name "notes/a.md" root) (expand-file-name "notes/b.md" root)))))))
 
+(ert-deftest agent-panel-c75-a-page-document-lists-its-tasks ()
+  "A Noema page names its document /fs:local:...; its tasks are listed all the same."
+  (agent-panel-tests--tree root
+    (cl-letf (((symbol-function '+agent-collab--client-file)
+               (lambda (file) (string-remove-prefix "/fs:local:" file))))
+      (with-temp-buffer
+        (+agent-panel-mode)
+        (setq +agent-panel--document (concat "/fs:local:" (expand-file-name "notes/a.md" root)))
+        (let ((inhibit-read-only t)) (+agent-panel--draw-tasks))
+        (should (string-match-p "this file · 1 open" (buffer-string)))
+        (should (string-match-p "● on a" (buffer-string)))))))
+
 (ert-deftest agent-panel-c75-a-new-folder-of-comments-is-found ()
   (agent-panel-tests--tree root
     (let ((file (expand-file-name "notes/a.md" root)))
@@ -108,7 +120,11 @@
               (should (eq (+agent-panel--window) window))
               (should (eq (window-buffer window) pi))
               (should (buffer-local-value '+agent-panel-pi-mode pi))
-              (should (string-match-p "2 Pi" (with-current-buffer pi (eval (cadr header-line-format) t))))
+              (should (string-match-p "2 Pi" (with-current-buffer pi
+                                               (eval (cadr (window-parameter window 'tab-line-format)) t))))
+              ;; agent-shell rewrites its header line; the tabs are the window's.
+              (with-current-buffer pi (setq header-line-format "agent-shell header"))
+              (should (window-parameter window 'tab-line-format))
               (+agent-panel--show-tab 'graph)
               (should (eq (window-buffer window) (get-buffer "*Agent Graph*")))
               (+agent-panel--show-tab 'tasks)
