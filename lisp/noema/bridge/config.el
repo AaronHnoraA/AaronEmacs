@@ -1571,6 +1571,12 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
              (when (fboundp '+dashboard-agenda-handle-change)
                (+noema--defer-host-event #'+dashboard-agenda-handle-change payload))
              nil)
+            ("agent-needs-person"
+             ;; A change too large or contested for an agent (C74).
+             (+noema--defer-host-event
+              (lambda (event) (require 'tools/agent/edit) (+agent-edit-needs-person event))
+              payload)
+             nil)
             ("comments-changed"
              ;; A note's comments changed in Noema: the task panel follows (C73).
              (when (featurep 'tools/agent/collab)
@@ -1729,6 +1735,12 @@ This is a memory-only check; it never opens an inactive project or reads disk."
  (lambda (params _client)
    (remote-require-on-client 'tools/agent/api)
    (+agent/api params)))
+;; agent:file:edit (C74): a text file as Emacs holds it, changed in place.
+(remote-gateway-register-method
+ "noema.file"
+ (lambda (params _client)
+   (remote-require-on-client 'tools/agent/edit)
+   (+agent-edit-file-api params)))
 
 (declare-function aaron-open-place "aaron-open" (file &optional placement line column no-focus))
 (defvar aaron-open-placements)

@@ -560,6 +560,16 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   修改、在批注里回复，并用 `agent:document:comment` 的 `resolve` 结案。Emacs 不读 Agent 的聊天，也不
   逐块累积回复（`acp.el` 不订阅 `agent-message-chunk`）；忙的会话由 agent-shell 自己的队列排队。
   测试：`agent-collab-c73-*`、`C73 *`。
+- **C74 Agent 经 API 修改，不必等，也不让人等。** `agent:document:edit`（笔记）与 `agent:file:edit`
+  （任何文本文件）接受同一组写法：`{oldText,newText}`（原文唯一，像 Agent 自带的 Edit）、
+  `{lines:[a,b],newText}`、`{after|before:行内文字,newText}`、`{append}`、位置 `{from,to,oldText,newText}`
+  或整篇 `content`（`server/lib/edit-forms.mjs`）。按文字定位的修改落在最新版本上：人同时打字时位置
+  偏移不影响，保存撞上并发写入就重读重试（最多三次）。笔记经 `notes:save` 保存，打开的页面只更新
+  变化处；其他文件经 Emacs（`noema.file`，`tools/agent/edit.el`）改在访问它的 buffer 里——有人未保存
+  的修改时只改 buffer、不替人保存，干净的 buffer 存盘，没有 buffer 时直接写文件；版本（文本哈希）和
+  每处原文守护应用，变了就是冲突、由 host 重试。改写大半篇（`LARGE_CHANGE`）或反复冲突时拒绝并返回
+  `needsPerson`，host 发 `agent-needs-person`，Emacs 把该会话标为等你并系统通知（点击打开聊天）；
+  Agent 只在人于聊天里同意后才可带 `allowLarge`。测试：`C74 *`、`agent-edit-c74-*`。
 
 ## 实现位置
 
