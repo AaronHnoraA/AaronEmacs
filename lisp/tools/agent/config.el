@@ -906,8 +906,10 @@ Local commands come first: they never reach the agent, so /resume, /restart or
              (agent-shell--prompt-queue-enqueue :prompt prompt))))
         (t (apply original args))))
 
-(defun +agent-shell/here (agent)
-  "Start a managed AGENT in the window where this command was invoked."
+(defun +agent-shell/here (agent &optional file)
+  "Start a managed AGENT in the window where this command was invoked.
+FILE makes it a collaborator of that document: bound to it and named after
+it (C65)."
   (interactive
    (list (+agent-shell--read-agent "Agent: ")))
   (+agent-shell--check-agent agent)
@@ -922,8 +924,13 @@ Local commands come first: they never reach the agent, so /resume, /restart or
                  (buffer (+agent-acp-start
                           :config config :directory directory :focus nil
                           :origin 'manual)))
-      (+agent-acp-adopt buffer :agent agent :origin 'manual
-                             :root noema-root)
+      (if file
+          (+agent-acp-adopt buffer :agent agent :origin 'manual :root noema-root :file file
+                            :name (+agent-acp--unique-name
+                                   (format "%s·%s" agent (file-name-base file))
+                                   (+agent-acp--workspace-root (or noema-root directory))))
+        (+agent-acp-adopt buffer :agent agent :origin 'manual
+                          :root noema-root))
       (+agent-view-embed buffer window)
       buffer)))
 
@@ -954,6 +961,32 @@ Local commands come first: they never reach the agent, so /resume, /restart or
     (use-local-map map)))
 
 (defun +agent-switcher-candidates ()
+  "Return (LABEL . CHOICE) for `+agent/switcher'.
+In a document, its collaborators come first, on screen or not, then a new
+collaborator of each agent for it (C65); the ordinary list follows without
+them.  A CHOICE is a buffer, (new . AGENT), (new AGENT . FILE) or `history'."
+  (let ((file (+agent-binding-canonical (+agent-document-file)))
+        (base (+agent-switcher--base-candidates)))
+    (if (not file)
+        base
+      (let* ((collaborators (+agent-binding-sessions file))
+             (buffers (mapcar (lambda (session) (plist-get session :buffer)) collaborators)))
+        (append
+         (mapcar (lambda (session)
+                   (cons (format "◆ %s · %s%s"
+                                 (or (plist-get session :name)
+                                     (buffer-name (plist-get session :buffer)))
+                                 (plist-get session :agent)
+                                 (if (plist-get session :busy) "  ● working" ""))
+                         (plist-get session :buffer)))
+                 collaborators)
+         (mapcar (lambda (agent)
+                   (cons (format "＋ New %s for %s" (car agent) (file-name-nondirectory file))
+                         (cons 'new (cons (car agent) file))))
+                 +agent-shell-agents)
+         (seq-remove (lambda (candidate) (memq (cdr candidate) buffers)) base))))))
+
+(defun +agent-switcher--base-candidates ()
   "Return (LABEL . CHOICE): sessions not on screen, newest first, then new ones.
 A CHOICE is a buffer, (new . AGENT) or `history'.  Background workers stay out,
 as they do from ordinary recall."
@@ -988,7 +1021,8 @@ as they do from ordinary recall."
 (defun +agent/switcher ()
   "Switch to an agent session or start one, choosing the window with Return.
 Return uses this window, Shift-Return splits right and Command-Return splits
-below.  Sessions already on screen are left out."
+below.  Sessions already on screen are left out, except a document's
+collaborators, which are reached where they are shown."
   (interactive)
   (let* ((candidates (+agent-switcher-candidates))
          (+agent-switcher--placement 'current)
@@ -999,22 +1033,31 @@ below.  Sessions already on screen are left out."
                                 candidates nil t))
                              candidates))))
     (unless choice (user-error "No agent selected"))
-    (if (eq choice 'history)
-        (call-interactively #'+agent/history)
+    (cond
+     ((eq choice 'history)
+      (call-interactively #'+agent/history))
+     ((and (bufferp choice) (get-buffer-window choice 'visible))
+      ;; A document's collaborator already on screen: go to it (C65).
+      (select-window (get-buffer-window choice 'visible))
+      (+agent-acp-touch choice)
+      (+agent-acp-clear-attention choice)
+      choice)
+     (t
       (let* ((origin (selected-window))
              (target (pcase +agent-switcher--placement
                        ('right (split-window origin nil 'right))
                        ('below (split-window origin nil 'below))
                        (_ origin))))
         (select-window target)
-        (if (bufferp choice)
-            (progn
-              (+agent-view-embed choice target)
-              (+agent-acp-touch choice)
-              (+agent-acp-clear-attention choice)
-              (+agent-render-flush choice)
-              choice)
-          (+agent-shell/here (cdr choice)))))))
+        (cond
+         ((bufferp choice)
+          (+agent-view-embed choice target)
+          (+agent-acp-touch choice)
+          (+agent-acp-clear-attention choice)
+          (+agent-render-flush choice)
+          choice)
+         ((consp (cdr choice)) (+agent-shell/here (cadr choice) (cddr choice)))
+         (t (+agent-shell/here (cdr choice)))))))))
 
 (defalias 'agent-switcher #'+agent/switcher
   "Choose an agent session or start one, like `terminal-switcher'.")

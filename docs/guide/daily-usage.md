@@ -187,7 +187,7 @@
 - `H-r` / `H-s` / `H-g`
   最近文件 / 当前 buffer 搜索 / 项目 ripgrep
 - `H-t`
-  Agent 选择器：切换会话、新建或打开历史
+  Agent 选择器：切换会话、新建或打开历史；在文档里先列这篇的协作者，可为这篇新建一个绑定它的 Agent
 - `H-p` / `H-P` / `H-R` / `H-T`
   项目菜单 / workspace 菜单 / run profile 菜单 / test 菜单
 - `H-m` / `H-a`
@@ -1794,7 +1794,7 @@ Emacs 通用 agent 层统一管理轻量模型交互与结构化 coding-agent �
 | 键 | 功能 |
 |----|------|
 | `H-A` / `SPC a a` / `C-c A RET` | Agent Manager 浮窗；再次调用隐藏返回 |
-| `H-t`（macOS `Option-T`，Noema 页面和 Portal 终端里也可用；`C-S-t` 保留为备用）/ `M-x agent-switcher` | 像 `Cmd-T` 选终端一样选 agent：列出不在屏幕上的会话、新建 Claude/Codex/OpenCode 和历史；`RET` 当前窗口，`S-RET` 右侧，`Cmd-RET` 下方 |
+| `H-t`（macOS `Option-T`，Noema 页面和 Portal 终端里也可用；`C-S-t` 保留为备用）/ `M-x agent-switcher` | 像 `Cmd-T` 选终端一样选 agent：列出不在屏幕上的会话、新建 Claude/Codex/OpenCode 和历史；`RET` 当前窗口，`S-RET` 右侧，`Cmd-RET` 下方。在文档（文件 buffer 或 Noema 页面）里，最前面是这篇的协作者（`◆`，在屏幕上的直接跳过去），然后是“＋ New … for 文件名”，新建的 Agent 绑定这篇 |
 | `C-c A W` | 打开当前项目 Pi |
 | `C-c A g` | 当前项目的 Agent cache：缓存、任务图谱、问题和日志（`noema-project-graph`） |
 | `C-c A M` | 发起数学探索：几个后台 Agent 各取一个方向攻同一问题，当前聊天当裁判；可给 Lean 冻结陈述，证明先经 Lean 判定（`noema-exploration-start`） |

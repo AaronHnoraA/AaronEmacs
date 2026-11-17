@@ -139,5 +139,80 @@ NATIVE-ID may be nil, for a session whose provider has not answered yet."
     (with-temp-file +agent-binding-store-file (insert "((unbalanced"))
     (should-not (+agent-binding-lookup "native-one"))))
 
+;;;; H-t in a document (C65)
+
+(defmacro agent-binding-tests--switcher (spec &rest body)
+  "Run BODY in a document buffer with SPEC (VAR :name NAME :file FILE) pool rows.
+Rows are live fake agent buffers; the current buffer visits /tmp/x/SAI.md."
+  (declare (indent 1))
+  `(let* (,@(mapcar (lambda (entry) `(,(car entry) (generate-new-buffer "*agent switcher fixture*"))) spec)
+          (rows (list ,@(mapcar (lambda (entry)
+                                  `(list :buffer ,(car entry) :agent "claude" :root "/tmp/"
+                                         :name ,(plist-get (cdr entry) :name)
+                                         :file (+agent-binding-canonical ,(plist-get (cdr entry) :file))
+                                         :last-used ,(or (plist-get (cdr entry) :last-used) 1)))
+                                spec)))
+          (document (generate-new-buffer "SAI.md")))
+     (unwind-protect
+         (cl-letf (((symbol-function '+agent-pool-sessions) (lambda (&rest _) rows))
+                   ((symbol-function '+agent-acp-project-root) (lambda (&rest _) "/tmp/")))
+           (with-current-buffer document
+             (setq buffer-file-name "/tmp/x/SAI.md")
+             ,@body))
+       (with-current-buffer document (set-buffer-modified-p nil) (setq buffer-file-name nil))
+       (kill-buffer document)
+       ,@(mapcar (lambda (entry) `(kill-buffer ,(car entry))) spec))))
+
+(ert-deftest agent-switcher-c65-document-lists-collaborators-first ()
+  (require 'tools/agent/config)
+  (agent-binding-tests--switcher ((mine :name "claude·SAI" :file "/tmp/x/SAI.md")
+                                  (other :name "codex·notes" :file "/tmp/x/notes.md" :last-used 9))
+    (let ((labels (mapcar #'car (+agent-switcher-candidates)))
+          (choices (mapcar #'cdr (+agent-switcher-candidates))))
+      (should (string-prefix-p "◆ claude·SAI · claude" (nth 0 labels)))
+      (should (eq (nth 0 choices) mine))
+      (should (equal (nth 1 labels) "＋ New claude for SAI.md"))
+      (should (equal (nth 1 choices) (cons 'new (cons 'claude (+agent-binding-canonical "/tmp/x/SAI.md")))))
+      (should (member other choices))
+      (should (= 1 (seq-count (lambda (choice) (eq choice mine)) choices)))
+      (should (eq (car (last choices)) 'history)))))
+
+(ert-deftest agent-switcher-c65-non-document-is-unchanged ()
+  (require 'tools/agent/config)
+  (agent-binding-tests--switcher ((mine :name "claude·SAI" :file "/tmp/x/SAI.md"))
+    (with-temp-buffer
+      (special-mode)
+      (should (equal (+agent-switcher-candidates) (+agent-switcher--base-candidates)))
+      (should-not (seq-find (lambda (label) (string-prefix-p "◆" label))
+                            (mapcar #'car (+agent-switcher-candidates)))))))
+
+(ert-deftest agent-switcher-c65-noema-pane-uses-noema-file ()
+  (require 'tools/agent/config)
+  (agent-binding-tests--switcher ((mine :name "claude·SAI" :file "/tmp/x/SAI.md"))
+    (with-temp-buffer
+      (let ((+agent-document-file-functions (list (lambda (_) "/tmp/x/SAI.md"))))
+        (should (eq (cdr (car (+agent-switcher-candidates))) mine))
+        (should (string-prefix-p "◆" (car (car (+agent-switcher-candidates)))))))))
+
+(ert-deftest agent-switcher-c65-new-for-file-binds-and-names ()
+  (require 'tools/agent/config)
+  (let ((agent-buffer (generate-new-buffer "*agent switcher new*"))
+        adopted)
+    (unwind-protect
+        (cl-letf (((symbol-function '+agent-shell--check-agent) #'ignore)
+                  ((symbol-function '+portal-popup--window) (lambda () nil))
+                  ((symbol-function '+agent-shell-launch-context) (lambda () (cons "/tmp/" "/tmp/")))
+                  ((symbol-function '+agent-acp-config-for) (lambda (_) '((:identifier . claude))))
+                  ((symbol-function '+agent-acp-start) (lambda (&rest _) agent-buffer))
+                  ((symbol-function '+agent-view-embed) #'ignore)
+                  ((symbol-function '+agent-acp--claimed-names) (lambda (_) '("claude·SAI")))
+                  ((symbol-function '+agent-acp-adopt) (lambda (&rest args) (setq adopted args))))
+          (+agent-shell/here 'claude "/tmp/x/SAI.md")
+          (should (equal (plist-get (cdr adopted) :file) "/tmp/x/SAI.md"))
+          (should (equal (plist-get (cdr adopted) :name) "claude·SAI-2"))
+          (+agent-shell/here 'claude)
+          (should-not (plist-get (cdr adopted) :file)))
+      (kill-buffer agent-buffer))))
+
 (provide 'agent-binding-tests)
 ;;; agent-binding-tests.el ends here

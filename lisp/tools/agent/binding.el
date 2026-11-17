@@ -18,9 +18,19 @@
 (require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
-(require 'tools/agent/acp)
 
+;; Loaded at startup by the agent module, so it must not load the runtime:
+;; every runtime call below runs only once an agent buffer exists.
+(defvar +agent-acp-session-file)
+(defvar +agent-acp-session-root)
+(defvar +agent-acp-session-name)
+(defvar +agent-acp--changes)
+(defvar +agent-acp-changed-functions)
 (declare-function remote-canonicalize-emacs-file-name "remote" (file))
+(declare-function +agent-acp-state-value "tools/agent/acp" (buffer path &optional default))
+(declare-function +agent-acp-agent-buffer-p "tools/agent/acp" (buffer))
+(declare-function +agent-acp--unique-name "tools/agent/acp" (base root))
+(declare-function +agent-pool-sessions "tools/agent/acp" (&optional root target kind))
 
 (defcustom +agent-binding-store-file (locate-user-emacs-file "var/agent/bindings.eld")
   "Where session bindings are kept by native session ID."
@@ -141,6 +151,7 @@ without takes the stored binding and name of a conversation it resumes."
 (defun +agent-binding-sessions (file &optional root)
   "Return the public sessions whose primary file is FILE, newest first.
 ROOT limits them to one project; background workers are left out."
+  (require 'tools/agent/acp)
   (let ((file (+agent-binding-canonical file)))
     (sort (seq-filter (lambda (session)
                         (and file (equal (plist-get session :file) file)
@@ -160,7 +171,8 @@ ROOT limits them to one project; background workers are left out."
   "Return the document file BUFFER shows, or nil when it shows none.
 Agent buffers and special-mode buffers are not documents."
   (let ((buffer (or buffer (current-buffer))))
-    (when (and (buffer-live-p buffer) (not (+agent-acp-agent-buffer-p buffer)))
+    (when (and (buffer-live-p buffer)
+               (not (and (fboundp '+agent-acp-agent-buffer-p) (+agent-acp-agent-buffer-p buffer))))
       (or (run-hook-with-args-until-success '+agent-document-file-functions buffer)
           (with-current-buffer buffer
             (and (not (derived-mode-p 'special-mode)) buffer-file-name))))))

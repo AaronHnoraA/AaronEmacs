@@ -35,7 +35,7 @@ Research 的逻辑 Session 和 Run ID 不可互换。关闭视图只改变显示
 | 新建 | `agent-shell` | 总是在当前窗口新建，不是开关 |
 | 选择 | `C-u C-u agent-shell`、`C-u C-c a` | 选池成员、新建或已保存对话 |
 | 召回 | `C-c a` | 回到本项目最近的会话；空池时选择新建或恢复 |
-| 切换 | `H-t`（macOS `Option-T`，Noema 页面和 Portal 终端里也可用；`C-S-t` 保留为备用） | 像 `Cmd-T` 选终端：不在屏幕上的会话、新建或历史，`RET`/`S-RET`/`Cmd-RET` 选窗口 |
+| 切换 | `H-t`（macOS `Option-T`，Noema 页面和 Portal 终端里也可用；`C-S-t` 保留为备用） | 像 `Cmd-T` 选终端：不在屏幕上的会话、新建或历史，`RET`/`S-RET`/`Cmd-RET` 选窗口；在文档里先列这篇的协作者，可为这篇新建（C65） |
 | 返回 | 在聊天里 `C-c a` | 收起聊天，回到来源窗口；agent 继续工作 |
 
 进入聊天之后，所有操作都在 agent-shell 自己的工作方式里：
@@ -504,6 +504,18 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   的配置 steer 或排队；只有 Research Run（会话来源 `run`）的输入在 RunSpec 冻结，一律排队。
   输入提示说出真实路径：冻结时显示 `Cmd-RET queue (this turn's input is frozen)`，不会写 steer
   却排队。被拒的 steer 仍按 C37 放回挂起队列首位。测试：`agent-input-c64-*`。
+- **C65 文档协作者绑定。** 协作者就是池里的会话，不另起注册表。会话多一项永久 buffer-local
+  事实 `+agent-acp-session-file`：一个主文件（框架身份 `/fs:TARGET:/path`），nil 表示绑定在项目层；
+  快照的 `:file` 读出它。Agent 实际运行时仍可读写任何文件，主文件之外改过的文件取自 C44 的
+  改动记录（`+agent-binding-touched`），不另外采集。绑定按原生 Session ID 存在
+  `var/agent/bindings.eld`（有上限），原生 ID 到达时写入；恢复同一对话、会话还没有绑定时取回
+  主文件和名字，已有的绑定不被覆盖。`H-t` 在文档里（`+agent-document-file`：普通文件 buffer，
+  或经 `+agent-document-file-functions` 注册的界面，例如 Noema 页面）先列这篇的协作者（在屏幕上的
+  直接跳过去），再给每种 Agent 一项“为这篇新建”，新建的会话绑定这篇并以 `agent·文件名` 命名；
+  其余会话随后，非文档 buffer 里列表不变。Pi 经 `emacs:agent` 的 `bind`（核对 buffer 与原生 ID）
+  改绑，`list` 接受 `file`，`create`/`spawn` 接受 `file`。只改 Emacs 侧的信息流转，不改 Agent
+  自身逻辑。整体设计见文档协作工作稿（迁入 `docs/design/` 前在仓库外）。测试：`agent-binding-*`、
+  `agent-api-bind-*`、`agent-api-create-with-file-*`、`agent-switcher-c65-*`。
 
 ## 实现位置
 

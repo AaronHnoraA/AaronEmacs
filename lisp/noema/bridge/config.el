@@ -2246,6 +2246,10 @@ When BUFFER is nil, inspect the current buffer."
            (not (string-empty-p +noema-buffer-file-name))
            +noema-buffer-file-name))))
 
+;; A Noema page is a document for the agent layer: `H-t' on it lists and
+;; creates that note's collaborators (C65).
+(add-hook '+agent-document-file-functions #'+noema-buffer-file)
+
 (defun +noema--buffer-display-name (&optional file)
   "Return the preferred Noema buffer display name for FILE."
   (if-let* ((file (+noema--canonical-file file)))
