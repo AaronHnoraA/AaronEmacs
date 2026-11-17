@@ -1,6 +1,8 @@
 ;;; agent-binding-tests.el --- Document collaborator bindings (C65) -*- lexical-binding: t; -*-
 (require 'ert)
 (require 'cl-lib)
+(require 'tools/agent/acp)
+(require 'tools/agent/sessions)
 (require 'tools/agent/binding)
 
 (defmacro agent-binding-tests--with-store (&rest body)
@@ -77,9 +79,31 @@ NATIVE-ID may be nil, for a session whose provider has not answered yet."
       (+agent-binding--restore-h resumed)
       (should-not (+agent-binding-file resumed))
       (set-native-id resumed "native-one")
-      (+agent-binding--restore-h resumed)
+      (let (renamed)
+        ;; The name comes back through the ordinary rename, so the buffer name
+        ;; and any domain registration follow it.
+        (cl-letf (((symbol-function '+agent-acp--unique-name) (lambda (base _root) base))
+                  ((symbol-function '+agent-session-rename)
+                   (lambda (buffer name)
+                     (setq renamed (list buffer name))
+                     (with-current-buffer buffer (setq-local +agent-acp-session-name name)))))
+          (+agent-binding--restore-h resumed))
+        (should (equal renamed (list resumed "claude·SAI"))))
       (should (equal (+agent-binding-file resumed) (+agent-binding-canonical "/tmp/x/SAI.md")))
       (should (equal (buffer-local-value '+agent-acp-session-name resumed) "claude·SAI")))))
+
+(ert-deftest agent-binding-restore-survives-a-refused-rename ()
+  (agent-binding-tests--with-store
+    (agent-binding-tests--session ((old "native-one") (resumed nil))
+      (with-current-buffer old (setq-local +agent-acp-session-name "claude·SAI"))
+      (+agent-binding-set old "/tmp/x/SAI.md")
+      (kill-buffer old)
+      (set-native-id resumed "native-one")
+      (cl-letf (((symbol-function '+agent-acp--unique-name) (lambda (base _root) base))
+                ((symbol-function '+agent-session-rename)
+                 (lambda (&rest _) (user-error "Session name already exists"))))
+        (+agent-binding--restore-h resumed))
+      (should (equal (+agent-binding-file resumed) (+agent-binding-canonical "/tmp/x/SAI.md"))))))
 
 (ert-deftest agent-binding-restore-keeps-an-explicit-binding ()
   (agent-binding-tests--with-store

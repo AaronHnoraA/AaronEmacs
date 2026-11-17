@@ -31,6 +31,7 @@
 (declare-function +agent-acp-agent-buffer-p "tools/agent/acp" (buffer))
 (declare-function +agent-acp--unique-name "tools/agent/acp" (base root))
 (declare-function +agent-pool-sessions "tools/agent/acp" (&optional root target kind))
+(declare-function +agent-session-rename "tools/agent/sessions" (&optional buffer name))
 
 (defcustom +agent-binding-store-file (locate-user-emacs-file "var/agent/bindings.eld")
   "Where session bindings are kept by native session ID."
@@ -92,6 +93,7 @@ the agent layer never depends on it.")
 
 (defun +agent-binding--save (buffer)
   "Store BUFFER's binding when its native ID is known."
+  (require 'tools/agent/acp)
   (when-let* ((id (+agent-binding--native-id buffer)))
     (with-current-buffer buffer
       (+agent-binding--write
@@ -111,11 +113,12 @@ the agent layer never depends on it.")
 
 (defun +agent-binding-file (buffer)
   "Return BUFFER's primary file, or nil at project level."
-  (and (buffer-live-p buffer) (buffer-local-value '+agent-acp-session-file buffer)))
+  (and (buffer-live-p buffer) (featurep 'tools/agent/acp) (buffer-local-value '+agent-acp-session-file buffer)))
 
 (defun +agent-binding-set (buffer file)
   "Bind session BUFFER to FILE, or to its project level when FILE is nil.
 Return the stored file identity."
+  (require 'tools/agent/acp)
   (let ((file (+agent-binding-canonical file)))
     (with-current-buffer buffer
       (setq-local +agent-acp-session-file file)
@@ -138,10 +141,16 @@ without takes the stored binding and name of a conversation it resumes."
         (when-let* ((entry (+agent-binding-lookup id)))
           (setq-local +agent-acp-session-file (plist-get entry :file)
                       +agent-binding--settled t)
-          (when-let* ((name (plist-get entry :name)))
-            (unless (equal name +agent-acp-session-name)
-              (setq-local +agent-acp-session-name
-                          (+agent-acp--unique-name name +agent-acp-session-root))))
+          (when-let* ((name (plist-get entry :name))
+                      ((not (equal name +agent-acp-session-name))))
+            ;; The ordinary rename, so the buffer name and any domain
+            ;; registration follow.  This runs from a state event: a refused
+            ;; name is reported, never raised.
+            (condition-case err
+                (progn (require 'tools/agent/sessions)
+                       (+agent-session-rename buffer (+agent-acp--unique-name name +agent-acp-session-root)))
+              (error (message "Agent binding: kept the session name (%s)"
+                              (error-message-string err)))))
           (+agent-binding--save buffer))))))
 
 (add-hook '+agent-acp-changed-functions #'+agent-binding--restore-h)
@@ -161,6 +170,7 @@ ROOT limits them to one project; background workers are left out."
 
 (defun +agent-binding-touched (buffer)
   "Return the files BUFFER's session changed besides its primary file, newest first."
+  (require 'tools/agent/acp)
   (let ((primary (+agent-binding-file buffer)))
     (delete-dups
      (seq-remove (lambda (file) (or (null file) (equal file primary)))
