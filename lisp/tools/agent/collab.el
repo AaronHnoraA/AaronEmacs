@@ -37,10 +37,6 @@
 (defvar +agent-collab-changed-functions nil
   "Functions called with a document FILE after its threads or suggestions changed.")
 
-(defconst +agent-collab-thread-prompt
-  "%s\n\n(A comment on %s line %d about «%s».  Your answer becomes the reply in that comment; a change to the document goes through agent:document:propose.)"
-  "How a thread question reaches its collaborator: question, file, line, anchor.")
-
 ;;;; Store
 
 (defun +agent-collab-root (file)
@@ -258,109 +254,64 @@
   (+agent-collab--append file `((op . ,(if resolved "resolve" "reopen")) (id . ,id)
                                 (author . ((name . "You") (kind . "person"))))))
 
-;;;; Turns
-
-(defvar-local +agent-collab--current nil
-  "(FILE . ID) of the thread whose turn this collaborator is taking.")
-(defvar-local +agent-collab--waiting nil
-  "Thread turns waiting for this collaborator, oldest first, as (FILE ID SEND).
-SEND is a function that delivers the turn.")
-
-(defun +agent-collab--idle-p (buffer)
-  "Whether session BUFFER can take a new turn now."
-  (and (eq (+agent-acp-state-value buffer '(:init-finished)) t)
-       (not (+agent-acp-busy-p buffer))
-       (zerop (+agent-acp-pending-prompt-count buffer))))
+;;;; Dispatch (C73)
+;;
+;; A comment is a task.  Handing it to an agent sends one prompt and nothing
+;; more: the agent works through Noema's API (it edits or proposes, replies in
+;; the comment, resolves it) and Emacs does not collect what it says in its
+;; chat.  The person reads that chat when they want to.  agent-shell's own
+;; queue holds a prompt for a busy session.
 
 (defvar +agent-collab-session-instructions-function nil
   "Function returning (KEY . TEXT): the tools guide a collaborator gets once per
 native session, so it knows how to comment and propose (C71).  Noema sets it.")
 
+(defconst +agent-collab-task-prompt
+  "%s\n\n(Task from comment %s on %s line %d about «%s».  Do it through Noema's API: change the document with agent:document:edit or agent:document:propose, reply in the comment with agent:document:comment {\"file\",\"id\",\"text\"}, and add \"resolve\":true when it is done.  Your chat answer is not collected.)"
+  "How a task reaches its agent: request, thread id, file, line, quote.")
+
 (defun +agent-collab--deliver (buffer prompt)
   "Send PROMPT to session BUFFER without taking the keyboard.
-The first thread turn of a native session carries the tools guide."
+The first task of a native session carries the tools guide."
   (require 'tools/agent/context)
   (+agent-context--deliver buffer (+agent-context-content-blocks prompt nil)
                            (and +agent-collab-session-instructions-function
                                 (ignore-errors (funcall +agent-collab-session-instructions-function)))
                            t
-                           (lambda () (+agent-collab--turn-failed buffer))))
+                           (lambda ()
+                             (message "%s refused the task: %s"
+                                      (buffer-local-value '+agent-acp-session-name buffer)
+                                      (or (buffer-local-value '+agent-acp-last-error buffer) "see its chat")))))
 
-(defun +agent-collab--turn-failed (buffer)
-  "Record that BUFFER's thread turn could not run, and go on to the next.
-Without this a refused prompt would hold the thread and every one behind it."
-  (when (buffer-live-p buffer)
-    (let ((current (buffer-local-value '+agent-collab--current buffer))
-          (reason (buffer-local-value '+agent-acp-last-error buffer)))
-      (when current
-        (with-current-buffer buffer
-          (setq +agent-collab--current nil))
-        (+agent-collab--defer
-         (lambda ()
-           (+agent-collab--add-message (car current) (cdr current) buffer
-                                       (format "(The request failed%s.)"
-                                               (if reason (format ": %s" reason) "")))
-           (when (buffer-live-p buffer) (+agent-collab--pump buffer))))))))
+(defun +agent-collab--task-prompt (thread)
+  "Return the prompt handing THREAD to an agent."
+  (format +agent-collab-task-prompt
+          (alist-get 'text (car (last (alist-get 'messages thread))))
+          (alist-get 'id thread) (alist-get 'file thread)
+          (or (+agent-collab--thread-line thread) 0)
+          (truncate-string-to-width (or (alist-get 'quote thread) "") 200 nil nil "…")))
 
-(defun +agent-collab--last-reply (buffer)
-  "Return the reply of BUFFER's thread turn, from the ACP stream, or nil."
-  (+agent-acp-turn-reply buffer))
-
-(defun +agent-collab--defer (function)
-  "Run FUNCTION outside the ACP event callback."
-  (run-at-time 0 nil function))
-
-(defun +agent-collab--pump (buffer)
-  "Start BUFFER's next waiting thread turn when it is free."
-  (with-current-buffer buffer
-    (when (and (not +agent-collab--current) +agent-collab--waiting (+agent-collab--idle-p buffer))
-      (pcase-let ((`(,file ,id ,send) (pop +agent-collab--waiting)))
-        (setq +agent-collab--current (cons file id))
-        (funcall send)))))
-
-(defun +agent-collab--submit (buffer file id send)
-  "Queue FILE's thread ID for collaborator BUFFER; SEND delivers its turn."
-  (with-current-buffer buffer
-    (setq +agent-collab--waiting (append +agent-collab--waiting (list (list file id send)))))
-  (+agent-collab--pump buffer))
-
-(defun +agent-collab--turn-complete-h (buffer _event)
-  "Put the reply of BUFFER's finished thread turn in its thread, then go on."
-  (when (buffer-live-p buffer)
-    (let ((current (buffer-local-value '+agent-collab--current buffer)))
-      (with-current-buffer buffer (setq +agent-collab--current nil))
-      (if (not current)
-          (+agent-collab--pump buffer)
-        (let ((ended (equal (buffer-local-value '+agent-acp--stop-reason buffer) "end_turn")))
-          (+agent-collab--defer
-           (lambda ()
-             (when (buffer-live-p buffer)
-               (let ((reply (+agent-collab--last-reply buffer)))
-                 ;; Only a finished turn with words in it answered the thread.
-                 (+agent-collab--add-message
-                  (car current) (cdr current) buffer
-                  (if (and ended reply) reply
-                    (or reply (format "(No reply%s.)"
-                                      (if-let* ((reason (buffer-local-value '+agent-acp-last-error buffer)))
-                                          (format ": %s" reason) ""))))))
-               (+agent-collab--pump buffer)))))))))
-
-(add-hook '+agent-acp-turn-complete-functions #'+agent-collab--turn-complete-h)
+(defun +agent-collab-dispatch (file id session)
+  "Hand FILE's thread ID to SESSION as a task: assign it and send the request."
+  (when-let* ((thread (+agent-collab-thread file id)))
+    (unless (equal (alist-get 'session (alist-get 'assignee thread))
+                   (+agent-acp-session-token session))
+      (+agent-collab--assign file id session))
+    (+agent-collab--deliver session (+agent-collab--task-prompt thread))
+    (message "Handed to %s" (buffer-local-value '+agent-acp-session-name session))))
 
 (cl-defun +agent-collab-thread-deliver (&key file line anchor session text send)
-  "Open a thread on FILE at LINE about ANCHOR, asked of SESSION with TEXT.
-SEND delivers the turn when SESSION is free; its reply comes back to the thread."
+  "Open a task on FILE at LINE about ANCHOR for SESSION with TEXT; SEND delivers it."
   (let ((thread (+agent-collab-thread-create :file file :line line :anchor anchor
                                              :session session :text text)))
-    (+agent-collab--submit session file (alist-get 'id thread) send)
+    (funcall send)
     thread))
 
 (cl-defun +agent-collab-ask-region (&key file line anchor session text)
-  "Ask SESSION TEXT about ANCHOR at LINE of FILE in a new thread, and return it."
-  (let ((prompt (format +agent-collab-thread-prompt text (expand-file-name file) line
-                        (truncate-string-to-width (or anchor "") 200 nil nil "…"))))
-    (+agent-collab-thread-deliver :file file :line line :anchor anchor :session session :text text
-                                  :send (lambda () (+agent-collab--deliver session prompt)))))
+  "Open a task TEXT about ANCHOR at LINE of FILE and hand it to SESSION."
+  (let ((thread (+agent-collab-thread-create :file file :line line :anchor anchor :text text)))
+    (+agent-collab-dispatch file (alist-get 'id thread) session)
+    (+agent-collab-thread file (alist-get 'id thread))))
 
 ;;;; Commands
 
@@ -508,12 +459,6 @@ With NOERROR return nil instead."
       (+agent-collab--live-collaborator (alist-get 'file thread))
       (unless noerror (user-error "No live collaborator for this thread"))))
 
-(defun +agent-collab--thread-prompt (thread text)
-  "Return the prompt asking THREAD's question TEXT."
-  (format +agent-collab-thread-prompt text (alist-get 'file thread)
-          (or (+agent-collab--thread-line thread) 0)
-          (truncate-string-to-width (or (alist-get 'quote thread) "") 200 nil nil "…")))
-
 (defun +agent-collab--named-session (to)
   "Return the live session TO names by buffer and native ID, or nil."
   (when-let* ((buffer (get-buffer (or (alist-get 'buffer to) "")))
@@ -533,12 +478,7 @@ Without a live collaborator the comment simply stays for the person."
                                (progn (message "The mentioned collaborator is no longer there") nil))
                          (+agent-collab--thread-session thread t))))
         (progn
-          (unless (equal (alist-get 'session (alist-get 'assignee thread))
-                         (+agent-acp-session-token session))
-            (+agent-collab--assign file id session))
-          (let ((prompt (+agent-collab--thread-prompt
-                         thread (alist-get 'text (car (last (alist-get 'messages thread)))))))
-            (+agent-collab--submit session file id (lambda () (+agent-collab--deliver session prompt)))))
+          (+agent-collab-dispatch file id session))
       (unless to
         (message "No collaborator works on %s; the comment stays for you"
                  (file-name-nondirectory file))))))

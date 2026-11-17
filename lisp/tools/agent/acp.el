@@ -1521,38 +1521,11 @@ A tool call is reported many times; only a finished one changed anything."
 (defvar-local +agent-acp--exit-interrupted nil
   "Non-nil when the client exited with a turn open, so its outcome is unknown.")
 
-(defvar-local +agent-acp--turn-reply nil
-  "The agent's last message of the current or last turn, as ACP streamed it.")
-(defvar-local +agent-acp--turn-reply-broken nil
-  "Non-nil when a tool call ended the message being collected.")
-
 (defun +agent-acp--turn-began ()
   "Record that a turn is running in the current buffer."
   (unless +agent-acp--turn-started-at
-    (setq +agent-acp--turn-started-at (float-time))
-    (setq +agent-acp--turn-reply nil +agent-acp--turn-reply-broken nil))
+    (setq +agent-acp--turn-started-at (float-time)))
   (setq +agent-acp--stop-reason nil))
-
-(defun +agent-acp--note-message-chunk (buffer text)
-  "Add streamed agent message TEXT to BUFFER's turn reply.
-A chunk after a tool call starts a new message: the reply is the last one."
-  (when (and (buffer-live-p buffer) (stringp text))
-    (with-current-buffer buffer
-      (when +agent-acp--turn-reply-broken
-        (setq +agent-acp--turn-reply nil +agent-acp--turn-reply-broken nil))
-      (setq +agent-acp--turn-reply (concat +agent-acp--turn-reply text)))))
-
-(defun +agent-acp--note-message-break (buffer)
-  "Record that a tool call ended BUFFER's current agent message."
-  (when (and (buffer-live-p buffer) (buffer-local-value '+agent-acp--turn-reply buffer))
-    (with-current-buffer buffer (setq +agent-acp--turn-reply-broken t))))
-
-(defun +agent-acp-turn-reply (buffer)
-  "Return the agent's last message of BUFFER's current or last turn, or nil.
-It comes from the ACP stream, not from the rendered chat (C67)."
-  (when (buffer-live-p buffer)
-    (let ((text (buffer-local-value '+agent-acp--turn-reply buffer)))
-      (and (stringp text) (not (string-empty-p (string-trim text))) (string-trim text)))))
 
 (defun +agent-acp--turn-ended (reason)
   "Record that the current buffer's turn ended with stop REASON."
@@ -1597,13 +1570,8 @@ It comes from the ACP stream, not from the rendered chat (C67)."
                      (setq +agent-acp-last-error nil))
                    (+agent-acp-clear-attention buffer))))
     (+agent-acp-subscribe
-     :buffer buffer :event 'agent-message-chunk
-     :callback (lambda (event)
-                 (+agent-acp--note-message-chunk buffer (map-elt (map-elt event :data) :text-chunk))))
-    (+agent-acp-subscribe
      :buffer buffer :event 'tool-call-update
      :callback (lambda (event)
-                 (+agent-acp--note-message-break buffer)
                  (let ((data (map-elt event :data)))
                    (+agent-acp--note-tool-change (map-elt data :tool-call-id)
                                                  (map-elt data :tool-call)))))

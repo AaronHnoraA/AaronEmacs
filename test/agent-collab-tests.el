@@ -95,7 +95,7 @@
       (+agent-collab--set-resolved file "c-1111" t)
       (should (equal (alist-get 'state (+agent-collab-thread file "c-1111")) "resolved")))))
 
-(ert-deftest agent-collab-c70-a-page-comment-is-asked-of-the-collaborator ()
+(ert-deftest agent-collab-c73-a-dispatched-comment-is-sent-to-its-agent ()
   (agent-collab-tests--project root
     (agent-collab-tests--agent-buffer agent
       (let ((file (expand-file-name "src/SAI.md" root)) delivered notified)
@@ -110,8 +110,7 @@
         (should (string-match-p "Why alpha?" (car delivered)))
         (should (string-match-p "line 3 about «alpha»" (car delivered)))
         (should (equal (alist-get 'name (alist-get 'assignee (+agent-collab-thread file "c-1111"))) "claude·SAI"))
-        (should notified)
-        (should (equal (buffer-local-value '+agent-collab--current agent) (cons file "c-1111")))))))
+        (should notified)))))
 
 (ert-deftest agent-collab-c70-a-comment-without-a-collaborator-stays ()
   (agent-collab-tests--project root
@@ -121,57 +120,6 @@
       (cl-letf (((symbol-function '+agent-collab--live-collaborator) (lambda (_) nil)))
         (+agent-collab-ask-thread file "c-1111"))
       (should (equal (alist-get 'state (+agent-collab-thread file "c-1111")) "open")))))
-
-(ert-deftest agent-collab-c67-a-busy-collaborator-gets-thread-turns-one-at-a-time ()
-  (agent-collab-tests--project root
-    (agent-collab-tests--agent-buffer agent
-      (let* ((file (expand-file-name "src/SAI.md" root))
-             (busy t) delivered)
-        (cl-letf (((symbol-function '+agent-collab--idle-p) (lambda (_) (not busy)))
-                  ((symbol-function '+agent-collab--deliver)
-                   (lambda (_buffer prompt) (push prompt delivered))))
-          (+agent-collab-ask-region :file file :line 3 :anchor "alpha" :session agent :text "first")
-          (+agent-collab-ask-region :file file :line 4 :anchor "beta" :session agent :text "second")
-          (should-not delivered)
-          (setq busy nil)
-          (+agent-collab--turn-complete-h agent nil)
-          (should (= (length delivered) 1))
-          (should (string-match-p "first" (car delivered)))
-          (should (string-match-p "line 3" (car delivered))))))))
-
-(ert-deftest agent-collab-c67-turn-reply-lands-in-its-thread ()
-  (agent-collab-tests--project root
-    (agent-collab-tests--agent-buffer agent
-      (let* ((file (expand-file-name "src/SAI.md" root)) delivered)
-        (cl-letf (((symbol-function '+agent-collab--idle-p) (lambda (_) (null delivered)))
-                  ((symbol-function '+agent-collab--deliver) (lambda (_b prompt) (push prompt delivered)))
-                  ((symbol-function '+agent-collab--last-reply) (lambda (_) "Because of the gadget."))
-                  ((symbol-function '+agent-collab--defer) (lambda (function) (funcall function))))
-          (let ((thread (+agent-collab-ask-region :file file :line 3 :anchor "alpha"
-                                                  :session agent :text "Why alpha?")))
-            (should (= (length delivered) 1))
-            (with-current-buffer agent (setq-local +agent-acp--stop-reason "end_turn"))
-            (+agent-collab--turn-complete-h agent nil)
-            (let ((stored (+agent-collab-thread (expand-file-name "src/SAI.md" root) (alist-get 'id thread))))
-              (should (equal (alist-get 'state stored) "replied"))
-              (should (equal (alist-get 'text (car (last (alist-get 'messages stored))))
-                             "Because of the gadget.")))
-            ;; A turn the person typed into the chat is not a thread's.
-            (+agent-collab--turn-complete-h agent nil)
-            (should (= 2 (length (alist-get 'messages (+agent-collab-thread (expand-file-name "src/SAI.md" root) (alist-get 'id thread))))))))))))
-
-(ert-deftest agent-collab-c67-a-stopped-turn-marks-its-thread ()
-  (agent-collab-tests--project root
-    (agent-collab-tests--agent-buffer agent
-      (cl-letf (((symbol-function '+agent-collab--idle-p) (lambda (_) t))
-                ((symbol-function '+agent-collab--deliver) #'ignore)
-                ((symbol-function '+agent-collab--last-reply) (lambda (_) nil))
-                ((symbol-function '+agent-collab--defer) (lambda (function) (funcall function))))
-        (let ((thread (+agent-collab-ask-region :file (expand-file-name "src/SAI.md" root) :line 3
-                                                :anchor "alpha" :session agent :text "q")))
-          (with-current-buffer agent (setq-local +agent-acp--stop-reason "cancelled"))
-          (+agent-collab--turn-complete-h agent nil)
-          (should (equal (alist-get 'state (+agent-collab-thread (expand-file-name "src/SAI.md" root) (alist-get 'id thread))) "stopped")))))))
 
 (ert-deftest agent-collab-c67-context-sends-default-to-the-document-collaborator ()
   (require 'tools/agent/context)
@@ -288,13 +236,11 @@
   (agent-collab-tests--project root
     (agent-collab-tests--agent-buffer agent
       (let ((file (expand-file-name "src/SAI.md" root)) sent)
-        (cl-letf (((symbol-function '+agent-collab--idle-p) (lambda (_) t)))
-          (+agent-collab-thread-deliver :file file :line 3 :anchor "alpha" :session agent :text "Why?"
-                                        :send (lambda () (setq sent t))))
+        (+agent-collab-thread-deliver :file file :line 3 :anchor "alpha" :session agent :text "Why?"
+                                      :send (lambda () (setq sent t)))
+        ;; Sent at once: agent-shell queues it for a busy session (C73).
         (should sent)
-        (should (equal (alist-get 'state (car (+agent-collab-threads file))) "waiting"))
-        (should (equal (buffer-local-value '+agent-collab--current agent)
-                       (cons file (alist-get 'id (car (+agent-collab-threads file))))))))))
+        (should (equal (alist-get 'state (car (+agent-collab-threads file))) "waiting"))))))
 
 (ert-deftest agent-collab-c67-a-collaborator-chat-means-its-primary-file ()
   (agent-collab-tests--agent-buffer agent
@@ -304,52 +250,6 @@
         (should (equal (+agent-collab--document) "/tmp/x/SAI.md"))
         (setq-local +agent-acp-session-file nil)
         (should-error (+agent-collab--document) :type 'user-error)))))
-
-(ert-deftest agent-collab-c67-a-failed-request-frees-the-collaborator ()
-  (agent-collab-tests--project root
-    (agent-collab-tests--agent-buffer agent
-      (let ((file (expand-file-name "src/SAI.md" root)) sends)
-        (cl-letf (((symbol-function '+agent-collab--idle-p) (lambda (_) t))
-                  ((symbol-function '+agent-collab--defer) (lambda (function) (funcall function))))
-          (let* ((first (+agent-collab-thread-deliver :file file :line 3 :anchor "a" :session agent :text "one"
-                                                      :send (lambda () (push 'one sends))))
-                 (_second (+agent-collab-thread-deliver :file file :line 4 :anchor "b" :session agent :text "two"
-                                                        :send (lambda () (push 'two sends)))))
-            (with-current-buffer agent (setq-local +agent-acp-last-error "usage limit"))
-            (+agent-collab--turn-failed agent)
-            (let ((stored (+agent-collab-thread file (alist-get 'id first))))
-              (should (equal (alist-get 'state stored) "stopped"))
-              (should (string-match-p "usage limit" (alist-get 'text (car (last (alist-get 'messages stored)))))))
-            ;; The next thread is not stuck behind it.
-            (should (equal sends '(two one)))))))))
-
-(ert-deftest agent-collab-c67-an-empty-reply-is-not-a-reply ()
-  (agent-collab-tests--project root
-    (agent-collab-tests--agent-buffer agent
-      (cl-letf (((symbol-function '+agent-collab--idle-p) (lambda (_) t))
-                ((symbol-function '+agent-collab--deliver) #'ignore)
-                ((symbol-function '+agent-collab--last-reply) (lambda (_) nil))
-                ((symbol-function '+agent-collab--defer) (lambda (function) (funcall function))))
-        (let ((thread (+agent-collab-ask-region :file (expand-file-name "src/SAI.md" root) :line 3
-                                                :anchor "alpha" :session agent :text "q")))
-          (with-current-buffer agent (setq-local +agent-acp--stop-reason "end_turn"))
-          (+agent-collab--turn-complete-h agent nil)
-          (should (equal (alist-get 'state (+agent-collab-thread (expand-file-name "src/SAI.md" root) (alist-get 'id thread))) "stopped")))))))
-
-(ert-deftest agent-collab-c67-the-turn-reply-comes-from-the-protocol ()
-  "The reply is the agent's last message of the turn, as ACP streamed it."
-  (agent-collab-tests--agent-buffer agent
-    (with-current-buffer agent (+agent-acp--turn-began))
-    (should-not (+agent-acp-turn-reply agent))
-    (+agent-acp--note-message-chunk agent "Let me look")
-    (+agent-acp--note-message-break agent)
-    (+agent-acp--note-message-chunk agent "The answer ")
-    (+agent-acp--note-message-chunk agent "is 42.\n")
-    (should (equal (+agent-acp-turn-reply agent) "The answer is 42."))
-    (should (equal (+agent-collab--last-reply agent) "The answer is 42."))
-    ;; A new turn starts empty: an old reply is never a new turn's.
-    (with-current-buffer agent (setq +agent-acp--turn-started-at nil) (+agent-acp--turn-began))
-    (should-not (+agent-acp-turn-reply agent))))
 
 (ert-deftest agent-collab-c71-a-mentioned-collaborator-answers ()
   (agent-collab-tests--project root
@@ -370,7 +270,7 @@
           (+agent-collab-ask-thread file "c-1111" `((buffer . ,(buffer-name agent)) (nativeSessionId . "old")))
           (should-not asked))))))
 
-(ert-deftest agent-collab-c71-a-thread-turn-carries-the-tools-guide ()
+(ert-deftest agent-collab-c73-a-task-carries-the-tools-guide ()
   (agent-collab-tests--agent-buffer agent
     (let (delivered)
       (cl-letf (((symbol-function '+agent-context--deliver)

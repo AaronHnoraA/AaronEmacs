@@ -54,17 +54,22 @@ contract; the code is `shared/comment-anchors.mjs`,
 - With comments the note narrows to give the rail its column. The paragraph
   layout re-measures for the new width.
 
-## The collaborator answers
+## Comments are tasks (C73)
 
-A person's comment or reply is handed by the host to Emacs (`noema.event`
-`comment-asked`), unless the API call carries `ask: false`. Emacs asks the
-thread's assignee, or else the note's most recent live collaborator. It
-records it as assignee (`assign`) and sends the question with the quote, the
-file and the line through the collaborator's thread turn queue (C67). The
-reply of that turn, read from the ACP stream (`+agent-acp-turn-reply`), is
-appended to the thread as the agent's message. Without a live collaborator,
-the comment stays for the person. The agent's own logic does not change: it
-only receives a prompt and answers.
+A comment is a task. Every write tells open pages and Emacs. Emacs's task
+panel (`H-t`) collects the comments of the current file, folder, folder tree
+or Project, and is where a comment is handed to an agent. The page shows no
+agents: no header chips, no @-mentions and no "replying" state. A card shows
+only its authors' names.
+
+Handing a task to an agent sends one prompt: the request, the thread id, the
+file, the line and the quote. The first task of a native session also carries
+Noema's tools guide. The agent then works through the API. It changes the
+document with `agent:document:edit` or `propose`, replies in the thread with
+`agent:document:comment` `{file, id, text}`, and adds `resolve: true` when the
+task is done. It can also open a comment of its own on the text it names.
+Emacs collects nothing from the agent's chat. The person reads the chat when
+they want to. agent-shell's own queue holds a prompt for a busy session.
 
 ## Tests
 
@@ -75,8 +80,5 @@ on click, a new comment wraps the selection, the text clear of the rail).
 
 ## Not yet
 
-- @-mentioning a particular collaborator (the assignee is the note's
-  collaborator).
 - Inline suggestions in the Google style. Proposals remain `ediff` cards.
-- Collaborator chips in the page header.
 - Comments in plain Emacs buffers are threads without an in-text anchor.

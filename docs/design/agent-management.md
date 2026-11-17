@@ -530,11 +530,7 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   在文件 buffer 里以选区或当前行提问；Noema 页面的“发给 Agent”经 `+agent-context--send` 的
   `:deliver` 同样成为线程。默认收件人是这篇文档的协作者（`+agent-context--session` 预选它，
   否则仍是本项目上次的会话）。一个协作者一次只接一条线程：它忙时下一条在 Emacs 侧等待，
-  空闲才送出，所以回合结束（`+agent-acp-turn-complete-functions`）时把这一回合的回复放回发起它的
-  线程。回复取自协议层：`acp.el` 从 agent-shell 的 `agent-message-chunk` 事件按回合累积 Agent 的
-  最后一段消息（工具调用之后另起一段，新回合清空），`+agent-acp-turn-reply` 读出，不从渲染后的
-  聊天抠文本。`end_turn` 且有回复记为 replied，否则 stopped；提示被拒（`+agent-context--deliver`
-  的失败回调）记为 failed 并放行下一条；人在聊天里自己输入的回合不归任何线程。
+  线程交给 Agent 时只发一条提示，回复不收集（C73）；Agent 经 API 回复、修改并结案。
   `C-c A k` 列出线程：`RET` 回到锚点，`v` 读全文，`r` 追问同一协作者，`c` 结案，`o` 进入
   agent-shell 深谈。非 Markdown 文件的修订（C66）由 `C-c A Y` 审阅：接受时旧文仍在原位或全文
   只出现一次才写入，否则拒绝；拒绝只改状态。一个已打开且有未保存修改的 buffer 不会替人保存。
@@ -557,7 +553,13 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
 - **C70 页面批注。** Noema 页面像 Google Docs 一样加批注；契约在
   [comments.md](../noema/design/comments.md)。线程存在每个文件夹的 `.noema-comments.jsonl`
   （只追加的事件日志），C67 的线程也改存这里，不再放在 Project 的 `.agent/`；页面批注经
-  `comment-asked` 交给这篇的协作者，回复按 C67 的回合队列写回同一线程。
+  Emacs 的 `comments-changed` 事件刷新任务面板。
+- **C73 批注即任务，不收集回答。** 页面不显示 Agent：没有协作者徽章、`@` 选人和"回复中"。
+  批注在 Emacs 的任务面板里收集，并从面板交给某个 Agent（`+agent-collab-dispatch`）：只发一条提示
+  （请求、线程 id、文件、行、引文，每个原生会话的第一条附 Noema 工具指南），之后 Agent 自己经 API
+  修改、在批注里回复，并用 `agent:document:comment` 的 `resolve` 结案。Emacs 不读 Agent 的聊天，也不
+  逐块累积回复（`acp.el` 不订阅 `agent-message-chunk`）；忙的会话由 agent-shell 自己的队列排队。
+  测试：`agent-collab-c73-*`、`C73 *`。
 
 ## 实现位置
 

@@ -1571,14 +1571,13 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
              (when (fboundp '+dashboard-agenda-handle-change)
                (+noema--defer-host-event #'+dashboard-agenda-handle-change payload))
              nil)
-            ("comment-asked"
-             ;; A page comment for the note's collaborator (C70).
-             (+noema--defer-host-event
-              (lambda (event)
-                (require 'tools/agent/collab)
-                (+agent-collab-ask-thread (alist-get 'file event) (alist-get 'id event)
-                                          (alist-get 'to event)))
-              payload)
+            ("comments-changed"
+             ;; A note's comments changed in Noema: the task panel follows (C73).
+             (when (featurep 'tools/agent/collab)
+               (+noema--defer-host-event
+                (lambda (event)
+                  (run-hook-with-args '+agent-collab-changed-functions (alist-get 'file event)))
+                payload))
              nil)
             ("notes-mutated"
              (when (fboundp '+noema-roam--clear-runtime-cache)
@@ -2274,14 +2273,7 @@ When BUFFER is nil, inspect the current buffer."
     t))
 (add-hook '+agent-collab-ask-functions #'+noema-collab-ask-h)
 
-;; A document's collaborators changed: its open pages refresh their header (C71).
-(defun +noema-collaborators-changed-h (file)
-  "Tell open Noema pages that FILE's collaborators changed."
-  (when (and +noema--ready (fboundp '+noema-api-call))
-    (+noema-api-call "noema:api:comments:collaborators-changed"
-                     (vector `((file . ,(or (ignore-errors (remote-client-file-name file)) file))))
-                     #'ignore)))
-(add-hook '+agent-binding-changed-functions #'+noema-collaborators-changed-h)
+
 
 ;; A collaborator answering a thread learns Noema's tools once, as a page
 ;; request's session does (C71): how to comment, propose and edit.
