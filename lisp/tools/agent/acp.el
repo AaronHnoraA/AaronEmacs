@@ -1487,6 +1487,15 @@ state, and it ends with the client.  See C44.")
                             (assoc-delete-all file +agent-acp--changes))
                       +agent-acp-changes-limit)))))
 
+(defcustom +agent-acp-direct-edits-limit 200
+  "Most changes one session remembers having applied itself (C68)."
+  :type 'natnum :group '+agent-session)
+
+(defvar-local +agent-acp--direct-edits nil
+  "Changes this client applied with its own tools, newest first (C68).
+Each is (:file FILE :old TEXT :new TEXT :at TIME) as its ACP tool call
+reported it; it ends with the client, like the C44 record.")
+
 (defun +agent-acp--note-tool-change (id tool-call)
   "Record the diffs of TOOL-CALL with ID once, when it has completed.
 A tool call is reported many times; only a finished one changed anything."
@@ -1495,7 +1504,13 @@ A tool call is reported many times; only a finished one changed anything."
       (let* ((file (map-elt diff :file)) (key (cons id file)))
         (unless (member key +agent-acp--counted-changes)
           (push key +agent-acp--counted-changes)
-          (+agent-acp--note-change file))))))
+          (+agent-acp--note-change file)
+          (when (and (stringp file) (stringp (map-elt diff :new)))
+            (setq +agent-acp--direct-edits
+                  (seq-take (cons (list :file file :old (or (map-elt diff :old) "")
+                                        :new (map-elt diff :new) :at (float-time))
+                                  +agent-acp--direct-edits)
+                            +agent-acp-direct-edits-limit))))))))
 
 (defvar-local +agent-acp--stop-reason nil
   "How the last turn ended, as the agent reported it; nil while one runs.")

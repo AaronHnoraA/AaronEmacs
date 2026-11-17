@@ -4,6 +4,7 @@
 (require 'tools/agent/acp)
 (require 'tools/agent/sessions)
 (require 'tools/agent/binding)
+(require 'tools/agent/collab)
 
 (defmacro agent-collab-tests--agent-buffer (var &rest body)
   "Bind VAR to a fake agent buffer that `+agent-acp-agent-buffer-p' accepts."
@@ -44,6 +45,223 @@
     (should (string-match-p "agent:document:edit" prompt))
     (should (string-match "node \\([^ `]+agent-api\\.mjs\\)" prompt))
     (should (file-exists-p (match-string 1 prompt)))))
+
+;;;; C67: threads anchored in a document.
+
+(defmacro agent-collab-tests--project (root &rest body)
+  "Bind ROOT to a temporary project with src/SAI.md and src/main.py, and run BODY."
+  (declare (indent 1))
+  `(let* ((,root (file-name-as-directory (make-temp-file "agent-collab" t)))
+          (+agent-collab-changed-functions nil))
+     (unwind-protect
+         (progn
+           (make-directory (expand-file-name "src" ,root))
+           (with-temp-file (expand-file-name "src/SAI.md" ,root) (insert "# SAI\n\nalpha\nbeta\n"))
+           (with-temp-file (expand-file-name "src/main.py" ,root) (insert "x = 1\ny = 2\n"))
+           (cl-letf (((symbol-function '+agent-collab-root) (lambda (_file) ,root)))
+             ,@body))
+       (delete-directory ,root t))))
+
+(ert-deftest agent-collab-c67-thread-is-stored-beside-the-project ()
+  (agent-collab-tests--project root
+    (agent-collab-tests--agent-buffer agent
+      (let* ((file (expand-file-name "src/SAI.md" root))
+             (thread (+agent-collab-thread-create :file file :line 3 :anchor "alpha"
+                                                  :session agent :text "Why alpha?")))
+        (should (file-exists-p (expand-file-name (format ".agent/collab/threads/%s.json"
+                                                         (alist-get 'id thread))
+                                                 root)))
+        (let ((stored (car (+agent-collab-threads file))))
+          (should (equal (alist-get 'id stored) (alist-get 'id thread)))
+          (should (equal (alist-get 'status stored) "waiting"))
+          (should (equal (alist-get 'line (alist-get 'anchor stored)) 3))
+          (should (equal (alist-get 'name (alist-get 'collaborator stored)) "claude·SAI"))
+          (should (equal (mapcar (lambda (m) (alist-get 'from m)) (alist-get 'messages stored))
+                         '("person"))))
+        (should-not (+agent-collab-threads (expand-file-name "src/main.py" root)))))))
+
+(ert-deftest agent-collab-c67-a-busy-collaborator-gets-thread-turns-one-at-a-time ()
+  (agent-collab-tests--project root
+    (agent-collab-tests--agent-buffer agent
+      (let* ((file (expand-file-name "src/SAI.md" root))
+             (busy t) delivered)
+        (cl-letf (((symbol-function '+agent-collab--idle-p) (lambda (_) (not busy)))
+                  ((symbol-function '+agent-collab--deliver)
+                   (lambda (_buffer prompt) (push prompt delivered))))
+          (+agent-collab-ask-region :file file :line 3 :anchor "alpha" :session agent :text "first")
+          (+agent-collab-ask-region :file file :line 4 :anchor "beta" :session agent :text "second")
+          (should-not delivered)
+          (setq busy nil)
+          (+agent-collab--turn-complete-h agent nil)
+          (should (= (length delivered) 1))
+          (should (string-match-p "first" (car delivered)))
+          (should (string-match-p "line 3" (car delivered))))))))
+
+(ert-deftest agent-collab-c67-turn-reply-lands-in-its-thread ()
+  (agent-collab-tests--project root
+    (agent-collab-tests--agent-buffer agent
+      (let* ((file (expand-file-name "src/SAI.md" root)) delivered)
+        (cl-letf (((symbol-function '+agent-collab--idle-p) (lambda (_) (null delivered)))
+                  ((symbol-function '+agent-collab--deliver) (lambda (_b prompt) (push prompt delivered)))
+                  ((symbol-function '+agent-collab--last-reply) (lambda (_) "Because of the gadget."))
+                  ((symbol-function '+agent-collab--defer) (lambda (function) (funcall function))))
+          (let ((thread (+agent-collab-ask-region :file file :line 3 :anchor "alpha"
+                                                  :session agent :text "Why alpha?")))
+            (should (= (length delivered) 1))
+            (with-current-buffer agent (setq-local +agent-acp--stop-reason "end_turn"))
+            (+agent-collab--turn-complete-h agent nil)
+            (let ((stored (+agent-collab-thread root (alist-get 'id thread))))
+              (should (equal (alist-get 'status stored) "replied"))
+              (should (equal (alist-get 'text (car (last (alist-get 'messages stored))))
+                             "Because of the gadget.")))
+            ;; A turn the person typed into the chat is not a thread's.
+            (+agent-collab--turn-complete-h agent nil)
+            (should (= 2 (length (alist-get 'messages (+agent-collab-thread root (alist-get 'id thread))))))))))))
+
+(ert-deftest agent-collab-c67-a-stopped-turn-marks-its-thread ()
+  (agent-collab-tests--project root
+    (agent-collab-tests--agent-buffer agent
+      (cl-letf (((symbol-function '+agent-collab--idle-p) (lambda (_) t))
+                ((symbol-function '+agent-collab--deliver) #'ignore)
+                ((symbol-function '+agent-collab--last-reply) (lambda (_) nil))
+                ((symbol-function '+agent-collab--defer) (lambda (function) (funcall function))))
+        (let ((thread (+agent-collab-ask-region :file (expand-file-name "src/SAI.md" root) :line 3
+                                                :anchor "alpha" :session agent :text "q")))
+          (with-current-buffer agent (setq-local +agent-acp--stop-reason "cancelled"))
+          (+agent-collab--turn-complete-h agent nil)
+          (should (equal (alist-get 'status (+agent-collab-thread root (alist-get 'id thread))) "stopped")))))))
+
+(ert-deftest agent-collab-c67-context-sends-default-to-the-document-collaborator ()
+  (require 'tools/agent/context)
+  (agent-collab-tests--agent-buffer agent
+    (let ((document (generate-new-buffer "SAI.md")) offered)
+      (unwind-protect
+          (with-current-buffer document
+            (setq buffer-file-name "/tmp/x/SAI.md")
+            (cl-letf (((symbol-function '+agent-binding-sessions)
+                       (lambda (&rest _) (list (list :buffer agent))))
+                      ((symbol-function '+agent-session-live-p) (lambda (_) t))
+                      ((symbol-function '+agent-acp-project-root) (lambda (&rest _) "/tmp/"))
+                      ((symbol-function '+agent-session-read)
+                       (lambda (&rest args) (setq offered (plist-get args :default)) agent)))
+              (let ((+agent-context-always-ask-session t))
+                (should (eq (+agent-context--session) agent))
+                (should (eq offered agent)))))
+        (with-current-buffer document (set-buffer-modified-p nil) (setq buffer-file-name nil))
+        (kill-buffer document)))))
+
+;;;; C66/C67: suggestions for files that cannot hold a card.
+
+(defun agent-collab-tests--suggest (root &rest fields)
+  "Write one pending suggestion record under ROOT with FIELDS and return its id."
+  (let* ((id (or (plist-get fields :id) "s1"))
+         (dir (expand-file-name ".agent/collab/suggestions/" root)))
+    (make-directory dir t)
+    (with-temp-file (expand-file-name (concat id ".json") dir)
+      (setq buffer-file-coding-system 'utf-8-unix)
+      (json-insert
+               `((id . ,id) (file . ,(expand-file-name "src/main.py" root)) (title . "Bump")
+                 (from . ((line . 2) (column . 0))) (to . ((line . 2) (column . 5)))
+                 (oldText . ,(or (plist-get fields :old) "y = 2")) (newText . "y = 3")
+                 (status . "pending") (comments . []) (author . ((name . "codex·main") (session . "tok"))))))
+    id))
+
+(ert-deftest agent-collab-c66-accepting-a-suggestion-applies-it-where-it-still-fits ()
+  (agent-collab-tests--project root
+    (let ((file (expand-file-name "src/main.py" root)))
+      (agent-collab-tests--suggest root)
+      (should (equal (mapcar (lambda (s) (alist-get 'id s)) (+agent-collab-suggestions file)) '("s1")))
+      (+agent-collab-suggestion-accept root "s1")
+      (should (equal (with-temp-buffer (insert-file-contents file) (buffer-string)) "x = 1\ny = 3\n"))
+      (should (equal (alist-get 'status (+agent-collab-suggestion root "s1")) "accepted"))
+      (should-not (+agent-collab-suggestions file)))))
+
+(ert-deftest agent-collab-c66-a-suggestion-whose-text-moved-is-refused ()
+  (agent-collab-tests--project root
+    (let ((file (expand-file-name "src/main.py" root)))
+      (agent-collab-tests--suggest root :old "z = 9")
+      (should-error (+agent-collab-suggestion-accept root "s1") :type 'user-error)
+      (should (equal (with-temp-buffer (insert-file-contents file) (buffer-string)) "x = 1\ny = 2\n"))
+      (+agent-collab-suggestion-reject root "s1")
+      (should (equal (alist-get 'status (+agent-collab-suggestion root "s1")) "rejected")))))
+
+;;;; C68: changes an Agent applied itself.
+
+(ert-deftest agent-collab-c68-direct-changes-are-recorded-from-tool-diffs ()
+  (agent-collab-tests--agent-buffer agent
+    (with-current-buffer agent
+      (setq-local +agent-acp--direct-edits nil +agent-acp--counted-changes nil +agent-acp--changes nil)
+      (+agent-acp--note-tool-change "t1" '((:status . "completed")
+                                           (:diffs ((:old . "y = 2") (:new . "y = 3") (:file . "/tmp/x/main.py")))))
+      (+agent-acp--note-tool-change "t1" '((:status . "completed")
+                                           (:diffs ((:old . "y = 2") (:new . "y = 3") (:file . "/tmp/x/main.py"))))))
+    (let ((edits (+agent-collab-direct-changes "/tmp/x/main.py")))
+      (should (= (length edits) 1))
+      (should (equal (plist-get (car edits) :new) "y = 3"))
+      (should (eq (plist-get (car edits) :buffer) agent)))))
+
+(ert-deftest agent-collab-c68-revert-puts-back-only-a-change-still-in-place ()
+  (agent-collab-tests--project root
+    (let ((file (expand-file-name "src/main.py" root)))
+      (with-temp-file file (insert "x = 1\ny = 3\n"))
+      (+agent-collab-revert-direct-change (list :file file :old "y = 2" :new "y = 3"))
+      (should (equal (with-temp-buffer (insert-file-contents file) (buffer-string)) "x = 1\ny = 2\n"))
+      (should-error (+agent-collab-revert-direct-change (list :file file :old "y = 2" :new "y = 3"))
+                    :type 'user-error)
+      (with-temp-file file (insert "a\na\n"))
+      (should-error (+agent-collab-revert-direct-change (list :file file :old "b" :new "a"))
+                    :type 'user-error))))
+
+(ert-deftest agent-collab-c68-a-note-is-reverted-through-noema-so-its-page-follows ()
+  (agent-collab-tests--project root
+    (let ((file (expand-file-name "src/SAI.md" root)) called)
+      (cl-letf (((symbol-function '+noema-api-call)
+                 (lambda (channel args callback &optional _timeout)
+                   (setq called (list channel args))
+                   (funcall callback '((ok . t)) nil))))
+        (+agent-collab-revert-direct-change (list :file file :old "ALPHA" :new "alpha"))
+        (should (equal (car called) "noema:api:agent:document:edit"))
+        (let ((edit (aref (alist-get 'edits (aref (cadr called) 0)) 0)))
+          (should (equal (alist-get 'oldText edit) "alpha"))
+          (should (equal (alist-get 'newText edit) "ALPHA"))
+          (should (equal (alist-get 'from edit) '((line . 3) (column . 0))))
+          (should (equal (alist-get 'to edit) '((line . 3) (column . 5)))))
+        ;; The note itself was not written behind its page's back.
+        (should (equal (with-temp-buffer (insert-file-contents file) (buffer-string))
+                       "# SAI\n\nalpha\nbeta\n"))))))
+
+(ert-deftest agent-collab-c67-a-context-send-can-hand-delivery-to-a-thread ()
+  (require 'tools/agent/context)
+  (agent-collab-tests--agent-buffer agent
+    (let (handed)
+      (cl-letf (((symbol-function '+agent-context--session) (lambda (&rest _) agent))
+                ((symbol-function '+agent-context--deliver) (lambda (&rest _) (error "Delivered directly"))))
+        (+agent-context--send :prompt "Why?" :instructions "Selection: 3:0"
+                              :references (lambda (_root _session) nil)
+                              :deliver (lambda (buffer blocks _instructions question)
+                                         (setq handed (list buffer question (length blocks))))))
+      (should (equal handed (list agent "Why?" 1))))))
+
+(ert-deftest agent-collab-c67-a-page-request-becomes-a-thread ()
+  (agent-collab-tests--project root
+    (agent-collab-tests--agent-buffer agent
+      (let ((file (expand-file-name "src/SAI.md" root)) sent)
+        (cl-letf (((symbol-function '+agent-collab--idle-p) (lambda (_) t)))
+          (+agent-collab-thread-deliver :file file :line 3 :anchor "alpha" :session agent :text "Why?"
+                                        :send (lambda () (setq sent t))))
+        (should sent)
+        (should (equal (alist-get 'status (car (+agent-collab-threads file))) "waiting"))
+        (should (equal (buffer-local-value '+agent-collab--current agent)
+                       (cons root (alist-get 'id (car (+agent-collab-threads file))))))))))
+
+(ert-deftest agent-collab-c67-a-collaborator-chat-means-its-primary-file ()
+  (agent-collab-tests--agent-buffer agent
+    (with-current-buffer agent
+      (setq-local +agent-acp-session-file "/tmp/x/SAI.md")
+      (cl-letf (((symbol-function '+agent-collab--client-file) #'identity))
+        (should (equal (+agent-collab--document) "/tmp/x/SAI.md"))
+        (setq-local +agent-acp-session-file nil)
+        (should-error (+agent-collab--document) :type 'user-error)))))
 
 (provide 'agent-collab-tests)
 ;;; agent-collab-tests.el ends here

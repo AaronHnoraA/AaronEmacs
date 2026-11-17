@@ -19,6 +19,7 @@
 (require 'subr-x)
 (require 'tools/agent/acp)
 (require 'tools/agent/sessions)
+(require 'tools/agent/binding)
 
 (require 'tools/agent/worktree)
 
@@ -290,17 +291,24 @@ file content is ever put in the request."
 (defun +agent-context--session (&optional pick)
   "Return the agent buffer editor context goes to, or `clipboard'.
 With `+agent-context-always-ask-session' (the default) every send asks, and the
-session this project used last is preselected.  Otherwise that live session is
+current document's collaborator, else the session this project used last, is
+preselected.  Otherwise that live session is
 reused until PICK.  Only running ACP sessions are offered; this command does
 not resume a recorded conversation or start a new agent.  The clipboard choice
 is always last and does not replace the remembered session."
   (let* ((root (+agent-acp-project-root))
          (remembered (gethash root +agent-context--last-session))
-         (live (and (buffer-live-p remembered)
-                    (+agent-session-live-p remembered)
-                    (equal (buffer-local-value '+agent-acp-session-root remembered)
-                           root)
-                    remembered))
+         ;; In a document, its collaborator is who you mean (C67).
+         (collaborator (when-let* ((file (+agent-document-file)))
+                         (seq-find #'+agent-session-live-p
+                                   (mapcar (lambda (session) (plist-get session :buffer))
+                                           (+agent-binding-sessions file)))))
+         (live (or collaborator
+                   (and (buffer-live-p remembered)
+                        (+agent-session-live-p remembered)
+                        (equal (buffer-local-value '+agent-acp-session-root remembered)
+                               root)
+                        remembered)))
          (buffer (if (and live (not pick) (not +agent-context-always-ask-session))
                      live
                    (+agent-session-read
@@ -380,7 +388,7 @@ is always last and does not replace the remembered session."
              (string-join skipped "; "))))
 
 (cl-defun +agent-context--send (&key prompt pick draft references instructions
-                                   session-instructions)
+                                   session-instructions deliver)
   "Send editor context to a session or copy it, reading PROMPT when nil.
 The context is the shared editor selection unless REFERENCES is given: a
 function of (ROOT SESSION) returning the reference plists for exactly what the
@@ -389,7 +397,10 @@ gathered earlier.  PICK asks which session to use when sessions are not always
 asked for.  DRAFT puts the turn in the session's input without submitting it.
 INSTRUCTIONS adds per-request guidance. SESSION-INSTRUCTIONS is (KEY . TEXT)
 of short capability guidance delivered once per native session. Drafts and
-clipboard copies include it without consuming that session's initialization."
+clipboard copies include it without consuming that session's initialization.
+DELIVER, when given, is called with (BUFFER BLOCKS SESSION-INSTRUCTIONS QUESTION)
+instead of sending at once, so a caller can schedule the turn (a document thread,
+C67); QUESTION is the prompt without INSTRUCTIONS."
   (let* ((buffer (+agent-context--session pick))
          (clipboard (eq buffer 'clipboard))
          (root (if clipboard
@@ -400,6 +411,7 @@ clipboard copies include it without consuming that session's initialization."
                      (+agent-context--resolve nil root (unless clipboard buffer))))
          (shared (null references))
          (references (car resolved))
+         question
          (prompt (or prompt
                      (read-string
                       (format "Ask %s (%d reference%s): "
@@ -411,6 +423,7 @@ clipboard copies include it without consuming that session's initialization."
     (+agent-context--report-skipped (cdr resolved))
     (when (and (string-empty-p (string-trim prompt)) (null references))
       (user-error "Nothing to send: no question and no context"))
+    (setq question prompt)
     (when instructions
       (setq prompt (concat prompt "\n\n" instructions)))
     (cond
@@ -427,9 +440,10 @@ clipboard copies include it without consuming that session's initialization."
                                references))
       (+agent-acp-show-buffer buffer))
      (t (let ((blocks (+agent-context-content-blocks prompt references)))
-          (if session-instructions
-              (+agent-context--deliver buffer blocks session-instructions)
-            (+agent-context--deliver buffer blocks)))))
+          (cond (deliver (funcall deliver buffer blocks session-instructions question))
+                (session-instructions
+                 (+agent-context--deliver buffer blocks session-instructions))
+                (t (+agent-context--deliver buffer blocks))))))
     (when (and (not clipboard) +agent-context-clear-after-send shared)
           (+agent-selection-clear))
     (unless clipboard buffer)))

@@ -59,6 +59,15 @@
      ("N" "Parallel attempts…" +agent-worktree-parallel)
      ("A" "Attempts board" +agent-worktree-board)
      ("?" "Key help" +agent-acp-help))
+    ("Document"
+     ("d" "Ask about this place…" +agent-collab/ask :slash "ask"
+      :doc "Ask this document's collaborator about the region or line, as a thread")
+     ("k" "Threads" +agent-collab/threads :slash "threads"
+      :doc "This document's threads and their replies")
+     ("Y" "Suggestions" +agent-collab/suggestions :slash "suggestions"
+      :doc "Pending suggestions for this file from its collaborators")
+     ("Z" "Direct changes" +agent-collab/direct-changes :slash "direct"
+      :doc "Changes agents applied to this document themselves; put one back"))
     ("Noema"
      ("W" "Noema" noema)
      ("P" "Pi" noema-pi-open :slash "pi" :doc "Open this project's Pi")
@@ -103,6 +112,9 @@ a local command typed at the agent's input.")
   "The actions under `c', which all hand material to an agent.")
 
 (autoload '+agent-session-menu "tools/agent/menu" nil t)
+(dolist (command '(+agent-collab/ask +agent-collab/threads +agent-collab/suggestions
+                   +agent-collab/direct-changes))
+  (autoload command "tools/agent/collab" nil t))
 (autoload '+agent/spawn "tools/agent/delegate" nil t)
 (autoload '+agent/open-worker "tools/agent/delegate" nil t)
 (autoload 'agent-spawn "tools/agent/delegate" nil t)

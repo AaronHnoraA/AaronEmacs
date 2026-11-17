@@ -525,6 +525,22 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   不动；没有 Project 时拒绝，`edit` 只接受 Markdown。所有入口都说明文档工具：页面入口（工具指南，
   API 路径指向 checkout 的 `scripts/`）、项目入口（一句话）、LaTeX 导出修复会话。Agent 自身逻辑不改。
   测试：`C66 *`（Noema）、`agent-collab-c66-*`、`agent-api-c66-*`、`noema-agent-entry-c66-*`。
+- **C67 文档线程。** 在文档某处提问是一条线程，存于其 Project 的 `.agent/collab/threads/<id>.json`
+  （文件、锚点行与原文、协作者的名字/buffer/令牌、状态、消息）。`C-c A d`（`+agent-collab/ask`）
+  在文件 buffer 里以选区或当前行提问；Noema 页面的“发给 Agent”经 `+agent-context--send` 的
+  `:deliver` 同样成为线程。默认收件人是这篇文档的协作者（`+agent-context--session` 预选它，
+  否则仍是本项目上次的会话）。一个协作者一次只接一条线程：它忙时下一条在 Emacs 侧等待，
+  空闲才送出，所以回合结束（`+agent-acp-turn-complete-functions`）时把最后一条回复放回发起它的
+  线程，`end_turn` 记为 replied，否则 stopped；人在聊天里自己输入的回合不归任何线程。
+  `C-c A k` 列出线程：`RET` 回到锚点，`v` 读全文，`r` 追问同一协作者，`c` 结案，`o` 进入
+  agent-shell 深谈。非 Markdown 文件的修订（C66）由 `C-c A Y` 审阅：接受时旧文仍在原位或全文
+  只出现一次才写入，否则拒绝；拒绝只改状态。一个已打开且有未保存修改的 buffer 不会替人保存。
+  测试：`agent-collab-c67-*`、`agent-collab-c66-*`、`noema-md-bridge-c67-*`。
+- **C68 直接改动。** Agent 绕过 API 用自己的工具改文件时，完成的 ACP 工具调用带来的 diff
+  （旧文、新文）记入该会话的 `+agent-acp--direct-edits`（有上限，随 client 结束），与 C44 同源。
+  `C-c A Z` 列出这篇文档上的直接改动，`RET` 看 diff，`u` 放回旧文：仅当新文在文件中恰好出现
+  一次；Markdown 笔记经 `agent:document:edit` 写回，打开的页面随之更新，其余文件走 C67 的
+  同一写入规则。新建整文件的改动不提供放回。测试：`agent-collab-c68-*`。
 
 ## 实现位置
 
@@ -576,7 +592,7 @@ G4–G9 与 G11 的项目池、显示归属、返回、预览及物理替换问�
 - **G14 Remote 上的项目入口。** Noema host 与 Hy Memory 在客户端，运行在其他 target 的
   Agent 既够不到 API 命令，也没有记忆。C51、C52 在这里不生效：会话不收入口，不是报错。
   要支持需要经 `remote-channel` 转发 host，尚未实现。
-- **G15 撤销会话改动。** ZCode 在回合摘要里按文件撤销，先预检文件自改动后未被他人修改，
+- **G15 撤销会话改动。** C68 已提供逐处放回（新文唯一出现时），但不是整回合撤销。 ZCode 在回合摘要里按文件撤销，先预检文件自改动后未被他人修改，
   多次修改按检查点倒序回放，有一个不安全就整体不写。C44 的清单来自 ACP 报告的 diff，
   不是写前内容的检查点，`oldText` 也可能只是片段。没有可靠的前内容和预检前，不提供
   “撤销”，以免把部分回退说成安全回退；需要先定契约。

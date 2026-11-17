@@ -1795,6 +1795,8 @@ Emacs 通用 agent 层统一管理轻量模型交互与结构化 coding-agent �
 |----|------|
 | `H-A` / `SPC a a` / `C-c A RET` | Agent Manager 浮窗；再次调用隐藏返回 |
 | `H-t`（macOS `Option-T`，Noema 页面和 Portal 终端里也可用；`C-S-t` 保留为备用）/ `M-x agent-switcher` | 像 `Cmd-T` 选终端一样选 agent：列出不在屏幕上的会话、新建 Claude/Codex/OpenCode 和历史；`RET` 当前窗口，`S-RET` 右侧，`Cmd-RET` 下方。在文档（文件 buffer 或 Noema 页面）里，最前面是这篇的协作者（`◆`，在屏幕上的直接跳过去），然后是“＋ New … for 文件名”，新建的 Agent 绑定这篇 |
+| `C-c A d` / `C-c A k` | 在文档里就选区或当前行向这篇的协作者提问，成为一条线程；`k` 列出线程，回复自动回到线程（`RET` 回到位置，`r` 追问，`c` 结案，`o` 进聊天深谈） |
+| `C-c A Y` / `C-c A Z` | 审阅协作者对非 Markdown 文件的修订（`a` 接受、`x` 拒绝）；列出 Agent 直接改过这篇的地方（`u` 放回） |
 | `C-c A W` | 打开当前项目 Pi |
 | `C-c A g` | 当前项目的 Agent cache：缓存、任务图谱、问题和日志（`noema-project-graph`） |
 | `C-c A M` | 发起数学探索：几个后台 Agent 各取一个方向攻同一问题，当前聊天当裁判；可给 Lean 冻结陈述，证明先经 Lean 判定（`noema-exploration-start`） |
