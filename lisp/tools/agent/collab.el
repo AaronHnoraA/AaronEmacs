@@ -38,7 +38,7 @@
   "Functions called with a document FILE after its threads or suggestions changed.")
 
 (defconst +agent-collab-thread-prompt
-  "%s\n\n(Asked at %s line %d: «%s».  Answer here; a change to the document goes through agent:document:propose.)"
+  "%s\n\n(A comment on %s line %d about «%s».  Your answer becomes the reply in that comment; a change to the document goes through agent:document:propose.)"
   "How a thread question reaches its collaborator: question, file, line, anchor.")
 
 ;;;; Store
@@ -100,56 +100,170 @@
   "Return a fresh record id."
   (format "%s-%06x" (format-time-string "%Y%m%dT%H%M%S") (random #xffffff)))
 
-;;;; Threads
+;;;; Threads (C70 store: the folder's comment journal)
+;;
+;; Threads are kept beside the document in its folder's hidden
+;; `.noema-comments.jsonl', the same journal the Noema host writes for page
+;; comments: one appended event per line, folded on read, so Emacs and the host
+;; can both write without losing each other's work.
 
-(defun +agent-collab-thread (root id)
-  "Return ROOT's thread ID, or nil."
-  (+agent-collab--read (expand-file-name (concat id ".json") (+agent-collab--dir root "threads"))))
+(defconst +agent-collab-comments-file ".noema-comments.jsonl"
+  "Name of a folder's comment journal.")
+
+(defun +agent-collab--journal (file)
+  "Return the comment journal of FILE's folder."
+  (expand-file-name +agent-collab-comments-file
+                    (file-name-directory (+agent-collab--client-file file))))
+
+(defun +agent-collab--notify-host (file)
+  "Tell open Noema pages that FILE's threads changed, when Noema runs."
+  (when (and (fboundp '+noema-api-call) (bound-and-true-p +noema--ready))
+    (ignore-errors
+      (+noema-api-call "noema:api:comments:changed"
+                       (vector `((file . ,(+agent-collab--client-file file))))
+                       #'ignore))))
+
+(defun +agent-collab--append (file event)
+  "Append EVENT, an alist, to FILE's comment journal and announce the change."
+  (let ((journal (+agent-collab--journal file))
+        (event (append '((v . 1)) event `((at . ,(+agent-collab--now-utc))))))
+    (with-temp-buffer
+      (json-insert (+agent-collab--jsonable event) :null-object :null :false-object :false)
+      (insert "\n")
+      (let ((coding-system-for-write 'utf-8-unix))
+        (write-region nil nil journal 'append 'silent)))
+    (run-hook-with-args '+agent-collab-changed-functions file)
+    (+agent-collab--notify-host file)))
+
+(defun +agent-collab--now-utc ()
+  "Return the current UTC time as the host writes it."
+  (format-time-string "%FT%T.000Z" nil t))
+
+(defun +agent-collab--author (value)
+  "Return the author alist VALUE with defaults."
+  `((name . ,(or (alist-get 'name value) "You")) (kind . ,(or (alist-get 'kind value) "person"))
+    ,@(when (alist-get 'session value) `((session . ,(alist-get 'session value))))))
+
+(defun +agent-collab--fold (file)
+  "Return a hash table of the threads in FILE's folder journal, by id."
+  (let ((threads (make-hash-table :test #'equal))
+        (journal (+agent-collab--journal file)))
+    (when (file-readable-p journal)
+      (with-temp-buffer
+        (let ((coding-system-for-read 'utf-8)) (insert-file-contents journal))
+        (dolist (line (split-string (buffer-string) "\n" t))
+          (when-let* ((event (ignore-errors
+                               (json-parse-string line :object-type 'alist :array-type 'list
+                                                  :null-object nil :false-object nil)))
+                      (id (alist-get 'id event)))
+            (let ((thread (gethash id threads)))
+              (pcase (alist-get 'op event)
+                ("thread"
+                 (unless thread
+                   (puthash id `((id . ,id) (note . ,(alist-get 'note event))
+                                 (quote . ,(or (alist-get 'quote event) ""))
+                                 (line . ,(alist-get 'line event))
+                                 (status . "open") (assignee . ,(alist-get 'assignee event))
+                                 (createdAt . ,(alist-get 'at event))
+                                 (messages . (((mid . "m0") (author . ,(+agent-collab--author (alist-get 'author event)))
+                                               (text . ,(or (alist-get 'text event) "")) (at . ,(alist-get 'at event))))))
+                            threads)))
+                ("reply"
+                 (when thread
+                   (setf (alist-get 'messages thread)
+                         (append (alist-get 'messages thread)
+                                 (list `((mid . ,(alist-get 'mid event))
+                                         (author . ,(+agent-collab--author (alist-get 'author event)))
+                                         (text . ,(or (alist-get 'text event) "")) (at . ,(alist-get 'at event))))))
+                   (puthash id thread threads)))
+                ("resolve" (when thread (setf (alist-get 'status thread) "resolved") (puthash id thread threads)))
+                ("reopen" (when thread (setf (alist-get 'status thread) "open") (puthash id thread threads)))
+                ("edit"
+                 (when-let* ((message (seq-find (lambda (m) (equal (alist-get 'mid m) (or (alist-get 'mid event) "m0")))
+                                                (alist-get 'messages thread))))
+                   (setf (alist-get 'text message) (or (alist-get 'text event) ""))))
+                ("delete"
+                 (when thread
+                   (if (member (alist-get 'mid event) '(nil "m0"))
+                       (remhash id threads)
+                     (setf (alist-get 'messages thread)
+                           (seq-remove (lambda (m) (equal (alist-get 'mid m) (alist-get 'mid event)))
+                                       (alist-get 'messages thread)))
+                     (puthash id thread threads))))
+                ("assign" (when thread (setf (alist-get 'assignee thread) (alist-get 'assignee event))
+                                (puthash id thread threads)))
+                ("move" (when thread (setf (alist-get 'note thread) (alist-get 'note event))
+                              (puthash id thread threads)))))))))
+    threads))
+
+(defun +agent-collab--with-file (thread file)
+  "Return THREAD with its document FILE and display status."
+  (let* ((last (car (last (alist-get 'messages thread))))
+         (status (cond ((equal (alist-get 'status thread) "resolved") "resolved")
+                       ((equal (alist-get 'kind (alist-get 'author last)) "agent")
+                        (if (string-prefix-p "(" (alist-get 'text last)) "stopped" "replied"))
+                       ((alist-get 'assignee thread) "waiting")
+                       (t "open"))))
+    (append `((file . ,(+agent-collab--client-file file)) (state . ,status)) thread)))
+
+(defun +agent-collab-thread (file id)
+  "Return FILE's thread ID, or nil."
+  (when-let* ((thread (gethash id (+agent-collab--fold file))))
+    (+agent-collab--with-file thread file)))
 
 (defun +agent-collab-threads (file)
   "Return FILE's threads, newest first."
-  (sort (seq-filter (lambda (thread) (+agent-collab--same-file-p (alist-get 'file thread) file))
-                    (+agent-collab--records (+agent-collab-root file) "threads"))
-        (lambda (a b) (string> (or (alist-get 'createdAt a) "") (or (alist-get 'createdAt b) "")))))
+  (let ((note (file-name-nondirectory (+agent-collab--client-file file))) threads)
+    (maphash (lambda (_id thread)
+               (when (equal (alist-get 'note thread) note)
+                 (push (+agent-collab--with-file thread file) threads)))
+             (+agent-collab--fold file))
+    (sort threads (lambda (a b) (string> (or (alist-get 'createdAt a) "") (or (alist-get 'createdAt b) ""))))))
 
 (defun +agent-collab--collaborator (buffer)
-  "Describe session BUFFER as a thread's collaborator."
+  "Describe session BUFFER as a thread's assignee."
   `((name . ,(or (buffer-local-value '+agent-acp-session-name buffer) (buffer-name buffer)))
-    (buffer . ,(buffer-name buffer))
     (session . ,(+agent-acp-session-token buffer))))
 
-(cl-defun +agent-collab-thread-create (&key file line anchor session text)
+(defun +agent-collab--comment-id ()
+  "Return a fresh comment id, of the page's form."
+  (format "c-%s-%06x" (format-time-string "%Y%m%d%H%M%S" nil t) (random #xffffff)))
+
+(cl-defun +agent-collab-thread-create (&key file line anchor session text id)
   "Store a new thread on FILE at LINE about ANCHOR, asked of SESSION with TEXT."
-  (+agent-collab--write
-   (+agent-collab-root file) "threads"
-   `((id . ,(+agent-collab--id)) (file . ,(+agent-binding-canonical file))
-     (anchor . ((line . ,line) (text . ,(or anchor ""))))
-     (collaborator . ,(+agent-collab--collaborator session))
-     (status . "waiting") (createdAt . ,(+agent-collab--now))
-     (messages . (((from . "person") (text . ,text) (at . ,(+agent-collab--now))))))))
+  (let ((id (or id (+agent-collab--comment-id))))
+    (+agent-collab--append
+     file `((op . "thread") (id . ,id) (note . ,(file-name-nondirectory (+agent-collab--client-file file)))
+            (quote . ,(or anchor "")) (line . ,line)
+            (author . ((name . "You") (kind . "person"))) (text . ,text)
+            ,@(when session `((assignee . ,(+agent-collab--collaborator session))))))
+    (+agent-collab-thread file id)))
 
-(defun +agent-collab--update-thread (root id function)
-  "Replace ROOT's thread ID with FUNCTION applied to it."
-  (when-let* ((thread (+agent-collab-thread root id)))
-    (+agent-collab--write root "threads" (funcall function thread))))
+(defun +agent-collab--assign (file id session)
+  "Make SESSION the assignee of FILE's thread ID."
+  (+agent-collab--append file `((op . "assign") (id . ,id) (assignee . ,(+agent-collab--collaborator session)))))
 
-(defun +agent-collab--add-message (root id from text status)
-  "Append FROM's TEXT to ROOT's thread ID and set its STATUS."
-  (+agent-collab--update-thread
-   root id
-   (lambda (thread)
-     (setf (alist-get 'messages thread)
-           (append (alist-get 'messages thread)
-                   (list `((from . ,from) (text . ,(or text "")) (at . ,(+agent-collab--now))))))
-     (setf (alist-get 'status thread) status)
-     thread)))
+(defun +agent-collab--add-message (file id session text)
+  "Append TEXT to FILE's thread ID, from SESSION's agent, or from you when nil."
+  (+agent-collab--append
+   file `((op . "reply") (id . ,id) (mid . ,(format "m-%08x" (random #xffffffff)))
+          (author . ,(if session
+                         `((name . ,(or (buffer-local-value '+agent-acp-session-name session) "agent"))
+                           (kind . "agent") (session . ,(+agent-acp-session-token session)))
+                       '((name . "You") (kind . "person"))))
+          (text . ,(or text "")))))
+
+(defun +agent-collab--set-resolved (file id resolved)
+  "Resolve FILE's thread ID, or reopen it when RESOLVED is nil."
+  (+agent-collab--append file `((op . ,(if resolved "resolve" "reopen")) (id . ,id)
+                                (author . ((name . "You") (kind . "person"))))))
 
 ;;;; Turns
 
 (defvar-local +agent-collab--current nil
-  "(ROOT . ID) of the thread whose turn this collaborator is taking.")
+  "(FILE . ID) of the thread whose turn this collaborator is taking.")
 (defvar-local +agent-collab--waiting nil
-  "Thread turns waiting for this collaborator, oldest first, as (ROOT ID SEND).
+  "Thread turns waiting for this collaborator, oldest first, as (FILE ID SEND).
 SEND is a function that delivers the turn.")
 
 (defun +agent-collab--idle-p (buffer)
@@ -175,10 +289,9 @@ Without this a refused prompt would hold the thread and every one behind it."
           (setq +agent-collab--current nil))
         (+agent-collab--defer
          (lambda ()
-           (+agent-collab--add-message (car current) (cdr current) "agent"
+           (+agent-collab--add-message (car current) (cdr current) buffer
                                        (format "(The request failed%s.)"
-                                               (if reason (format ": %s" reason) ""))
-                                       "failed")
+                                               (if reason (format ": %s" reason) "")))
            (when (buffer-live-p buffer) (+agent-collab--pump buffer))))))))
 
 (defun +agent-collab--last-reply (buffer)
@@ -193,14 +306,14 @@ Without this a refused prompt would hold the thread and every one behind it."
   "Start BUFFER's next waiting thread turn when it is free."
   (with-current-buffer buffer
     (when (and (not +agent-collab--current) +agent-collab--waiting (+agent-collab--idle-p buffer))
-      (pcase-let ((`(,root ,id ,send) (pop +agent-collab--waiting)))
-        (setq +agent-collab--current (cons root id))
+      (pcase-let ((`(,file ,id ,send) (pop +agent-collab--waiting)))
+        (setq +agent-collab--current (cons file id))
         (funcall send)))))
 
-(defun +agent-collab--submit (buffer root id send)
-  "Queue ROOT's thread ID for collaborator BUFFER; SEND delivers its turn."
+(defun +agent-collab--submit (buffer file id send)
+  "Queue FILE's thread ID for collaborator BUFFER; SEND delivers its turn."
   (with-current-buffer buffer
-    (setq +agent-collab--waiting (append +agent-collab--waiting (list (list root id send)))))
+    (setq +agent-collab--waiting (append +agent-collab--waiting (list (list file id send)))))
   (+agent-collab--pump buffer))
 
 (defun +agent-collab--turn-complete-h (buffer _event)
@@ -217,11 +330,11 @@ Without this a refused prompt would hold the thread and every one behind it."
                (let ((reply (+agent-collab--last-reply buffer)))
                  ;; Only a finished turn with words in it answered the thread.
                  (+agent-collab--add-message
-                  (car current) (cdr current) "agent"
-                  (or reply (format "(No reply%s.)"
-                                    (if-let* ((reason (buffer-local-value '+agent-acp-last-error buffer)))
-                                        (format ": %s" reason) "")))
-                  (if (and ended reply) "replied" "stopped")))
+                  (car current) (cdr current) buffer
+                  (if (and ended reply) reply
+                    (or reply (format "(No reply%s.)"
+                                      (if-let* ((reason (buffer-local-value '+agent-acp-last-error buffer)))
+                                          (format ": %s" reason) ""))))))
                (+agent-collab--pump buffer)))))))))
 
 (add-hook '+agent-acp-turn-complete-functions #'+agent-collab--turn-complete-h)
@@ -231,7 +344,7 @@ Without this a refused prompt would hold the thread and every one behind it."
 SEND delivers the turn when SESSION is free; its reply comes back to the thread."
   (let ((thread (+agent-collab-thread-create :file file :line line :anchor anchor
                                              :session session :text text)))
-    (+agent-collab--submit session (+agent-collab-root file) (alist-get 'id thread) send)
+    (+agent-collab--submit session file (alist-get 'id thread) send)
     thread))
 
 (cl-defun +agent-collab-ask-region (&key file line anchor session text)
@@ -260,11 +373,22 @@ In a collaborator's chat it is that collaborator's primary file."
     (cons (line-number-at-pos nil t)
           (buffer-substring-no-properties (line-beginning-position) (line-end-position)))))
 
+(defvar +agent-collab-ask-functions nil
+  "Functions tried, without arguments, before asking in a plain buffer.
+A surface with its own comment box (a Noema page) opens it and returns non-nil.")
+
 ;;;###autoload
 (defun +agent-collab/ask (text)
   "Ask this document's collaborator TEXT about the region or the current line.
-The question becomes a thread of the document; the reply comes back into it."
-  (interactive (list (read-string "Ask about this place: ")))
+The question becomes a thread of the document; the reply comes back into it.
+A Noema page opens its own comment box instead."
+  (interactive (list (unless (run-hook-with-args-until-success '+agent-collab-ask-functions)
+                       (read-string "Ask about this place: "))))
+  (when text
+    (+agent-collab--ask text)))
+
+(defun +agent-collab--ask (text)
+  "Ask this document's collaborator TEXT about the region or the current line."
   (let* ((file (+agent-collab--document))
          (anchor (+agent-collab--anchor))
          (session (progn (require 'tools/agent/context) (+agent-context--session))))
@@ -301,6 +425,10 @@ A file of another target keeps its framework name, which the /fs handler opens."
   (or (and (fboundp 'remote-client-file-name) (ignore-errors (remote-client-file-name file)))
       file))
 
+(defun +agent-collab--assignee-name (thread)
+  "Return the name of THREAD's assignee, or an empty string."
+  (or (alist-get 'name (alist-get 'assignee thread)) ""))
+
 (defun +agent-collab--last-text (thread)
   "Return the first line of THREAD's last message."
   (car (split-string (or (alist-get 'text (car (last (alist-get 'messages thread)))) "") "\n")))
@@ -312,27 +440,36 @@ A file of another target keeps its framework name, which the /fs handler opens."
 
 (defun +agent-collab--threads-refresh ()
   "Redraw this thread list."
-  (let ((root (+agent-collab-root +agent-collab--file)))
+  (let ((file +agent-collab--file))
     (setq tabulated-list-entries
           (mapcar (lambda (thread)
-                    (list (cons root (alist-get 'id thread))
-                          (vector (alist-get 'status thread)
-                                  (or (alist-get 'name (alist-get 'collaborator thread)) "")
-                                  (number-to-string (or (alist-get 'line (alist-get 'anchor thread)) 0))
+                    (list (cons file (alist-get 'id thread))
+                          (vector (alist-get 'state thread)
+                                  (+agent-collab--assignee-name thread)
+                                  (number-to-string (or (+agent-collab--thread-line thread) 0))
                                   (+agent-collab--last-text thread))))
-                  (+agent-collab-threads +agent-collab--file)))
+                  (+agent-collab-threads file)))
     (tabulated-list-print t)))
+
+(defun +agent-collab--thread-line (thread)
+  "Return THREAD's line: stored, or where its anchor is in the document."
+  (or (alist-get 'line thread)
+      (let ((file (alist-get 'file thread)) (marker (format "{>>#%s<<}" (alist-get 'id thread))))
+        (when (file-readable-p file)
+          (with-temp-buffer
+            (insert-file-contents file)
+            (when (search-forward marker nil t) (line-number-at-pos)))))))
 
 (defun +agent-collab--at-thread ()
   "Return the thread at point in a thread list."
-  (pcase-let ((`(,root . ,id) (or (tabulated-list-get-id) (user-error "No thread here"))))
-    (or (+agent-collab-thread root id) (user-error "The thread is gone"))))
+  (pcase-let ((`(,file . ,id) (or (tabulated-list-get-id) (user-error "No thread here"))))
+    (or (+agent-collab-thread file id) (user-error "The thread is gone"))))
 
 (defun +agent-collab-threads-visit ()
   "Show the place this thread was asked about."
   (interactive)
   (let ((thread (+agent-collab--at-thread)))
-    (+agent-collab--visit-line (alist-get 'file thread) (alist-get 'line (alist-get 'anchor thread)))))
+    (+agent-collab--visit-line (alist-get 'file thread) (+agent-collab--thread-line thread))))
 
 (defun +agent-collab-threads-read ()
   "Show this thread's whole conversation."
@@ -341,44 +478,63 @@ A file of another target keeps its framework name, which the /fs handler opens."
     (with-current-buffer (get-buffer-create "*Agent thread*")
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (insert (format "%s line %s — %s\n\n" (alist-get 'file thread)
-                        (alist-get 'line (alist-get 'anchor thread)) (alist-get 'status thread)))
+        (insert (format "%s line %s — %s\n\n> %s\n\n" (alist-get 'file thread)
+                        (+agent-collab--thread-line thread) (alist-get 'state thread)
+                        (alist-get 'quote thread)))
         (dolist (message (alist-get 'messages thread))
-          (insert (format "## %s\n\n%s\n\n"
-                          (if (equal (alist-get 'from message) "agent")
-                              (alist-get 'name (alist-get 'collaborator thread)) "You")
+          (insert (format "## %s\n\n%s\n\n" (alist-get 'name (alist-get 'author message))
                           (alist-get 'text message))))
         (goto-char (point-min))
         (special-mode))
       (display-buffer (current-buffer)))))
 
-(defun +agent-collab--thread-session (thread)
-  "Return THREAD's live collaborator buffer, or signal."
-  (or (+agent-acp-session-buffer-for-token (alist-get 'session (alist-get 'collaborator thread)))
-      (let ((buffer (get-buffer (or (alist-get 'buffer (alist-get 'collaborator thread)) ""))))
-        (and (+agent-acp-agent-buffer-p buffer) buffer))
-      (user-error "The collaborator of this thread has ended")))
+(defun +agent-collab--live-collaborator (file)
+  "Return FILE's most recent live collaborator, or nil."
+  (seq-find #'+agent-session-live-p
+            (mapcar (lambda (session) (plist-get session :buffer)) (+agent-binding-sessions file))))
+
+(defun +agent-collab--thread-session (thread &optional noerror)
+  "Return THREAD's live assignee, else its document's collaborator, or signal.
+With NOERROR return nil instead."
+  (or (+agent-acp-session-buffer-for-token (alist-get 'session (alist-get 'assignee thread)))
+      (+agent-collab--live-collaborator (alist-get 'file thread))
+      (unless noerror (user-error "No live collaborator for this thread"))))
+
+(defun +agent-collab--thread-prompt (thread text)
+  "Return the prompt asking THREAD's question TEXT."
+  (format +agent-collab-thread-prompt text (alist-get 'file thread)
+          (or (+agent-collab--thread-line thread) 0)
+          (truncate-string-to-width (or (alist-get 'quote thread) "") 200 nil nil "…")))
+
+(defun +agent-collab-ask-thread (file id)
+  "Ask FILE's thread ID's latest question of its collaborator.
+A page comment arrives here from the Noema host (C70).  Without a live
+collaborator the comment simply stays for the person."
+  (when-let* ((thread (+agent-collab-thread file id)))
+    (if-let* ((session (+agent-collab--thread-session thread t)))
+        (progn
+          (unless (equal (alist-get 'session (alist-get 'assignee thread))
+                         (+agent-acp-session-token session))
+            (+agent-collab--assign file id session))
+          (let ((prompt (+agent-collab--thread-prompt
+                         thread (alist-get 'text (car (last (alist-get 'messages thread)))))))
+            (+agent-collab--submit session file id (lambda () (+agent-collab--deliver session prompt)))))
+      (message "No collaborator works on %s; the comment stays for you"
+               (file-name-nondirectory file)))))
 
 (defun +agent-collab-threads-reply (text)
   "Continue this thread with TEXT, asked of the same collaborator."
   (interactive (list (read-string "Reply: ")))
   (let* ((thread (+agent-collab--at-thread))
-         (root (+agent-collab-root (alist-get 'file thread)))
-         (session (+agent-collab--thread-session thread)))
-    (+agent-collab--add-message root (alist-get 'id thread) "person" text "waiting")
-    (let ((prompt (format +agent-collab-thread-prompt text
-                          (+agent-collab--client-file (alist-get 'file thread))
-                          (alist-get 'line (alist-get 'anchor thread))
-                          (alist-get 'text (alist-get 'anchor thread)))))
-      (+agent-collab--submit session root (alist-get 'id thread)
-                             (lambda () (+agent-collab--deliver session prompt))))))
+         (file (alist-get 'file thread)))
+    (+agent-collab--add-message file (alist-get 'id thread) nil text)
+    (+agent-collab-ask-thread file (alist-get 'id thread))))
 
 (defun +agent-collab-threads-resolve ()
   "Mark this thread resolved."
   (interactive)
   (let ((thread (+agent-collab--at-thread)))
-    (+agent-collab--update-thread (+agent-collab-root (alist-get 'file thread)) (alist-get 'id thread)
-                                  (lambda (record) (setf (alist-get 'status record) "resolved") record))))
+    (+agent-collab--set-resolved (alist-get 'file thread) (alist-get 'id thread) t)))
 
 (defun +agent-collab-threads-chat ()
   "Open this thread's collaborator chat for a longer discussion."

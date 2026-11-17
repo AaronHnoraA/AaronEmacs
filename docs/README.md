@@ -179,6 +179,7 @@ Noema is developed in its own repository (`site-lisp/noema/`); its documentation
 - [current-architecture.md](noema/design/current-architecture.md) Noema 当前架构
 - [elisp-api.md](noema/design/elisp-api.md) Noema semantic Emacs Lisp API
 - [hy-memory.md](noema/design/hy-memory.md) Noema 自动记忆
+- [comments.md](noema/design/comments.md) Google Docs 式批注：锚点语法、文件夹旁的批注日志、批注栏交互与协作者回复（C70）
 - [interaction-plan.md](noema/design/interaction-plan.md) Noema composition and writing plan
 - [latex-export-style.md](noema/design/latex-export-style.md) Noema LaTeX Export — Style Contract
 - [magent-runtime.md](noema/design/magent-runtime.md) Noema + internalized Magent runtime

@@ -525,8 +525,8 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   不动；没有 Project 时拒绝，`edit` 只接受 Markdown。所有入口都说明文档工具：页面入口（工具指南，
   API 路径指向 checkout 的 `scripts/`）、项目入口（一句话）、LaTeX 导出修复会话。Agent 自身逻辑不改。
   测试：`C66 *`（Noema）、`agent-collab-c66-*`、`agent-api-c66-*`、`noema-agent-entry-c66-*`。
-- **C67 文档线程。** 在文档某处提问是一条线程，存于其 Project 的 `.agent/collab/threads/<id>.json`
-  （文件、锚点行与原文、协作者的名字/buffer/令牌、状态、消息）。`C-c A d`（`+agent-collab/ask`）
+- **C67 文档线程。** 在文档某处提问是一条线程，存于文档所在文件夹的 `.noema-comments.jsonl`
+  （C70 的批注日志：引文、行、指派的协作者、消息）。`C-c A d`（`+agent-collab/ask`）
   在文件 buffer 里以选区或当前行提问；Noema 页面的“发给 Agent”经 `+agent-context--send` 的
   `:deliver` 同样成为线程。默认收件人是这篇文档的协作者（`+agent-context--session` 预选它，
   否则仍是本项目上次的会话）。一个协作者一次只接一条线程：它忙时下一条在 Emacs 侧等待，
@@ -554,6 +554,10 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   （来源 `agent-collab`）标记：绑定的文件 ` ◆N`、待审 ` ✎M`、只被改过 ` ◇`，文件夹汇总其下文件
   （每个文件只计一次），正在被改的文件用 `+agent-presence-working`；同样随事件合并刷新，
   只在 Treemacs 与会话层都已加载后启用。测试：`agent-topology-c69-*`、`agent-presence-c69-*`。
+- **C70 页面批注。** Noema 页面像 Google Docs 一样加批注；契约在
+  [comments.md](../noema/design/comments.md)。线程存在每个文件夹的 `.noema-comments.jsonl`
+  （只追加的事件日志），C67 的线程也改存这里，不再放在 Project 的 `.agent/`；页面批注经
+  `comment-asked` 交给这篇的协作者，回复按 C67 的回合队列写回同一线程。
 
 ## 实现位置
 

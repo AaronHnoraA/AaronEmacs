@@ -445,7 +445,9 @@ default.  This setting does not change interactive agent sessions."
   "M-z" #'+noema/undo
   "M-Z" #'+noema/redo
   "M-S-z" #'+noema/redo
-  "M-C" #'+noema/prose-check)
+  "M-C" #'+noema/prose-check
+  ;; Cmd-Option-M, as in Google Docs (C70).
+  "H-M-m" #'noema-add-comment)
 
 ;; The pane buffer is an inert placeholder: the page owns the text.  Global
 ;; Emacs text commands reached through forwarded keys (H-s, H-c, C-x C-s,
@@ -1569,6 +1571,14 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
              (when (fboundp '+dashboard-agenda-handle-change)
                (+noema--defer-host-event #'+dashboard-agenda-handle-change payload))
              nil)
+            ("comment-asked"
+             ;; A page comment for the note's collaborator (C70).
+             (+noema--defer-host-event
+              (lambda (event)
+                (require 'tools/agent/collab)
+                (+agent-collab-ask-thread (alist-get 'file event) (alist-get 'id event)))
+              payload)
+             nil)
             ("notes-mutated"
              (when (fboundp '+noema-roam--clear-runtime-cache)
                (+noema--defer-host-event
@@ -2254,6 +2264,14 @@ When BUFFER is nil, inspect the current buffer."
 ;; A Noema page is a document for the agent layer: `H-t' on it lists and
 ;; creates that note's collaborators (C65).
 (add-hook '+agent-document-file-functions #'+noema-buffer-file)
+
+;; In a Noema page a question about a place is a page comment (C70).
+(defun +noema-collab-ask-h ()
+  "Start a comment in the current Noema page, when this is one."
+  (when (+noema-buffer-file)
+    (noema-add-comment)
+    t))
+(add-hook '+agent-collab-ask-functions #'+noema-collab-ask-h)
 
 (defun +noema--buffer-display-name (&optional file)
   "Return the preferred Noema buffer display name for FILE."

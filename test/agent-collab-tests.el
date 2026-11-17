@@ -62,23 +62,65 @@
              ,@body))
        (delete-directory ,root t))))
 
-(ert-deftest agent-collab-c67-thread-is-stored-beside-the-project ()
+(ert-deftest agent-collab-c70-a-thread-is-kept-in-the-folder-journal ()
   (agent-collab-tests--project root
     (agent-collab-tests--agent-buffer agent
       (let* ((file (expand-file-name "src/SAI.md" root))
              (thread (+agent-collab-thread-create :file file :line 3 :anchor "alpha"
                                                   :session agent :text "Why alpha?")))
-        (should (file-exists-p (expand-file-name (format ".agent/collab/threads/%s.json"
-                                                         (alist-get 'id thread))
-                                                 root)))
+        (should (file-exists-p (expand-file-name "src/.noema-comments.jsonl" root)))
+        (should (string-match-p "\\`c-[0-9]\\{14\\}-[0-9a-f]\\{6\\}\\'" (alist-get 'id thread)))
         (let ((stored (car (+agent-collab-threads file))))
           (should (equal (alist-get 'id stored) (alist-get 'id thread)))
-          (should (equal (alist-get 'status stored) "waiting"))
-          (should (equal (alist-get 'line (alist-get 'anchor stored)) 3))
-          (should (equal (alist-get 'name (alist-get 'collaborator stored)) "claude·SAI"))
-          (should (equal (mapcar (lambda (m) (alist-get 'from m)) (alist-get 'messages stored))
-                         '("person"))))
+          (should (equal (alist-get 'state stored) "waiting"))
+          (should (equal (alist-get 'line stored) 3))
+          (should (equal (alist-get 'quote stored) "alpha"))
+          (should (equal (alist-get 'name (alist-get 'assignee stored)) "claude·SAI"))
+          (should (equal (mapcar (lambda (m) (alist-get 'name (alist-get 'author m))) (alist-get 'messages stored))
+                         '("You"))))
         (should-not (+agent-collab-threads (expand-file-name "src/main.py" root)))))))
+
+(ert-deftest agent-collab-c70-threads-the-host-wrote-are-read ()
+  "Emacs folds the same journal the Noema host appends to for page comments."
+  (agent-collab-tests--project root
+    (let ((file (expand-file-name "src/SAI.md" root)))
+      (with-temp-file (expand-file-name "src/.noema-comments.jsonl" root)
+        (insert "{\"v\":1,\"op\":\"thread\",\"id\":\"c-1111\",\"note\":\"SAI.md\",\"quote\":\"alpha\",\"author\":{\"name\":\"You\",\"kind\":\"person\"},\"text\":\"Why?\",\"at\":\"2026-11-17T08:00:00.000Z\"}\n"
+                "{\"v\":1,\"op\":\"reply\",\"id\":\"c-1111\",\"mid\":\"m-1\",\"author\":{\"name\":\"codex\",\"kind\":\"agent\"},\"text\":\"Because.\",\"at\":\"2026-11-17T08:01:00.000Z\"}\n"
+                "{\"v\":1,\"op\":\"thread\",\"id\":\"c-2222\",\"note\":\"other.md\",\"quote\":\"x\",\"author\":{\"name\":\"You\",\"kind\":\"person\"},\"text\":\"elsewhere\",\"at\":\"2026-11-17T08:02:00.000Z\"}\n"
+                "not json\n"))
+      (let ((threads (+agent-collab-threads file)))
+        (should (equal (mapcar (lambda (thread) (alist-get 'id thread)) threads) '("c-1111")))
+        (should (equal (alist-get 'state (car threads)) "replied")))
+      (+agent-collab--set-resolved file "c-1111" t)
+      (should (equal (alist-get 'state (+agent-collab-thread file "c-1111")) "resolved")))))
+
+(ert-deftest agent-collab-c70-a-page-comment-is-asked-of-the-collaborator ()
+  (agent-collab-tests--project root
+    (agent-collab-tests--agent-buffer agent
+      (let ((file (expand-file-name "src/SAI.md" root)) delivered notified)
+        (with-temp-file (expand-file-name "src/SAI.md" root) (insert "# SAI\n\n{==alpha==}{>>#c-1111<<}\n"))
+        (with-temp-file (expand-file-name "src/.noema-comments.jsonl" root)
+          (insert "{\"v\":1,\"op\":\"thread\",\"id\":\"c-1111\",\"note\":\"SAI.md\",\"quote\":\"alpha\",\"author\":{\"name\":\"You\",\"kind\":\"person\"},\"text\":\"Why alpha?\",\"at\":\"2026-11-17T08:00:00.000Z\"}\n"))
+        (cl-letf (((symbol-function '+agent-collab--live-collaborator) (lambda (_) agent))
+                  ((symbol-function '+agent-collab--idle-p) (lambda (_) t))
+                  ((symbol-function '+agent-collab--deliver) (lambda (_b prompt) (push prompt delivered)))
+                  ((symbol-function '+agent-collab--notify-host) (lambda (f) (push f notified))))
+          (+agent-collab-ask-thread file "c-1111"))
+        (should (string-match-p "Why alpha?" (car delivered)))
+        (should (string-match-p "line 3 about «alpha»" (car delivered)))
+        (should (equal (alist-get 'name (alist-get 'assignee (+agent-collab-thread file "c-1111"))) "claude·SAI"))
+        (should notified)
+        (should (equal (buffer-local-value '+agent-collab--current agent) (cons file "c-1111")))))))
+
+(ert-deftest agent-collab-c70-a-comment-without-a-collaborator-stays ()
+  (agent-collab-tests--project root
+    (let ((file (expand-file-name "src/SAI.md" root)))
+      (with-temp-file (expand-file-name "src/.noema-comments.jsonl" root)
+        (insert "{\"v\":1,\"op\":\"thread\",\"id\":\"c-1111\",\"note\":\"SAI.md\",\"quote\":\"alpha\",\"author\":{\"name\":\"You\",\"kind\":\"person\"},\"text\":\"Note to self\",\"at\":\"2026-11-17T08:00:00.000Z\"}\n"))
+      (cl-letf (((symbol-function '+agent-collab--live-collaborator) (lambda (_) nil)))
+        (+agent-collab-ask-thread file "c-1111"))
+      (should (equal (alist-get 'state (+agent-collab-thread file "c-1111")) "open")))))
 
 (ert-deftest agent-collab-c67-a-busy-collaborator-gets-thread-turns-one-at-a-time ()
   (agent-collab-tests--project root
@@ -110,13 +152,13 @@
             (should (= (length delivered) 1))
             (with-current-buffer agent (setq-local +agent-acp--stop-reason "end_turn"))
             (+agent-collab--turn-complete-h agent nil)
-            (let ((stored (+agent-collab-thread root (alist-get 'id thread))))
-              (should (equal (alist-get 'status stored) "replied"))
+            (let ((stored (+agent-collab-thread (expand-file-name "src/SAI.md" root) (alist-get 'id thread))))
+              (should (equal (alist-get 'state stored) "replied"))
               (should (equal (alist-get 'text (car (last (alist-get 'messages stored))))
                              "Because of the gadget.")))
             ;; A turn the person typed into the chat is not a thread's.
             (+agent-collab--turn-complete-h agent nil)
-            (should (= 2 (length (alist-get 'messages (+agent-collab-thread root (alist-get 'id thread))))))))))))
+            (should (= 2 (length (alist-get 'messages (+agent-collab-thread (expand-file-name "src/SAI.md" root) (alist-get 'id thread))))))))))))
 
 (ert-deftest agent-collab-c67-a-stopped-turn-marks-its-thread ()
   (agent-collab-tests--project root
@@ -129,7 +171,7 @@
                                                 :anchor "alpha" :session agent :text "q")))
           (with-current-buffer agent (setq-local +agent-acp--stop-reason "cancelled"))
           (+agent-collab--turn-complete-h agent nil)
-          (should (equal (alist-get 'status (+agent-collab-thread root (alist-get 'id thread))) "stopped")))))))
+          (should (equal (alist-get 'state (+agent-collab-thread (expand-file-name "src/SAI.md" root) (alist-get 'id thread))) "stopped")))))))
 
 (ert-deftest agent-collab-c67-context-sends-default-to-the-document-collaborator ()
   (require 'tools/agent/context)
@@ -250,9 +292,9 @@
           (+agent-collab-thread-deliver :file file :line 3 :anchor "alpha" :session agent :text "Why?"
                                         :send (lambda () (setq sent t))))
         (should sent)
-        (should (equal (alist-get 'status (car (+agent-collab-threads file))) "waiting"))
+        (should (equal (alist-get 'state (car (+agent-collab-threads file))) "waiting"))
         (should (equal (buffer-local-value '+agent-collab--current agent)
-                       (cons root (alist-get 'id (car (+agent-collab-threads file))))))))))
+                       (cons file (alist-get 'id (car (+agent-collab-threads file))))))))))
 
 (ert-deftest agent-collab-c67-a-collaborator-chat-means-its-primary-file ()
   (agent-collab-tests--agent-buffer agent
@@ -275,8 +317,8 @@
                                                         :send (lambda () (push 'two sends)))))
             (with-current-buffer agent (setq-local +agent-acp-last-error "usage limit"))
             (+agent-collab--turn-failed agent)
-            (let ((stored (+agent-collab-thread root (alist-get 'id first))))
-              (should (equal (alist-get 'status stored) "failed"))
+            (let ((stored (+agent-collab-thread file (alist-get 'id first))))
+              (should (equal (alist-get 'state stored) "stopped"))
               (should (string-match-p "usage limit" (alist-get 'text (car (last (alist-get 'messages stored)))))))
             ;; The next thread is not stuck behind it.
             (should (equal sends '(two one)))))))))
@@ -292,7 +334,7 @@
                                                 :anchor "alpha" :session agent :text "q")))
           (with-current-buffer agent (setq-local +agent-acp--stop-reason "end_turn"))
           (+agent-collab--turn-complete-h agent nil)
-          (should (equal (alist-get 'status (+agent-collab-thread root (alist-get 'id thread))) "stopped")))))))
+          (should (equal (alist-get 'state (+agent-collab-thread (expand-file-name "src/SAI.md" root) (alist-get 'id thread))) "stopped")))))))
 
 (ert-deftest agent-collab-c67-the-turn-reply-comes-from-the-protocol ()
   "The reply is the agent's last message of the turn, as ACP streamed it."

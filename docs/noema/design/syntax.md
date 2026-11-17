@@ -173,6 +173,7 @@ autolinks.  Noema adds, in `src/render-html.ts` and the editor's Lezer rules:
 | `[toc]` on its own line | table of contents |
 | `> [!type] Title` | callout; `type` is any word (`note`, `tip`, `warning`, …); first line is the title |
 | `[^id]` / `[^id]: text` | footnote; continuation lines indented two or more spaces |
+| `{==text==}{>>#c-ID<<}` | comment anchor: the commented text and its thread id (C70). The conversation lives in the folder's hidden `.noema-comments.jsonl`; the editor hides the markers and the page shows the thread in the comment rail; HTML and the Wiki index keep only the text. One line, not nested |
 | `## Heading {#slug}` | explicit heading anchor |
 | `## Heading <!-- omit from toc -->` | heading left out of the TOC and the slide list |
 | `1)` and `(a)` list markers | ordered lists with matching labels in export |
