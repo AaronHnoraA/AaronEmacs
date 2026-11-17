@@ -274,4 +274,20 @@
         (should (equal (alist-get 'nativeSessionId (alist-get 'session reply)) "native-one")))
       (should-error (+agent/api '((action . "identify") (session . "other"))) :type 'user-error))))
 
+(ert-deftest agent-api-c71-create-for-a-file-finds-its-project-and-names-the-collaborator ()
+  (agent-api-tests--session
+    (let (adopted started)
+      (cl-letf (((symbol-function '+agent-acp-config-for) (lambda (_) '((:identifier . claude-code))))
+                ((symbol-function '+agent-acp-project-root) (lambda (&rest _) "/tmp/"))
+                ((symbol-function '+agent-workspace) (lambda (_) "/tmp/"))
+                ((symbol-function '+agent-acp-start) (lambda (&rest args) (setq started args) buffer))
+                ((symbol-function '+agent-acp--claimed-names) (lambda (_) nil))
+                ((symbol-function '+agent-acp-adopt) (lambda (&rest args) (setq adopted args))))
+        (+agent/api '((action . "create") (agent . "claude") (file . "/tmp/x/SAI.md")))
+        (should (equal (plist-get (cdr adopted) :file) "/tmp/x/SAI.md"))
+        (should (equal (plist-get (cdr adopted) :name) "claude·SAI"))
+        (should (equal (plist-get (cdr adopted) :root) "/tmp/"))
+        (should-not (plist-get started :focus))
+        (should-error (+agent/api '((action . "create") (agent . "claude"))) :type 'user-error)))))
+
 (provide 'agent-api-tests)

@@ -351,5 +351,37 @@
     (with-current-buffer agent (setq +agent-acp--turn-started-at nil) (+agent-acp--turn-began))
     (should-not (+agent-acp-turn-reply agent))))
 
+(ert-deftest agent-collab-c71-a-mentioned-collaborator-answers ()
+  (agent-collab-tests--project root
+    (agent-collab-tests--agent-buffer agent
+      (let ((file (expand-file-name "src/SAI.md" root)) asked)
+        (with-temp-file (expand-file-name "src/.noema-comments.jsonl" root)
+          (insert "{\"v\":1,\"op\":\"thread\",\"id\":\"c-1111\",\"note\":\"SAI.md\",\"quote\":\"alpha\",\"author\":{\"name\":\"You\",\"kind\":\"person\"},\"text\":\"@claude·SAI why?\",\"at\":\"2026-11-17T08:00:00.000Z\"}\n"))
+        (cl-letf (((symbol-function '+agent-collab--live-collaborator) (lambda (_) (error "Not this one")))
+                  ((symbol-function '+agent-session-snapshot)
+                   (lambda (buffer) (and (eq buffer agent) (list :buffer agent :native-session-id "n1"))))
+                  ((symbol-function '+agent-collab--idle-p) (lambda (_) t))
+                  ((symbol-function '+agent-collab--deliver) (lambda (b _prompt) (push b asked)))
+                  ((symbol-function '+agent-collab--notify-host) #'ignore))
+          (+agent-collab-ask-thread file "c-1111" `((buffer . ,(buffer-name agent)) (nativeSessionId . "n1")))
+          (should (equal asked (list agent)))
+          ;; A stale identity is refused rather than sent to another session.
+          (setq asked nil)
+          (+agent-collab-ask-thread file "c-1111" `((buffer . ,(buffer-name agent)) (nativeSessionId . "old")))
+          (should-not asked))))))
+
+(ert-deftest agent-collab-c71-a-thread-turn-carries-the-tools-guide ()
+  (agent-collab-tests--agent-buffer agent
+    (let (delivered)
+      (cl-letf (((symbol-function '+agent-context--deliver)
+                 (lambda (buffer blocks instructions no-focus _failure)
+                   (setq delivered (list buffer (length blocks) instructions no-focus)))))
+        (let ((+agent-collab-session-instructions-function (lambda () '(noema-tools . "GUIDE"))))
+          (+agent-collab--deliver agent "q"))
+        (should (equal delivered (list agent 1 '(noema-tools . "GUIDE") t)))
+        (let ((+agent-collab-session-instructions-function nil))
+          (+agent-collab--deliver agent "q"))
+        (should (equal (nth 2 delivered) nil))))))
+
 (provide 'agent-collab-tests)
 ;;; agent-collab-tests.el ends here

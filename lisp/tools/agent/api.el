@@ -173,11 +173,18 @@ as zero."
       `((ok . t) (accepted . t) (session . ,(+agent-api--describe (+agent-session-snapshot buffer)))))))
 
 (defun +agent-api--create (body)
-  "Create a session from BODY: in the workspace, or in its own worktree."
-  (let ((root (+agent-api--string body "root"))
-        (agent (+agent-api--string body "agent")))
+  "Create a session from BODY: in the workspace, or in its own worktree.
+Given a document `file' without a root, the session is a collaborator of that
+document in its project, named after it (C71: a page asks for one)."
+  (let* ((file (+agent-api--file body))
+         (root (or (+agent-api--string body "root")
+                   (and file (+agent-acp-project-root (file-name-directory file)))))
+         (agent (+agent-api--string body "agent")))
     (unless (and root (file-name-absolute-p root) agent)
-      (user-error "create requires an absolute root and agent identifier"))
+      (user-error "create requires an absolute root (or a file) and agent identifier"))
+    (when (and file (not (+agent-api--string body "name")))
+      (setq body (append `((name . ,(format "%s·%s" agent (file-name-base file))))
+                         (if (hash-table-p body) (+agent-api--alist body) body))))
     (setq root (remote-resolve-emacs-file-name root))
     (unless (file-directory-p root) (user-error "Project directory does not exist"))
     (let ((directory (+agent-workspace root)))
@@ -187,6 +194,10 @@ as zero."
       (if (+agent-api--string body "worktree")
           (+agent-api--create-in-worktree root agent body)
         (+agent-api--create-in-workspace root agent directory body)))))
+
+(defun +agent-api--alist (table)
+  "Return hash TABLE as an alist with symbol keys."
+  (let (alist) (maphash (lambda (k v) (push (cons (intern (format "%s" k)) v) alist)) table) alist))
 
 (defun +agent-api--file (body)
   "Return BODY's optional absolute document file, or nil when absent or null."

@@ -1576,7 +1576,8 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
              (+noema--defer-host-event
               (lambda (event)
                 (require 'tools/agent/collab)
-                (+agent-collab-ask-thread (alist-get 'file event) (alist-get 'id event)))
+                (+agent-collab-ask-thread (alist-get 'file event) (alist-get 'id event)
+                                          (alist-get 'to event)))
               payload)
              nil)
             ("notes-mutated"
@@ -2272,6 +2273,24 @@ When BUFFER is nil, inspect the current buffer."
     (noema-add-comment)
     t))
 (add-hook '+agent-collab-ask-functions #'+noema-collab-ask-h)
+
+;; A document's collaborators changed: its open pages refresh their header (C71).
+(defun +noema-collaborators-changed-h (file)
+  "Tell open Noema pages that FILE's collaborators changed."
+  (when (and +noema--ready (fboundp '+noema-api-call))
+    (+noema-api-call "noema:api:comments:collaborators-changed"
+                     (vector `((file . ,(or (ignore-errors (remote-client-file-name file)) file))))
+                     #'ignore)))
+(add-hook '+agent-binding-changed-functions #'+noema-collaborators-changed-h)
+
+;; A collaborator answering a thread learns Noema's tools once, as a page
+;; request's session does (C71): how to comment, propose and edit.
+(defun +noema-collab-instructions ()
+  "Return the Noema tools guide for a collaborator's session."
+  (require 'noema-md-bridge)
+  (noema-md-bridge--review-bootstrap))
+(after! tools/agent/collab
+  (setq +agent-collab-session-instructions-function #'+noema-collab-instructions))
 
 (defun +noema--buffer-display-name (&optional file)
   "Return the preferred Noema buffer display name for FILE."

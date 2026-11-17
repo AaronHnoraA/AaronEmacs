@@ -238,5 +238,26 @@ Rows are live fake agent buffers; the current buffer visits /tmp/x/SAI.md."
           (should-not (plist-get (cdr adopted) :file)))
       (kill-buffer agent-buffer))))
 
+(ert-deftest agent-binding-c71-a-collaborator-change-is-announced-once-per-file ()
+  (agent-binding-tests--with-store
+    (agent-binding-tests--session ((a "native-a") (b "native-b"))
+      (let (announced timers (+agent-binding-changed-functions nil)
+            (+agent-binding--announce-pending nil) (+agent-binding--announce-timer nil))
+        (add-hook '+agent-binding-changed-functions (lambda (file) (push file announced)))
+        (cl-letf (((symbol-function 'run-with-idle-timer)
+                   (lambda (_secs _repeat function &rest args) (push (cons function args) timers) 'timer)))
+          (with-current-buffer a (setq-local +agent-acp-session-file (+agent-binding-canonical "/tmp/x/SAI.md")))
+          (with-current-buffer b (setq-local +agent-acp-session-file (+agent-binding-canonical "/tmp/x/SAI.md")))
+          (+agent-binding--announce-h a)
+          (+agent-binding--announce-h b)
+          (+agent-binding--announce-h a)
+          (should (= (length timers) 1))
+          (apply (caar timers) (cdar timers))
+          (should (equal announced (list (+agent-binding-canonical "/tmp/x/SAI.md"))))
+          ;; A session at project level announces nothing.
+          (with-current-buffer a (setq-local +agent-acp-session-file nil))
+          (+agent-binding--announce-h a)
+          (should (= (length timers) 1)))))))
+
 (provide 'agent-binding-tests)
 ;;; agent-binding-tests.el ends here

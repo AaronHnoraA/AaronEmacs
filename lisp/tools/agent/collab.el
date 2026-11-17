@@ -272,10 +272,18 @@ SEND is a function that delivers the turn.")
        (not (+agent-acp-busy-p buffer))
        (zerop (+agent-acp-pending-prompt-count buffer))))
 
+(defvar +agent-collab-session-instructions-function nil
+  "Function returning (KEY . TEXT): the tools guide a collaborator gets once per
+native session, so it knows how to comment and propose (C71).  Noema sets it.")
+
 (defun +agent-collab--deliver (buffer prompt)
-  "Send PROMPT to session BUFFER without taking the keyboard."
+  "Send PROMPT to session BUFFER without taking the keyboard.
+The first thread turn of a native session carries the tools guide."
   (require 'tools/agent/context)
-  (+agent-context--deliver buffer (+agent-context-content-blocks prompt nil) nil t
+  (+agent-context--deliver buffer (+agent-context-content-blocks prompt nil)
+                           (and +agent-collab-session-instructions-function
+                                (ignore-errors (funcall +agent-collab-session-instructions-function)))
+                           t
                            (lambda () (+agent-collab--turn-failed buffer))))
 
 (defun +agent-collab--turn-failed (buffer)
@@ -506,12 +514,24 @@ With NOERROR return nil instead."
           (or (+agent-collab--thread-line thread) 0)
           (truncate-string-to-width (or (alist-get 'quote thread) "") 200 nil nil "…")))
 
-(defun +agent-collab-ask-thread (file id)
+(defun +agent-collab--named-session (to)
+  "Return the live session TO names by buffer and native ID, or nil."
+  (when-let* ((buffer (get-buffer (or (alist-get 'buffer to) "")))
+              ((+agent-acp-agent-buffer-p buffer))
+              (snapshot (+agent-session-snapshot buffer))
+              ((equal (plist-get snapshot :native-session-id) (alist-get 'nativeSessionId to))))
+    buffer))
+
+(defun +agent-collab-ask-thread (file id &optional to)
   "Ask FILE's thread ID's latest question of its collaborator.
-A page comment arrives here from the Noema host (C70).  Without a live
-collaborator the comment simply stays for the person."
+A page comment arrives here from the Noema host (C70).  TO, an @-mention's
+(buffer . nativeSessionId), names who answers (C71); a stale one is refused.
+Without a live collaborator the comment simply stays for the person."
   (when-let* ((thread (+agent-collab-thread file id)))
-    (if-let* ((session (+agent-collab--thread-session thread t)))
+    (if-let* ((session (if to
+                           (or (+agent-collab--named-session to)
+                               (progn (message "The mentioned collaborator is no longer there") nil))
+                         (+agent-collab--thread-session thread t))))
         (progn
           (unless (equal (alist-get 'session (alist-get 'assignee thread))
                          (+agent-acp-session-token session))
@@ -519,8 +539,9 @@ collaborator the comment simply stays for the person."
           (let ((prompt (+agent-collab--thread-prompt
                          thread (alist-get 'text (car (last (alist-get 'messages thread)))))))
             (+agent-collab--submit session file id (lambda () (+agent-collab--deliver session prompt)))))
-      (message "No collaborator works on %s; the comment stays for you"
-               (file-name-nondirectory file)))))
+      (unless to
+        (message "No collaborator works on %s; the comment stays for you"
+                 (file-name-nondirectory file))))))
 
 (defun +agent-collab-threads-reply (text)
   "Continue this thread with TEXT, asked of the same collaborator."

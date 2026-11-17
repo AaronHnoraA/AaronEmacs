@@ -155,6 +155,35 @@ without takes the stored binding and name of a conversation it resumes."
 
 (add-hook '+agent-acp-changed-functions #'+agent-binding--restore-h)
 
+;;;; Announcing a document's collaborators
+
+(defvar +agent-binding-changed-functions nil
+  "Functions called with a document FILE after its collaborators changed.
+A collaborator was created, ended, rebound or changed state.  Calls are
+coalesced per file; a surface showing the document's collaborators (a Noema
+page's header) refreshes from here.")
+
+(defvar +agent-binding--announce-pending nil
+  "Files whose collaborator change is waiting to be announced.")
+(defvar +agent-binding--announce-timer nil
+  "Timer that announces the pending files.")
+
+(defun +agent-binding--announce ()
+  "Announce every pending file once."
+  (let ((files (prog1 +agent-binding--announce-pending
+                 (setq +agent-binding--announce-pending nil +agent-binding--announce-timer nil))))
+    (dolist (file files) (run-hook-with-args '+agent-binding-changed-functions file))))
+
+(defun +agent-binding--announce-h (buffer)
+  "Schedule the announcement of BUFFER's primary file, coalesced."
+  (when-let* (((buffer-live-p buffer))
+              (file (buffer-local-value '+agent-acp-session-file buffer)))
+    (cl-pushnew file +agent-binding--announce-pending :test #'equal)
+    (unless +agent-binding--announce-timer
+      (setq +agent-binding--announce-timer (run-with-idle-timer 0.3 nil #'+agent-binding--announce)))))
+
+(add-hook '+agent-acp-changed-functions #'+agent-binding--announce-h)
+
 ;;;; Queries
 
 (defun +agent-binding-sessions (file &optional root)
