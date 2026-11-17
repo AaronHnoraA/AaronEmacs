@@ -662,6 +662,11 @@ or effort.  Later intentional changes within this session remain possible."
   "Project root of the session served by this agent-shell buffer.")
 (put '+agent-acp-session-root 'permanent-local t)
 
+(defvar-local +agent-acp-session-file nil
+  "Primary document file of this collaborator, or nil at project level (C65).
+Set through `+agent-binding-set'; see tools/agent/binding.")
+(put '+agent-acp-session-file 'permanent-local t)
+
 (defvar-local +agent-acp-session-origin nil
   "How this agent-shell buffer was started.
 One of `run', `popup', `manual', `foreign', `pi', `takeover', `probe',
@@ -695,6 +700,7 @@ New views store their return point on the window through tools/agent/views.")
 ;; window; each tab is the session's own interactive agent-shell buffer.
 
 (autoload '+agent-session-menu "tools/agent/menu" nil t)
+(declare-function +agent-binding-set "tools/agent/binding" (buffer file))
 
 (defvar +agent-prefix-map)
 (defvar +agent-acp-tabs-mode-map (make-sparse-keymap)
@@ -2305,11 +2311,12 @@ to nil to leave such buffers exactly as upstream created them."
 
 
 
-(cl-defun +agent-acp-adopt (buffer &key agent origin name root)
+(cl-defun +agent-acp-adopt (buffer &key agent origin name root file)
   "Register agent BUFFER as a named session of its project, and return it.
 ORIGIN records which entry point started it.  NAME defaults to a unique local
 name built from ORIGIN and the agent id; ROOT defaults to
-`+agent-acp-project-root' of the buffer's own directory.
+`+agent-acp-project-root' of the buffer's own directory.  FILE, when given,
+binds the session to that primary document file (C65).
 
 Optional domain adapters associate their business identity after registration;
 the runtime does not start a document host or create a business project."
@@ -2332,6 +2339,7 @@ the runtime does not start a document host or create a business project."
       (with-current-buffer buffer
         (setq-local +agent-acp-session-origin origin))
       (+agent-acp-mark-session-buffer buffer name agent root)
+      (when file (+agent-binding-set buffer file))
       (unless (+agent-acp-temporary-origin-p origin)
         (run-hook-with-args '+agent-session-adopt-functions buffer name root))
       buffer)))
@@ -2428,6 +2436,7 @@ This queries one registry."
         (list :buffer buffer :name +agent-acp-session-name :agent +agent-acp-session-agent
               :provider (map-nested-elt state '(:agent-config :identifier))
               :origin +agent-acp-session-origin :root +agent-acp-session-root
+              :file +agent-acp-session-file
               :background +agent-acp-background :parent +agent-acp-parent-session
               :group (+agent-session-group buffer) :retired (+agent-acp-retired-p buffer)
               :target (and (fboundp 'remote-file-name-target) (remote-file-name-target directory))

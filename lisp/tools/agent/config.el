@@ -26,6 +26,7 @@
 (require 'aaron-packages)
 (require 'seq)
 (require 'tools/agent/notifications)
+(require 'tools/agent/binding)
 (require 'noema/bridge/agent-notifications)
 
 (dolist (option '(+agent-notify-events +agent-notify-delay +agent-notify-cooldown))
