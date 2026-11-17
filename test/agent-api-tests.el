@@ -265,4 +265,13 @@
         (+agent/api `((action . "create") (root . ,temporary-file-directory) (agent . "codex")))
         (should-not (plist-get (cdr adopted) :file))))))
 
+(ert-deftest agent-api-c66-identify-names-the-session-of-a-token ()
+  (agent-api-tests--session
+    (cl-letf (((symbol-function '+agent-acp-session-buffer-for-token)
+               (lambda (token) (and (equal token "tok") buffer))))
+      (let ((reply (+agent/api '((action . "identify") (session . "tok")))))
+        (should (equal (alist-get 'name (alist-get 'session reply)) "worker"))
+        (should (equal (alist-get 'nativeSessionId (alist-get 'session reply)) "native-one")))
+      (should-error (+agent/api '((action . "identify") (session . "other"))) :type 'user-error))))
+
 (provide 'agent-api-tests)

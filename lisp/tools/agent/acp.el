@@ -662,6 +662,42 @@ or effort.  Later intentional changes within this session remain possible."
   "Project root of the session served by this agent-shell buffer.")
 (put '+agent-acp-session-root 'permanent-local t)
 
+(defvar-local +agent-acp--session-token nil
+  "Opaque identity this session's Agent process carries (C66), or nil until used.")
+(put '+agent-acp--session-token 'permanent-local t)
+
+(defun +agent-acp-session-token (buffer)
+  "Return agent BUFFER's session token, creating it on first use.
+It survives client restarts, so a restarted process keeps its identity."
+  (with-current-buffer buffer
+    (or +agent-acp--session-token
+        (setq-local +agent-acp--session-token
+                    (format "%s-%08x" (format-time-string "%s") (random #xffffffff))))))
+
+(defun +agent-acp-session-buffer-for-token (token)
+  "Return the live agent buffer whose session token is TOKEN, or nil."
+  (and (stringp token) (not (string-empty-p token))
+       (seq-find (lambda (buffer)
+                   (and (+agent-acp-agent-buffer-p buffer)
+                        (equal (buffer-local-value '+agent-acp--session-token buffer) token)))
+                 (buffer-list))))
+
+(defun +agent-acp--session-environment-a (args)
+  "Give the ACP client of an agent buffer NOEMA_AGENT_SESSION, its session token.
+ARGS are `acp-make-client' keyword arguments.  The Noema API client sends the
+token with document writes, so a proposal names its author (C66) without the
+model passing anything; the Agent's own logic is unchanged."
+  (let ((buffer (plist-get args :context-buffer)))
+    (if (not (+agent-acp-agent-buffer-p buffer))
+        args
+      (let ((copy (copy-sequence args)))
+        (plist-put copy :environment-variables
+                   (append (plist-get args :environment-variables)
+                           (list (concat "NOEMA_AGENT_SESSION="
+                                         (+agent-acp-session-token buffer)))))))))
+
+(advice-add 'acp-make-client :filter-args #'+agent-acp--session-environment-a)
+
 (defvar-local +agent-acp-session-file nil
   "Primary document file of this collaborator, or nil at project level (C65).
 Set through `+agent-binding-set'; see tools/agent/binding.")

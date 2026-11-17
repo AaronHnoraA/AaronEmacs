@@ -516,6 +516,15 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   改绑，`list` 接受 `file`，`create`/`spawn` 接受 `file`。只改 Emacs 侧的信息流转，不改 Agent
   自身逻辑。整体设计见文档协作工作稿（迁入 `docs/design/` 前在仓库外）。测试：`agent-binding-*`、
   `agent-api-bind-*`、`agent-api-create-with-file-*`、`agent-switcher-c65-*`。
+- **C66 修订带作者。** 每个 agent 会话有一个不透明令牌（`+agent-acp-session-token`，跨 client
+  重启不变），经 `acp-make-client` 的环境变量 `NOEMA_AGENT_SESSION` 交给 Agent 进程；Noema API
+  客户端在 `agent:document:propose/edit` 上自动带上 `authorSession`，host 用 `emacs:agent` 的
+  `identify` 向 Emacs 取名字。新卡片写 `@@ediff-author {"name","session"}`，修订已有卡片保留原作者；
+  Emacs 不可达时作者名为 `agent`，仍可归属。不是 Markdown 的文件不能内嵌卡片：`propose` 在其
+  Project 下写 `.agent/collab/suggestions/<id>.json`（pending，含行列位置、旧文与新文），文件本身
+  不动；没有 Project 时拒绝，`edit` 只接受 Markdown。所有入口都说明文档工具：页面入口（工具指南，
+  API 路径指向 checkout 的 `scripts/`）、项目入口（一句话）、LaTeX 导出修复会话。Agent 自身逻辑不改。
+  测试：`C66 *`（Noema）、`agent-collab-c66-*`、`agent-api-c66-*`、`noema-agent-entry-c66-*`。
 
 ## 实现位置
 

@@ -200,6 +200,12 @@ as zero."
     (+agent-binding-set buffer (+agent-api--file body))
     (+agent-api--acknowledge buffer "bind")))
 
+(defun +agent-api--identify (body)
+  "Describe the session whose Agent process carries BODY's session token (C66)."
+  (let ((buffer (+agent-acp-session-buffer-for-token (+agent-api--string body "session"))))
+    (unless buffer (user-error "No live session carries that token"))
+    `((ok . t) (session . ,(+agent-api--describe (+agent-session-snapshot buffer))))))
+
 (defun +agent-api-identified (body)
   "Return BODY's session row, proven by its buffer and native ID."
   (let* ((name (+agent-api--string body "buffer"))
@@ -313,6 +319,7 @@ requestId before initialization; result uses that receipt even after exit."
       ("spawn" (+agent-api--spawn body))
       ("result" (+agent-requests-result (+agent-api--string body "requestId") offset limit))
       ("bind" (+agent-api--bind (+agent-api-identified body) body))
+      ("identify" (+agent-api--identify body))
       ((or "status" "send" "read" "stop" "show")
        (let* ((snapshot (+agent-api-identified body))
               (buffer (plist-get snapshot :buffer)))

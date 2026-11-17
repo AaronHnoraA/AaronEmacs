@@ -254,7 +254,12 @@ Source has no file headers or absolute
 hunk coordinates to rebase.
 
 `@@ediff-comment "JSON string"` lines may appear after the opener and before
-the diff lines. Reject inserts `@@ediff-status rejected` immediately after
+the diff lines. One `@@ediff-author {"name": "...", "session": "..."}` line
+names the collaborator that proposed the card (written by
+`agent:document:propose`, kept when the card is revised); the card shows the
+name beside its title. Review metadata lines (`@@ediff-author`,
+`@@ediff-status`, `@@ediff-comment`) may come in any order before the diff
+lines. Reject inserts `@@ediff-status rejected` immediately after
 the opener and leaves the old side active for agent follow-up. Accept replaces
 only that environment with its new side in one undoable edit. HTML, LaTeX and
 Wiki indexing resolve valid pending and rejected environments to the old

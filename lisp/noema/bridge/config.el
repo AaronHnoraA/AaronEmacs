@@ -1811,11 +1811,16 @@ run in this buffer, or they would end the session shown in that other frame."
   (format (concat "Investigate this failed Noema LaTeX export.\n"
                   "Source note: %s\nOutput target: %s\n\n"
                   "Error:\n%s\n\n"
-                  "Inspect the source and make only the needed edits. "
+                  "Inspect the source and make only the needed edits, through "
+                  "agent:document:edit so the open page follows (`node %s help` "
+                  "shows the call). "
                   "Tell me what changed; I will rerun the export from Task Manager.")
           (or (alist-get 'file params) "")
           (or (alist-get 'outputPath params) "")
-          (or (alist-get 'error params) "LaTeX export failed")))
+          (or (alist-get 'error params) "LaTeX export failed")
+          (shell-quote-argument
+           (expand-file-name "../scripts/agent-api.mjs"
+                             (file-name-directory (locate-library "noema-md-bridge"))))))
 
 (defun +noema--latex-intervention-open (params)
   "Open or focus an independent manual ACP session for failed export PARAMS."
