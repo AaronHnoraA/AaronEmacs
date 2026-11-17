@@ -29,7 +29,6 @@
 (require 'tools/agent/acp)
 (require 'tools/agent/binding)
 
-(declare-function +agent-last-reply "tools/agent/menu" (&optional buffer))
 (declare-function +agent-context--session "tools/agent/context" (&optional pick))
 (declare-function +agent-context--deliver "tools/agent/context" (buffer blocks &optional instructions no-focus))
 (declare-function +agent-context-content-blocks "tools/agent/context" (prompt references))
@@ -162,12 +161,29 @@ SEND is a function that delivers the turn.")
 (defun +agent-collab--deliver (buffer prompt)
   "Send PROMPT to session BUFFER without taking the keyboard."
   (require 'tools/agent/context)
-  (+agent-context--deliver buffer (+agent-context-content-blocks prompt nil) nil t))
+  (+agent-context--deliver buffer (+agent-context-content-blocks prompt nil) nil t
+                           (lambda () (+agent-collab--turn-failed buffer))))
+
+(defun +agent-collab--turn-failed (buffer)
+  "Record that BUFFER's thread turn could not run, and go on to the next.
+Without this a refused prompt would hold the thread and every one behind it."
+  (when (buffer-live-p buffer)
+    (let ((current (buffer-local-value '+agent-collab--current buffer))
+          (reason (buffer-local-value '+agent-acp-last-error buffer)))
+      (when current
+        (with-current-buffer buffer
+          (setq +agent-collab--current nil))
+        (+agent-collab--defer
+         (lambda ()
+           (+agent-collab--add-message (car current) (cdr current) "agent"
+                                       (format "(The request failed%s.)"
+                                               (if reason (format ": %s" reason) ""))
+                                       "failed")
+           (when (buffer-live-p buffer) (+agent-collab--pump buffer))))))))
 
 (defun +agent-collab--last-reply (buffer)
-  "Return the last reply of session BUFFER, or nil."
-  (require 'tools/agent/menu)
-  (ignore-errors (+agent-last-reply buffer)))
+  "Return the reply of BUFFER's thread turn, from the ACP stream, or nil."
+  (+agent-acp-turn-reply buffer))
 
 (defun +agent-collab--defer (function)
   "Run FUNCTION outside the ACP event callback."
@@ -198,9 +214,14 @@ SEND is a function that delivers the turn.")
           (+agent-collab--defer
            (lambda ()
              (when (buffer-live-p buffer)
-               (+agent-collab--add-message (car current) (cdr current) "agent"
-                                           (+agent-collab--last-reply buffer)
-                                           (if ended "replied" "stopped"))
+               (let ((reply (+agent-collab--last-reply buffer)))
+                 ;; Only a finished turn with words in it answered the thread.
+                 (+agent-collab--add-message
+                  (car current) (cdr current) "agent"
+                  (or reply (format "(No reply%s.)"
+                                    (if-let* ((reason (buffer-local-value '+agent-acp-last-error buffer)))
+                                        (format ": %s" reason) "")))
+                  (if (and ended reply) "replied" "stopped")))
                (+agent-collab--pump buffer)))))))))
 
 (add-hook '+agent-acp-turn-complete-functions #'+agent-collab--turn-complete-h)
@@ -275,8 +296,10 @@ The question becomes a thread of the document; the reply comes back into it."
   (forward-line (1- (max 1 (or line 1)))))
 
 (defun +agent-collab--client-file (file)
-  "Return FILE as Emacs visits it."
-  (if (fboundp 'remote-resolve-emacs-file-name) (remote-resolve-emacs-file-name file) file))
+  "Return FILE as Emacs visits it: a client path when this machine has it.
+A file of another target keeps its framework name, which the /fs handler opens."
+  (or (and (fboundp 'remote-client-file-name) (ignore-errors (remote-client-file-name file)))
+      file))
 
 (defun +agent-collab--last-text (thread)
   "Return the first line of THREAD's last message."

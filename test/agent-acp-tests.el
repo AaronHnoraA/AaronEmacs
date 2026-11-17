@@ -226,7 +226,8 @@
                        (lambda (&rest _) nil)))
               (+agent-acp--subscribe-attention buffer)
               (+agent-acp--subscribe-attention buffer)
-              (should (= (length subscriptions) 7))
+              ;; One more since C67: agent-message-chunk keeps the turn's reply.
+              (should (= (length subscriptions) 8))
               (let ((callback (plist-get (car subscriptions) :callback))
                     (event '((:event . turn-complete)
                              (:data . ((:stop-reason . "end_turn"))))))
@@ -251,8 +252,9 @@
             (+agent-acp--watch-attention-h)
             (should (memq 'permission-request subscriptions))
             (should (memq 'turn-complete subscriptions))
+            (should (memq 'agent-message-chunk subscriptions))
             (+agent-acp--watch-attention-h)
-            (should (= (length subscriptions) 7))))
+            (should (= (length subscriptions) 8))))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (ert-deftest +agent-acp-renamed-shell-restores-real-input-and-submits ()

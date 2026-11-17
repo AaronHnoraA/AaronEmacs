@@ -263,5 +263,51 @@
         (setq-local +agent-acp-session-file nil)
         (should-error (+agent-collab--document) :type 'user-error)))))
 
+(ert-deftest agent-collab-c67-a-failed-request-frees-the-collaborator ()
+  (agent-collab-tests--project root
+    (agent-collab-tests--agent-buffer agent
+      (let ((file (expand-file-name "src/SAI.md" root)) sends)
+        (cl-letf (((symbol-function '+agent-collab--idle-p) (lambda (_) t))
+                  ((symbol-function '+agent-collab--defer) (lambda (function) (funcall function))))
+          (let* ((first (+agent-collab-thread-deliver :file file :line 3 :anchor "a" :session agent :text "one"
+                                                      :send (lambda () (push 'one sends))))
+                 (_second (+agent-collab-thread-deliver :file file :line 4 :anchor "b" :session agent :text "two"
+                                                        :send (lambda () (push 'two sends)))))
+            (with-current-buffer agent (setq-local +agent-acp-last-error "usage limit"))
+            (+agent-collab--turn-failed agent)
+            (let ((stored (+agent-collab-thread root (alist-get 'id first))))
+              (should (equal (alist-get 'status stored) "failed"))
+              (should (string-match-p "usage limit" (alist-get 'text (car (last (alist-get 'messages stored)))))))
+            ;; The next thread is not stuck behind it.
+            (should (equal sends '(two one)))))))))
+
+(ert-deftest agent-collab-c67-an-empty-reply-is-not-a-reply ()
+  (agent-collab-tests--project root
+    (agent-collab-tests--agent-buffer agent
+      (cl-letf (((symbol-function '+agent-collab--idle-p) (lambda (_) t))
+                ((symbol-function '+agent-collab--deliver) #'ignore)
+                ((symbol-function '+agent-collab--last-reply) (lambda (_) nil))
+                ((symbol-function '+agent-collab--defer) (lambda (function) (funcall function))))
+        (let ((thread (+agent-collab-ask-region :file (expand-file-name "src/SAI.md" root) :line 3
+                                                :anchor "alpha" :session agent :text "q")))
+          (with-current-buffer agent (setq-local +agent-acp--stop-reason "end_turn"))
+          (+agent-collab--turn-complete-h agent nil)
+          (should (equal (alist-get 'status (+agent-collab-thread root (alist-get 'id thread))) "stopped")))))))
+
+(ert-deftest agent-collab-c67-the-turn-reply-comes-from-the-protocol ()
+  "The reply is the agent's last message of the turn, as ACP streamed it."
+  (agent-collab-tests--agent-buffer agent
+    (with-current-buffer agent (+agent-acp--turn-began))
+    (should-not (+agent-acp-turn-reply agent))
+    (+agent-acp--note-message-chunk agent "Let me look")
+    (+agent-acp--note-message-break agent)
+    (+agent-acp--note-message-chunk agent "The answer ")
+    (+agent-acp--note-message-chunk agent "is 42.\n")
+    (should (equal (+agent-acp-turn-reply agent) "The answer is 42."))
+    (should (equal (+agent-collab--last-reply agent) "The answer is 42."))
+    ;; A new turn starts empty: an old reply is never a new turn's.
+    (with-current-buffer agent (setq +agent-acp--turn-started-at nil) (+agent-acp--turn-began))
+    (should-not (+agent-acp-turn-reply agent))))
+
 (provide 'agent-collab-tests)
 ;;; agent-collab-tests.el ends here

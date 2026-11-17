@@ -530,8 +530,11 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   在文件 buffer 里以选区或当前行提问；Noema 页面的“发给 Agent”经 `+agent-context--send` 的
   `:deliver` 同样成为线程。默认收件人是这篇文档的协作者（`+agent-context--session` 预选它，
   否则仍是本项目上次的会话）。一个协作者一次只接一条线程：它忙时下一条在 Emacs 侧等待，
-  空闲才送出，所以回合结束（`+agent-acp-turn-complete-functions`）时把最后一条回复放回发起它的
-  线程，`end_turn` 记为 replied，否则 stopped；人在聊天里自己输入的回合不归任何线程。
+  空闲才送出，所以回合结束（`+agent-acp-turn-complete-functions`）时把这一回合的回复放回发起它的
+  线程。回复取自协议层：`acp.el` 从 agent-shell 的 `agent-message-chunk` 事件按回合累积 Agent 的
+  最后一段消息（工具调用之后另起一段，新回合清空），`+agent-acp-turn-reply` 读出，不从渲染后的
+  聊天抠文本。`end_turn` 且有回复记为 replied，否则 stopped；提示被拒（`+agent-context--deliver`
+  的失败回调）记为 failed 并放行下一条；人在聊天里自己输入的回合不归任何线程。
   `C-c A k` 列出线程：`RET` 回到锚点，`v` 读全文，`r` 追问同一协作者，`c` 结案，`o` 进入
   agent-shell 深谈。非 Markdown 文件的修订（C66）由 `C-c A Y` 审阅：接受时旧文仍在原位或全文
   只出现一次才写入，否则拒绝；拒绝只改状态。一个已打开且有未保存修改的 buffer 不会替人保存。
@@ -541,6 +544,16 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   `C-c A Z` 列出这篇文档上的直接改动，`RET` 看 diff，`u` 放回旧文：仅当新文在文件中恰好出现
   一次；Markdown 笔记经 `agent:document:edit` 写回，打开的页面随之更新，其余文件走 C67 的
   同一写入规则。新建整文件的改动不提供放回。测试：`agent-collab-c68-*`。
+- **C69 全局可见性。** `C-c A H`（`+agent/topology`，`M-x agent-topology`）是会话池的只读拓扑：
+  Pi 在上，管理它所在的项目；项目下是文档，文档下是绑定它的协作者，协作者到它另外改过的文件
+  是虚线。节点标出状态（working / needs you / idle / disconnected）与文档的待审项（未拒绝的卡片
+  加修订）和未结线程。模型来自会话快照与协作记录，不向 Agent 发查询；状态事件合并后重画，
+  没有轮询计时器，视图关掉即解除监听。布局沿用已退役研究 Graph Board 的引擎：客户端的
+  Graphviz `dot -Tjson` 排版，SVG 自绘；没有 Graphviz 时只列节点。`n`/`p` 选择，`RET` 打开
+  （文档停在第一张卡片，协作者回到其主文件），`S-RET` 进入聊天。Treemacs 用自带注解接口
+  （来源 `agent-collab`）标记：绑定的文件 ` ◆N`、待审 ` ✎M`、只被改过 ` ◇`，文件夹汇总其下文件
+  （每个文件只计一次），正在被改的文件用 `+agent-presence-working`；同样随事件合并刷新，
+  只在 Treemacs 与会话层都已加载后启用。测试：`agent-topology-c69-*`、`agent-presence-c69-*`。
 
 ## 实现位置
 

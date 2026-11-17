@@ -336,8 +336,9 @@ is always last and does not replace the remembered session."
           (concat (cdr instructions) "\n\n" (map-elt (car copy) 'text)))
     copy))
 
-(defun +agent-context--deliver (buffer blocks &optional instructions no-focus)
-  "Send BLOCKS when BUFFER can take a turn; NO-FOCUS preserves the editor."
+(defun +agent-context--deliver (buffer blocks &optional instructions no-focus on-failure)
+  "Send BLOCKS when BUFFER can take a turn; NO-FOCUS preserves the editor.
+ON-FAILURE, a function of no arguments, runs when the agent refuses the prompt."
   (cond
    ;; A session started for this send is still shaking hands with its agent.
    ((not (+agent-acp-state-value buffer '(:session :id)))
@@ -350,7 +351,7 @@ is always last and does not replace the remembered session."
                            (+agent-acp-unsubscribe
                             :buffer buffer :subscription subscription))
                          (when (buffer-live-p buffer)
-                           (+agent-context--deliver buffer blocks instructions no-focus))))))
+                           (+agent-context--deliver buffer blocks instructions no-focus on-failure))))))
     (message "Agent: the session is starting; your context follows"))
    ;; Mid-turn: agent-shell's own queue sends it when the turn finishes.  A
    ;; queued prompt is plain text, so the references travel as the same
@@ -371,7 +372,8 @@ is always last and does not replace the remembered session."
          :buffer buffer :content content :process-queue t
          :on-failure (lambda (&rest _)
                        (setq accepted nil)
-                       (when first (remhash key +agent-context--session-instructions)))))
+                       (when first (remhash key +agent-context--session-instructions))
+                       (when on-failure (funcall on-failure)))))
       (when (and first accepted)
         (when (>= (hash-table-count +agent-context--session-instructions) 256)
           (remhash (car (hash-table-keys +agent-context--session-instructions))

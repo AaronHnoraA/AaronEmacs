@@ -27,6 +27,8 @@
 (require 'seq)
 (require 'tools/agent/notifications)
 (require 'tools/agent/binding)
+;; Treemacs marks the files collaborators work on (C69), once both exist.
+(after! (treemacs tools/agent/acp) (require 'tools/agent/presence))
 (require 'noema/bridge/agent-notifications)
 
 (dolist (option '(+agent-notify-events +agent-notify-delay +agent-notify-cooldown))
