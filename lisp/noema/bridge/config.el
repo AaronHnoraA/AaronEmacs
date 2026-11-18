@@ -1551,6 +1551,27 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
                 (encode-coding-string json 'utf-8)
               json))))
 
+(defvar +agent-collab-changed-functions)
+(defvar +noema--comment-signatures (make-hash-table :test #'equal)
+  "Note file -> the signature of its side comments when last saved.")
+
+(defun +noema--comments-saved-h (payload)
+  "Announce PAYLOAD's note when the ids or states of its side comments changed."
+  (when-let* ((file (alist-get 'file payload))
+              ((string-match-p "\\.\\(?:md\\|markdown\\)\\'" file))
+              ((file-readable-p file)))
+    (let ((signature (with-temp-buffer
+                       (insert-file-contents file)
+                       (let (marks)
+                         (goto-char (point-min))
+                         (while (re-search-forward "@@scomment\\(?:([^)\n]*)\\)?[ \t]*\\[" nil t)
+                           (push (buffer-substring-no-properties (match-beginning 0) (min (point-max) (+ (point) 80))) marks))
+                         (secure-hash 'sha1 (string-join marks "\n"))))))
+      (unless (equal signature (gethash file +noema--comment-signatures))
+        (when (>= (hash-table-count +noema--comment-signatures) 512) (clrhash +noema--comment-signatures))
+        (puthash file signature +noema--comment-signatures)
+        (run-hook-with-args '+agent-collab-changed-functions file)))))
+
 (defun +noema--gateway-event (params _client)
   "Acknowledge Noema event PARAMS and dispatch it outside the process filter."
   (let* ((type (format "%s" (or (alist-get 'type params) "")))
@@ -1689,6 +1710,10 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
              nil)
             ((or "open" "system-open" "zotero" "zotero-import"
                  "current-file" "saved")
+             ;; A saved note whose side comments changed: the task panel
+             ;; follows (C79).  Only once collaboration is in use.
+             (when (and (equal type "saved") (featurep 'tools/agent/collab))
+               (+noema--defer-host-event #'+noema--comments-saved-h payload))
              (+noema--event-line type payload))
             (_ nil))))
     (when line

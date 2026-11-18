@@ -1,4 +1,4 @@
-;;; agent-collab-tests.el --- Document collaboration: authorship, threads, direct changes -*- lexical-binding: t; -*-
+;;; agent-collab-tests.el --- Document collaboration: authorship, comment tasks, direct changes -*- lexical-binding: t; -*-
 (require 'ert)
 (require 'cl-lib)
 (require 'tools/agent/acp)
@@ -61,65 +61,6 @@
            (cl-letf (((symbol-function '+agent-collab-root) (lambda (_file) ,root)))
              ,@body))
        (delete-directory ,root t))))
-
-(ert-deftest agent-collab-c70-a-thread-is-kept-in-the-folder-journal ()
-  (agent-collab-tests--project root
-    (agent-collab-tests--agent-buffer agent
-      (let* ((file (expand-file-name "src/SAI.md" root))
-             (thread (+agent-collab-thread-create :file file :line 3 :anchor "alpha"
-                                                  :session agent :text "Why alpha?")))
-        (should (file-exists-p (expand-file-name "src/.noema-comments.jsonl" root)))
-        (should (string-match-p "\\`c-[0-9]\\{14\\}-[0-9a-f]\\{6\\}\\'" (alist-get 'id thread)))
-        (let ((stored (car (+agent-collab-threads file))))
-          (should (equal (alist-get 'id stored) (alist-get 'id thread)))
-          (should (equal (alist-get 'state stored) "waiting"))
-          (should (equal (alist-get 'line stored) 3))
-          (should (equal (alist-get 'quote stored) "alpha"))
-          (should (equal (alist-get 'name (alist-get 'assignee stored)) "claude·SAI"))
-          (should (equal (mapcar (lambda (m) (alist-get 'name (alist-get 'author m))) (alist-get 'messages stored))
-                         '("You"))))
-        (should-not (+agent-collab-threads (expand-file-name "src/main.py" root)))))))
-
-(ert-deftest agent-collab-c70-threads-the-host-wrote-are-read ()
-  "Emacs folds the same journal the Noema host appends to for page comments."
-  (agent-collab-tests--project root
-    (let ((file (expand-file-name "src/SAI.md" root)))
-      (with-temp-file (expand-file-name "src/.noema-comments.jsonl" root)
-        (insert "{\"v\":1,\"op\":\"thread\",\"id\":\"c-1111\",\"note\":\"SAI.md\",\"quote\":\"alpha\",\"author\":{\"name\":\"You\",\"kind\":\"person\"},\"text\":\"Why?\",\"at\":\"2026-11-17T08:00:00.000Z\"}\n"
-                "{\"v\":1,\"op\":\"reply\",\"id\":\"c-1111\",\"mid\":\"m-1\",\"author\":{\"name\":\"codex\",\"kind\":\"agent\"},\"text\":\"Because.\",\"at\":\"2026-11-17T08:01:00.000Z\"}\n"
-                "{\"v\":1,\"op\":\"thread\",\"id\":\"c-2222\",\"note\":\"other.md\",\"quote\":\"x\",\"author\":{\"name\":\"You\",\"kind\":\"person\"},\"text\":\"elsewhere\",\"at\":\"2026-11-17T08:02:00.000Z\"}\n"
-                "not json\n"))
-      (let ((threads (+agent-collab-threads file)))
-        (should (equal (mapcar (lambda (thread) (alist-get 'id thread)) threads) '("c-1111")))
-        (should (equal (alist-get 'state (car threads)) "replied")))
-      (+agent-collab--set-resolved file "c-1111" t)
-      (should (equal (alist-get 'state (+agent-collab-thread file "c-1111")) "resolved")))))
-
-(ert-deftest agent-collab-c73-a-dispatched-comment-is-sent-to-its-agent ()
-  (agent-collab-tests--project root
-    (agent-collab-tests--agent-buffer agent
-      (let ((file (expand-file-name "src/SAI.md" root)) delivered notified)
-        (with-temp-file (expand-file-name "src/SAI.md" root) (insert "# SAI\n\n{==alpha==}{>>#c-1111<<}\n"))
-        (with-temp-file (expand-file-name "src/.noema-comments.jsonl" root)
-          (insert "{\"v\":1,\"op\":\"thread\",\"id\":\"c-1111\",\"note\":\"SAI.md\",\"quote\":\"alpha\",\"author\":{\"name\":\"You\",\"kind\":\"person\"},\"text\":\"Why alpha?\",\"at\":\"2026-11-17T08:00:00.000Z\"}\n"))
-        (cl-letf (((symbol-function '+agent-collab--live-collaborator) (lambda (_) agent))
-                  ((symbol-function '+agent-collab--idle-p) (lambda (_) t))
-                  ((symbol-function '+agent-collab--deliver) (lambda (_b prompt) (push prompt delivered)))
-                  ((symbol-function '+agent-collab--notify-host) (lambda (f) (push f notified))))
-          (+agent-collab-ask-thread file "c-1111"))
-        (should (string-match-p "Why alpha?" (car delivered)))
-        (should (string-match-p "line 3 about «alpha»" (car delivered)))
-        (should (equal (alist-get 'name (alist-get 'assignee (+agent-collab-thread file "c-1111"))) "claude·SAI"))
-        (should notified)))))
-
-(ert-deftest agent-collab-c70-a-comment-without-a-collaborator-stays ()
-  (agent-collab-tests--project root
-    (let ((file (expand-file-name "src/SAI.md" root)))
-      (with-temp-file (expand-file-name "src/.noema-comments.jsonl" root)
-        (insert "{\"v\":1,\"op\":\"thread\",\"id\":\"c-1111\",\"note\":\"SAI.md\",\"quote\":\"alpha\",\"author\":{\"name\":\"You\",\"kind\":\"person\"},\"text\":\"Note to self\",\"at\":\"2026-11-17T08:00:00.000Z\"}\n"))
-      (cl-letf (((symbol-function '+agent-collab--live-collaborator) (lambda (_) nil)))
-        (+agent-collab-ask-thread file "c-1111"))
-      (should (equal (alist-get 'state (+agent-collab-thread file "c-1111")) "open")))))
 
 (ert-deftest agent-collab-c67-context-sends-default-to-the-document-collaborator ()
   (require 'tools/agent/context)
@@ -232,25 +173,6 @@
                                          (setq handed (list buffer question (length blocks))))))
       (should (equal handed (list agent "Why?" 1))))))
 
-(ert-deftest agent-collab-c76-a-send-about-a-place-becomes-a-task ()
-  (agent-collab-tests--project root
-    (agent-collab-tests--agent-buffer agent
-      (let ((file (expand-file-name "src/SAI.md" root)) sent)
-        (cl-letf (((symbol-function '+agent-context--deliver)
-                   (lambda (buffer blocks _instructions no-focus &rest _)
-                     (setq sent (list buffer (alist-get 'text (car blocks)) no-focus)))))
-          (funcall (+agent-collab-task-delivery file 3 "alpha")
-                   agent '(((type . "text") (text . "Why?")) ((type . "resource_link"))) nil "Why?"))
-        (let ((thread (car (+agent-collab-threads file))))
-          (should (equal (alist-get 'text (car (alist-get 'messages thread))) "Why?"))
-          (should (equal (alist-get 'quote thread) "alpha"))
-          (should (equal (alist-get 'session (alist-get 'assignee thread)) (+agent-acp-session-token agent)))
-          ;; Sent at once, without taking the keyboard; the turn names the thread.
-          (should (eq (nth 0 sent) agent))
-          (should (string-prefix-p "Why?\n\n(Task from comment " (nth 1 sent)))
-          (should (string-match-p (regexp-quote (alist-get 'id thread)) (nth 1 sent)))
-          (should (nth 2 sent)))))))
-
 (ert-deftest agent-collab-c76-sends-from-a-document-carry-a-task-delivery ()
   (agent-collab-tests--project root
     (agent-collab-tests--agent-buffer agent
@@ -278,25 +200,6 @@
         (setq-local +agent-acp-session-file nil)
         (should-error (+agent-collab--document) :type 'user-error)))))
 
-(ert-deftest agent-collab-c71-a-mentioned-collaborator-answers ()
-  (agent-collab-tests--project root
-    (agent-collab-tests--agent-buffer agent
-      (let ((file (expand-file-name "src/SAI.md" root)) asked)
-        (with-temp-file (expand-file-name "src/.noema-comments.jsonl" root)
-          (insert "{\"v\":1,\"op\":\"thread\",\"id\":\"c-1111\",\"note\":\"SAI.md\",\"quote\":\"alpha\",\"author\":{\"name\":\"You\",\"kind\":\"person\"},\"text\":\"@claude·SAI why?\",\"at\":\"2026-11-17T08:00:00.000Z\"}\n"))
-        (cl-letf (((symbol-function '+agent-collab--live-collaborator) (lambda (_) (error "Not this one")))
-                  ((symbol-function '+agent-session-snapshot)
-                   (lambda (buffer) (and (eq buffer agent) (list :buffer agent :native-session-id "n1"))))
-                  ((symbol-function '+agent-collab--idle-p) (lambda (_) t))
-                  ((symbol-function '+agent-collab--deliver) (lambda (b _prompt) (push b asked)))
-                  ((symbol-function '+agent-collab--notify-host) #'ignore))
-          (+agent-collab-ask-thread file "c-1111" `((buffer . ,(buffer-name agent)) (nativeSessionId . "n1")))
-          (should (equal asked (list agent)))
-          ;; A stale identity is refused rather than sent to another session.
-          (setq asked nil)
-          (+agent-collab-ask-thread file "c-1111" `((buffer . ,(buffer-name agent)) (nativeSessionId . "old")))
-          (should-not asked))))))
-
 (ert-deftest agent-collab-c73-a-task-carries-the-tools-guide ()
   (agent-collab-tests--agent-buffer agent
     (let (delivered)
@@ -310,18 +213,91 @@
           (+agent-collab--deliver agent "q"))
         (should (equal (nth 2 delivered) nil))))))
 
-(ert-deftest agent-collab-c75-resolving-one-thread-leaves-the-others-open ()
-  "Each folded thread is its own structure: no state leaks between threads."
+
+;;;; C79: comments are side comments in the note; tasks are journal lines.
+
+(ert-deftest agent-collab-c79-the-scanner-reads-the-shared-fixtures ()
+  (let ((fixtures (with-temp-buffer
+                    (insert-file-contents (expand-file-name "site-lisp/noema/shared/scomment-fixtures.json" user-emacs-directory))
+                    (json-parse-buffer :object-type 'alist :array-type 'list :false-object nil))))
+    (dolist (fixture fixtures)
+      (should (equal (mapcar (lambda (c) (list (alist-get 'id c) (alist-get 'done c) (alist-get 'text c)
+                                               (alist-get 'line c) (alist-get 'quote c)))
+                             (+agent-collab-scan (alist-get 'source fixture)))
+                     (mapcar (lambda (c) (list (alist-get 'id c) (alist-get 'done c) (alist-get 'text c)
+                                               (alist-get 'line c) (alist-get 'quote c)))
+                             (alist-get 'comments fixture)))))))
+
+(defun agent-collab-tests--note (root text)
+  "Write TEXT as ROOT's src/SAI.md and return its file."
+  (let ((file (expand-file-name "src/SAI.md" root)))
+    (with-temp-file file (insert text))
+    file))
+
+(defun agent-collab-tests--disk (file)
+  (with-temp-buffer (insert-file-contents file) (buffer-string)))
+
+(ert-deftest agent-collab-c79-handing-over-names-the-comment-and-records-the-agent ()
   (agent-collab-tests--project root
-    (let ((file (expand-file-name "src/SAI.md" root)))
-      (with-temp-file (expand-file-name "src/.noema-comments.jsonl" root)
-        (insert "{\"v\":1,\"op\":\"thread\",\"id\":\"c-1111\",\"note\":\"SAI.md\",\"quote\":\"a\",\"author\":{\"name\":\"You\",\"kind\":\"person\"},\"text\":\"one\",\"at\":\"2026-11-17T08:00:00.000Z\"}\n"
-                "{\"v\":1,\"op\":\"thread\",\"id\":\"c-2222\",\"note\":\"SAI.md\",\"quote\":\"b\",\"author\":{\"name\":\"You\",\"kind\":\"person\"},\"text\":\"two\",\"at\":\"2026-11-17T08:01:00.000Z\"}\n"
-                "{\"v\":1,\"op\":\"resolve\",\"id\":\"c-1111\",\"at\":\"2026-11-17T09:00:00.000Z\"}\n"
-                "{\"v\":1,\"op\":\"edit\",\"id\":\"c-1111\",\"text\":\"ONE\",\"at\":\"2026-11-17T09:01:00.000Z\"}\n"))
-      (should (equal (alist-get 'status (+agent-collab-thread file "c-1111")) "resolved"))
-      (should (equal (alist-get 'status (+agent-collab-thread file "c-2222")) "open"))
-      (should (equal (alist-get 'text (car (alist-get 'messages (+agent-collab-thread file "c-2222")))) "two")))))
+    (agent-collab-tests--agent-buffer agent
+      (let* ((+noema--ready nil)
+             (file (agent-collab-tests--note root "# SAI\n\nThe bound @@scomment [Prove [it]] holds.\n"))
+             (comment (car (+agent-collab-comments file)))
+             delivered)
+        (should (equal (alist-get 'id comment) ""))
+        (cl-letf (((symbol-function '+agent-collab--deliver) (lambda (_b prompt) (push prompt delivered))))
+          (+agent-collab-dispatch comment agent))
+        ;; An id-less comment is given one; its text stays as written.
+        (should (string-match "The bound @@scomment \\[Prove \\[it\\]\\] {id: \\([a-z0-9]\\{6\\}\\)} holds" (agent-collab-tests--disk file)))
+        (let ((id (match-string 1 (agent-collab-tests--disk file))))
+          (should (string-match-p (format "side comment %s on .*SAI.md, line 3, after «The bound»" id) (car delivered)))
+          (should (string-match-p "agent:document:comment" (car delivered)))
+          (should (equal (alist-get 'assignee (+agent-collab-comment file id))
+                         (cons "claude·SAI" (+agent-acp-session-token agent)))))))))
+
+(ert-deftest agent-collab-c79-done-and-reopen-edit-only-the-head ()
+  (agent-collab-tests--project root
+    (let* ((+noema--ready nil)
+           (file (agent-collab-tests--note root "a @@scomment [x \\] y] {id: ab12cd; by: You}\nb @@scomment [z] {id: cd34ef}\n")))
+      (+agent-collab-set-done (+agent-collab-comment file "ab12cd") t)
+      (should (equal (agent-collab-tests--disk file) "a @@scomment(done) [x \\] y] {id: ab12cd; by: You}\nb @@scomment [z] {id: cd34ef}\n"))
+      (should (alist-get 'done (+agent-collab-comment file "ab12cd")))
+      (should-not (alist-get 'done (+agent-collab-comment file "cd34ef")))
+      (+agent-collab-set-done (+agent-collab-comment file "ab12cd") nil)
+      (should (string-prefix-p "a @@scomment [x \\] y]" (agent-collab-tests--disk file))))))
+
+(ert-deftest agent-collab-c79-a-note-gains-a-side-comment-and-code-keeps-a-journal-task ()
+  (agent-collab-tests--project root
+    (let* ((+noema--ready nil)
+           (note (agent-collab-tests--note root "# SAI\n\nalpha\nbeta\n"))
+           (code (expand-file-name "src/main.py" root))
+           (begin (string-match "alpha" (agent-collab-tests--disk note)))
+           (id (+agent-collab-add note "Why ] alpha?" begin (+ begin 5))))
+      (should (equal (agent-collab-tests--disk note) (format "# SAI\n\nalpha @@scomment [Why \\] alpha?] {id: %s}\nbeta\n" id)))
+      (let ((task (+agent-collab-add code "Rename y" 6 11)))
+        (should (equal (agent-collab-tests--disk code) "x = 1\ny = 2\n"))
+        (let ((comment (+agent-collab-comment code task)))
+          (should (equal (alist-get 'text comment) "Rename y"))
+          (should (equal (alist-get 'line comment) 2))
+          (should (equal (alist-get 'quote comment) "y = 2")))))))
+
+(ert-deftest agent-collab-c76-a-send-about-a-place-becomes-a-task ()
+  (agent-collab-tests--project root
+    (agent-collab-tests--agent-buffer agent
+      (let* ((+noema--ready nil)
+             (file (agent-collab-tests--note root "# SAI\n\nalpha\n"))
+             (begin (string-match "alpha" (agent-collab-tests--disk file)))
+             sent id)
+        (cl-letf (((symbol-function '+agent-context--deliver)
+                   (lambda (buffer blocks _instructions no-focus &rest _)
+                     (setq sent (list buffer (alist-get 'text (car blocks)) no-focus)))))
+          (setq id (funcall (+agent-collab-task-delivery file 3 "alpha" begin (+ begin 5))
+                            agent '(((type . "text") (text . "Why?")) ((type . "resource_link"))) nil "Why?")))
+        (should (string-match-p (format "alpha @@scomment \\[Why\\?\\] {id: %s}" id) (agent-collab-tests--disk file)))
+        (should (eq (nth 0 sent) agent))
+        (should (string-prefix-p "Why?\n\n(Task from side comment " (nth 1 sent)))
+        (should (nth 2 sent))
+        (should (equal (car (alist-get 'assignee (+agent-collab-comment file id))) "claude·SAI"))))))
 
 (provide 'agent-collab-tests)
 ;;; agent-collab-tests.el ends here

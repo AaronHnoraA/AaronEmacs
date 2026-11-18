@@ -19,7 +19,7 @@
 (require 'tools/agent/binding)
 
 (declare-function +agent-collab-suggestions "tools/agent/collab" (file &optional all))
-(declare-function +agent-collab-threads "tools/agent/collab" (file))
+(declare-function +agent-collab-comments "tools/agent/collab" (file))
 (declare-function +agent-collab--client-file "tools/agent/collab" (file))
 (defvar +agent-collab-changed-functions)
 
@@ -41,7 +41,7 @@
 (defun +agent-topology-file-counts (file)
   "Return (:pending N :threads M) for FILE.
 Pending counts review cards that are not rejected and suggestions; threads
-counts those not resolved."
+counts the comment tasks not done."
   (require 'tools/agent/collab)
   (let* ((client (+agent-collab--client-file file))
          (cards (if (and (string-match-p "\\.\\(?:md\\|markdown\\)\\'" client) (file-readable-p client))
@@ -55,8 +55,8 @@ counts those not resolved."
                         count))
                   0)))
     (list :pending (+ cards (length (ignore-errors (+agent-collab-suggestions client))))
-          :threads (seq-count (lambda (thread) (not (equal (alist-get 'status thread) "resolved")))
-                              (ignore-errors (+agent-collab-threads client))))))
+          :threads (seq-count (lambda (comment) (not (alist-get 'done comment)))
+                              (ignore-errors (+agent-collab-comments client))))))
 
 (defun +agent-topology--file-label (file counts)
   "Return the label of FILE with COUNTS."

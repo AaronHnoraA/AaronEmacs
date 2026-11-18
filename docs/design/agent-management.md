@@ -525,16 +525,12 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   不动；没有 Project 时拒绝，`edit` 只接受 Markdown。所有入口都说明文档工具：页面入口（工具指南，
   API 路径指向 checkout 的 `scripts/`）、项目入口（一句话）、LaTeX 导出修复会话。Agent 自身逻辑不改。
   测试：`C66 *`（Noema）、`agent-collab-c66-*`、`agent-api-c66-*`、`noema-agent-entry-c66-*`。
-- **C67 文档线程。** 在文档某处提问是一条线程，存于文档所在文件夹的 `.noema-comments.jsonl`
-  （C70 的批注日志：引文、行、指派的协作者、消息）。`C-c A d`（`+agent-collab/ask`）
-  在文件 buffer 里以选区或当前行提问；Noema 页面的“发给 Agent”经 `+agent-context--send` 的
-  `:deliver` 同样成为线程。默认收件人是这篇文档的协作者（`+agent-context--session` 预选它，
-  否则仍是本项目上次的会话）。一个协作者一次只接一条线程：它忙时下一条在 Emacs 侧等待，
-  线程交给 Agent 时只发一条提示，回复不收集（C73）；Agent 经 API 回复、修改并结案。
-  `C-c A k` 列出线程：`RET` 回到锚点，`v` 读全文，`r` 追问同一协作者，`c` 结案，`o` 进入
-  agent-shell 深谈。非 Markdown 文件的修订（C66）由 `C-c A Y` 审阅：接受时旧文仍在原位或全文
-  只出现一次才写入，否则拒绝；拒绝只改状态。一个已打开且有未保存修改的 buffer 不会替人保存。
-  测试：`agent-collab-c67-*`、`agent-collab-c66-*`、`noema-md-bridge-c67-*`。
+- **C67 文档里的提问。** 在文档某处提问就是加一条批注任务（C79）：`C-c A d`（`+agent-collab/ask`）
+  在文件 buffer 里以选区或当前行加批注，Noema 页面用 ⌘⌥M；交给谁在协作面板里决定。默认收件人
+  是这篇文档的协作者（`+agent-context--session` 预选它，否则仍是本项目上次的会话）。非 Markdown
+  文件的修订（C66）由 `C-c A Y` 审阅：接受时旧文仍在原位或全文只出现一次才写入，否则拒绝；
+  拒绝只改状态。一个已打开且有未保存修改的 buffer 不会替人保存。
+  测试：`agent-collab-c66-*`、`noema-md-bridge-c76-*`。
 - **C68 直接改动。** Agent 绕过 API 用自己的工具改文件时，完成的 ACP 工具调用带来的 diff
   （旧文、新文）记入该会话的 `+agent-acp--direct-edits`（有上限，随 client 结束），与 C44 同源。
   `C-c A Z` 列出这篇文档上的直接改动，`RET` 看 diff，`u` 放回旧文：仅当新文在文件中恰好出现
@@ -549,16 +545,14 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   （来源 `agent-collab`）标记：绑定的文件 ` ◆N`、待审 ` ✎M`、只被改过 ` ◇`，文件夹汇总其下文件
   （每个文件只计一次），正在被改的文件用 `+agent-presence-working`；同样随事件合并刷新，
   只在 Treemacs 与会话层都已加载后启用。测试：`agent-topology-c69-*`、`agent-presence-c69-*`。
-- **C70 页面批注。** Noema 页面像 Google Docs 一样加批注；契约在
-  [comments.md](../noema/design/comments.md)。线程存在每个文件夹的 `.noema-comments.jsonl`
-  （只追加的事件日志），C67 的线程也改存这里，不再放在 Project 的 `.agent/`；页面批注经
-  Emacs 的 `comments-changed` 事件刷新任务面板。
-- **C73 批注即任务，不收集回答。** 页面不显示 Agent：没有协作者徽章、`@` 选人和"回复中"。
-  批注在 Emacs 的任务面板里收集，并从面板交给某个 Agent（`+agent-collab-dispatch`）：只发一条提示
-  （请求、线程 id、文件、行、引文，每个原生会话的第一条附 Noema 工具指南），之后 Agent 自己经 API
-  修改、在批注里回复，并用 `agent:document:comment` 的 `resolve` 结案。Emacs 不读 Agent 的聊天，也不
-  逐块累积回复（`acp.el` 不订阅 `agent-message-chunk`）；忙的会话由 agent-shell 自己的队列排队。
-  测试：`agent-collab-c73-*`、`C73 *`。
+- **C73 / C79 批注即任务。** 批注是笔记里的边注 `@@scomment [正文] {id: …}`，`@@scomment(done)` 是
+  完成的；契约在 [comments.md](../noema/design/comments.md)。页面没有评论栏、线程和回复，也不显示
+  Agent。批注在协作面板的任务页收集，从那里交给某个 Agent（`+agent-collab-dispatch`）：只发一条提示
+  （批注、id、文件、行、前面的文字，每个原生会话的第一条附 Noema 工具指南），之后 Agent 经
+  `agent:document:edit` 修改文件，并用 `agent:document:comment {file,id}` 标为完成。文件夹的隐藏
+  `.noema-tasks.jsonl` 只记谁接了哪条（不能放边注的文件连任务本身也记在这里）。对笔记的每次改动
+  都走 `agent:document:edit`，打开的页面随之更新；Emacs 不读 Agent 的聊天，忙的会话由 agent-shell
+  自己的队列排队。测试：`agent-collab-c79-*`、`C79 *`。
 - **C74 Agent 经 API 修改，不必等，也不让人等。** `agent:document:edit`（笔记）与 `agent:file:edit`
   （任何文本文件）接受同一组写法：`{oldText,newText}`（原文唯一，像 Agent 自带的 Edit）、
   `{lines:[a,b],newText}`、`{after|before:行内文字,newText}`、`{append}`、位置 `{from,to,oldText,newText}`
@@ -571,7 +565,7 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   Agent 只在人于聊天里同意后才可带 `allowLarge`。测试：`C74 *`、`agent-edit-c74-*`。
 - **C75 协作面板。** `H-t`（`agent-panel`，`tools/agent/panel.el`）在右侧开固定侧窗，`H-t` 或 `q`
   收起，点击别处不关。标签：任务（默认；批注即任务，范围本文件→本目录→目录及子目录→项目，
-  `s` 切换；`a` 交给 Agent、`r` 回复、`c` 结案、`R` 显示已结案）、Pi、拓扑。面板说的是最近聚焦的
+  `s` 切换；`a` 交给 Agent、`c` 标为完成或重开、`o` 进聊天、`R` 显示已完成）、Pi、拓扑。面板说的是最近聚焦的
   文档（`+agent-binding-last-document`，由 `aaron-switch-buffer-hook` 记录）；只在显示时监听状态
   事件并合并为一次重绘，隐藏后什么都不挂。`H-T` 是原来的 Agent 选择器，默认针对同一篇文档。
   页面里没有打开 Agent 的按钮。测试：`agent-panel-c75-*`。
@@ -588,8 +582,8 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   `C-c 1/2/3` 切换（任务页与图谱页也可直接按 `1/2/3`），页签可点。测试：`agent-panel-c78-*`、
   `agent-board-c78-*`。
 - **C76 发送即任务。** 指向文档某处的发送（`C-c A c` 的区域/整篇/光标处、页面选区、旧的
-  `noema-interaction-send-*`）经 `+agent-collab-task-delivery` 变成该处的批注线程、指派给选中会话
-  并立即交出，不夺键盘；聊天与草稿、剪贴板路径不变。测试：`agent-collab-c76-*`。
+  `noema-interaction-send-*`）经 `+agent-collab-task-delivery` 变成该处的边注任务（代码文件记在
+  任务日志里）、指派给选中会话并立即交出，不夺键盘；聊天与草稿、剪贴板路径不变。测试：`agent-collab-c76-*`。
 
 ## 实现位置
 

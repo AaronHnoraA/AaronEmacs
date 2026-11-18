@@ -425,15 +425,17 @@ This config already has maintenance and workflow entry points. Reuse them:
   under `~/.config/mn-bridge/`) and never read as each other; the `marginnote-agent`
   Skill has the capability matrix, `docs/noema/design/marginnote-agent-bridge.md`
   the contracts.
-- Comments and document collaboration: a Noema page comments like Google Docs
-  (`docs/noema/design/comments.md`, C70). The anchor `{==text==}{>>#c-ID<<}`
-  sits in the note. Threads live in each folder's hidden
-  `.noema-comments.jsonl`, an append-only journal that the host and Emacs
-  both append to. A comment goes to the note's collaborator, a pool session
-  bound to the file (C65), and its reply comes back into the card. Do not add
-  another comment store, another review surface or an Emacs-side copy of the
-  rail. Agent facts (replies, tool diffs) come from `acp.el` events, never
-  from the rendered chat.
+- Comments and document collaboration: a comment is a side comment in the
+  note, `@@scomment [text] {id: …}`, and a comment is a task
+  (`docs/noema/design/comments.md`, C79); `@@scomment(done)` is a finished
+  one. The page has no rail, threads or replies. Tasks are listed and handed
+  to agents in the collaboration panel (`H-t`); the folder's hidden
+  `.noema-tasks.jsonl` records only who took which comment (and the tasks of
+  files that cannot hold a comment). An agent changes the file through the API
+  and marks the comment done; every change to a note goes through
+  `agent:document:edit`. `shared/scomment.mjs` is the one parser. Do not add
+  another comment store or review surface. Agent facts (tool diffs) come from
+  `acp.el` events, never from the rendered chat.
 - Page search and references: one implementation, the Noema kernel's
   (`site-lisp/noema/kernel/noema/wikisearch`).  `lisp/noema/search/config.el`
   sends the typed text and shows the answer through the completion style

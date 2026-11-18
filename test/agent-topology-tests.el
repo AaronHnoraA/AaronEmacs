@@ -66,8 +66,8 @@
           (with-temp-file file
             (insert "a\n#+begin ediff t\n-a\n+b\n#+end ediff\n#+begin ediff r\n@@ediff-status rejected\n-c\n+d\n#+end ediff\n"))
           (cl-letf (((symbol-function '+agent-collab-suggestions) (lambda (&rest _) '(s1 s2)))
-                    ((symbol-function '+agent-collab-threads)
-                     (lambda (&rest _) '(((status . "waiting")) ((status . "replied")) ((status . "resolved"))))))
+                    ((symbol-function '+agent-collab-comments)
+                     (lambda (&rest _) '(((done)) ((done)) ((done . t))))))
             (let ((counts (+agent-topology-file-counts file)))
               (should (= (plist-get counts :pending) 3))
               (should (= (plist-get counts :threads) 2)))))
