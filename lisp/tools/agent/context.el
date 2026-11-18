@@ -475,12 +475,9 @@ document (a file the person works on, not an agent chat) takes tasks."
   (when-let* ((file (with-current-buffer buffer (+agent-document-file))))
     (require 'tools/agent/collab)
     (with-current-buffer buffer
-      (save-restriction
-        (widen)
-        (+agent-collab-task-delivery
-         file (and begin (line-number-at-pos begin t))
-         (and begin (buffer-substring-no-properties begin (min end (+ begin 200))))
-         (and begin (1- begin)) (and end (1- end)))))))
+      (+agent-collab-task-delivery
+       file (and begin (line-number-at-pos begin t))
+       (and begin (buffer-substring-no-properties begin (min end (+ begin 200))))))))
 
 ;;;; ── Commands ─────────────────────────────────────────────────────────────
 

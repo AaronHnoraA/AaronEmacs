@@ -4,17 +4,18 @@
 ;; `H-t' (C75) opens a side window on the right that stays until `H-t' or `q'
 ;; hides it.  Its three tabs are three buffers shown in that one window:
 ;;
-;;   Tasks  the comments (`@@comment', C79) of the focused document, its
-;;          folder, the folder and its subfolders, or the whole Project, as a
-;;          task list; a comment is handed to an agent from here.
+;;   Tasks  the comments of the focused document, its folder, the folder and
+;;          its subfolders, or the whole Project, as a task list.  New comments
+;;          land here; a task is handed to an agent from here (C73).
 ;;   Pi     the Project's own Pi, its chat embedded here: a project Pi is shown
 ;;          only in this panel, never among the other sessions (C78).
 ;;   Graph  the interactive graph of Pi, projects, documents and agents
 ;;          (`tools/agent/board', C78).
 ;;
 ;; The panel listens to state events only while it is shown and redraws once
-;; per burst; closed, it costs nothing.  A wider scope finds its notes with
-;; ripgrep when it is drawn; nothing is cached or watched.
+;; per burst; closed, it costs nothing.  The task list reads the folders'
+;; comment journals (C70); a folder tree's journals are found once and kept
+;; until a comment appears in a folder not yet known.
 
 ;;; Code:
 
@@ -73,56 +74,57 @@
 (defvar-local +agent-panel--show-resolved nil "Whether resolved tasks are listed.")
 (defvar-local +agent-panel--timer nil "Pending coalesced redraw.")
 
+(defvar +agent-panel--journal-cache (make-hash-table :test #'equal)
+  "Folder tree -> the comment journals found under it.")
+
+;;;; Collecting tasks
+
 (defun +agent-panel--project-root (file)
   "Return the Project directory of FILE."
   (file-name-as-directory (or (+agent-acp-project-root (file-name-directory file))
                               (file-name-directory file))))
 
-(defun +agent-panel--scope-files (root recursive)
-  "Return the files under ROOT with comment tasks: notes holding a side
-comment, and the files a task journal names.  Below ROOT only when RECURSIVE."
-  (let* ((default-directory root)
-         (depth (unless recursive '("--max-depth" "1")))
-         (skip (mapcan (lambda (dir) (list "--glob" (concat "!" dir))) +agent-panel-skip-directories))
-         (rg (executable-find "rg"))
-         (notes (when rg
-                  (ignore-errors
-                    (apply #'process-lines rg "-l" "-F" "--glob" "*.md" "--glob" "*.markdown"
-                           (append depth skip (list "@@comment" "."))))))
-         (journals (when rg
-                     (ignore-errors
-                       (apply #'process-lines rg "--files" "--hidden" "--glob" +agent-collab-tasks-file
-                              (append depth skip (list ".")))))))
-    (unless rg
-      (setq notes (seq-filter (lambda (file) (with-temp-buffer (insert-file-contents file) (search-forward "@@comment" nil t)))
-                              (if recursive (directory-files-recursively root "\\.md\\'")
-                                (directory-files root t "\\.md\\'")))))
-    (delete-dups
-     (append (mapcar (lambda (file) (expand-file-name file root)) notes)
-             (mapcan (lambda (journal)
-                       (let ((directory (file-name-directory (expand-file-name journal root))))
-                         (with-temp-buffer
-                           (insert-file-contents (expand-file-name journal root))
-                           (let (files)
-                             (dolist (line (split-string (buffer-string) "\n" t) files)
-                               (when-let* ((event (ignore-errors (json-parse-string line :object-type 'alist)))
-                                           ((alist-get 'text event))
-                                           (note (alist-get 'note event)))
-                                 (cl-pushnew (expand-file-name note directory) files :test #'equal)))))))
-                     journals)))))
+(defun +agent-panel--journals-under (root &optional rescan)
+  "Return the comment journals under ROOT, from the cache unless RESCAN."
+  (or (and (not rescan) (gethash root +agent-panel--journal-cache))
+      (puthash root
+               (when (file-directory-p root)
+                 (directory-files-recursively
+                  root (concat "\\`" (regexp-quote +agent-collab-comments-file) "\\'") nil
+                  (lambda (directory)
+                    (not (member (file-name-nondirectory directory) +agent-panel-skip-directories)))))
+               +agent-panel--journal-cache)))
+
+(defun +agent-panel--folder-threads (directory)
+  "Return every thread in DIRECTORY's journal, each with its file."
+  (let (threads)
+    (maphash (lambda (_id thread)
+               (let ((file (expand-file-name (alist-get 'note thread) directory)))
+                 (push (+agent-collab--with-file thread file) threads)))
+             (+agent-collab--fold (expand-file-name "x" directory)))
+    threads))
 
 (defun +agent-panel-tasks (file scope)
-  "Return the comment tasks of SCOPE around document FILE, as ((FILE . COMMENTS) ...)."
+  "Return the tasks of SCOPE around document FILE, grouped as ((FILE . THREADS) ...)."
   (setq file (+agent-collab--client-file file))
   (let* ((directory (file-name-directory (expand-file-name file)))
-         (files (pcase scope
-                  ('file (list file))
-                  ('dir (cons file (+agent-panel--scope-files directory nil)))
-                  ('tree (cons file (+agent-panel--scope-files directory t)))
-                  ('project (cons file (+agent-panel--scope-files (+agent-panel--project-root file) t))))))
-    (sort (delq nil (mapcar (lambda (each) (when-let* ((comments (+agent-collab-comments each))) (cons each comments)))
-                            (delete-dups (mapcar #'expand-file-name files))))
-          (lambda (a b) (string< (car a) (car b))))))
+         (threads
+          (pcase scope
+            ('file (+agent-collab-threads file))
+            ('dir (+agent-panel--folder-threads directory))
+            ((or 'tree 'project)
+             (let ((root (if (eq scope 'tree) directory (+agent-panel--project-root file))))
+               (mapcan (lambda (journal) (+agent-panel--folder-threads (file-name-directory journal)))
+                       (+agent-panel--journals-under root)))))))
+    (let (groups)
+      (dolist (thread (sort threads (lambda (a b) (string< (or (alist-get 'createdAt a) "")
+                                                            (or (alist-get 'createdAt b) "")))))
+        (let ((cell (assoc (alist-get 'file thread) groups)))
+          (if cell (setcdr cell (append (cdr cell) (list thread)))
+            (push (cons (alist-get 'file thread) (list thread)) groups))))
+      (sort groups (lambda (a b) (string< (car a) (car b)))))))
+
+;;;; Drawing
 
 (defconst +agent-panel--tabs '((tasks "1" "Tasks") (pi "2" "Pi") (graph "3" "Graph"))
   "The tabs: symbol, key and title.")
@@ -165,57 +167,66 @@ comment, and the files a task journal names.  Below ROOT only when RECURSIVE."
               ((< minutes 1440) (format "%dh" (/ minutes 60)))
               (t (format "%dd" (/ minutes 1440))))))))
 
-(defun +agent-panel--insert-task (comment)
-  "Insert COMMENT as one task."
+(defun +agent-panel--insert-task (thread)
+  "Insert THREAD as one task."
   (let* ((start (point))
-         (done (alist-get 'done comment))
-         (width (max 20 (- (window-width (get-buffer-window (current-buffer))) 8)))
-         (assignee (alist-get 'assignee comment)))
-    (insert "  " (propertize (if done "✓" "●") 'face (if done '+agent-panel-done '+agent-panel-open)) " "
-            (propertize (truncate-string-to-width (string-trim (or (alist-get 'text comment) "")) width nil nil "…")
-                        'face (if done '+agent-panel-done 'default))
+         (resolved (equal (alist-get 'status thread) "resolved"))
+         (messages (alist-get 'messages thread))
+         (first (car messages))
+         (last (car (last messages)))
+         (width (max 20 (- (window-width (get-buffer-window (current-buffer))) 8))))
+    (insert "  " (propertize (if resolved "✓" "●") 'face (if resolved '+agent-panel-done '+agent-panel-open)) " "
+            (propertize (truncate-string-to-width (string-trim (or (alist-get 'text first) "")) width nil nil "…")
+                        'face (if resolved '+agent-panel-done 'default))
             "\n")
-    (unless (string-empty-p (or (alist-get 'quote comment) ""))
-      (insert "    " (propertize (truncate-string-to-width (format "after «%s»" (alist-get 'quote comment)) width nil nil "…")
+    (unless (string-empty-p (or (alist-get 'quote thread) ""))
+      (insert "    " (propertize (truncate-string-to-width (format "«%s»" (alist-get 'quote thread)) width nil nil "…")
                                  'face '+agent-panel-quote)
               "\n"))
     (insert "    "
-            (propertize (concat (if assignee (format "→ %s" (car assignee)) "not handed over")
-                                (when-let* ((line (alist-get 'line comment))) (format " · line %d" line)))
+            (propertize (concat (alist-get 'name (alist-get 'author first))
+                                (when-let* ((assignee (alist-get 'assignee thread)))
+                                  (concat " → " (alist-get 'name assignee)))
+                                (when (> (length messages) 1)
+                                  (format " · %d repl%s, last %s" (1- (length messages))
+                                          (if (= (length messages) 2) "y" "ies")
+                                          (alist-get 'name (alist-get 'author last))))
+                                " · " (+agent-panel--age (alist-get 'at last))
+                                (when-let* ((line (+agent-collab--thread-line thread))) (format " · line %d" line)))
                         'face '+agent-panel-meta)
             "\n")
-    (put-text-property start (point) '+agent-panel-task (cons (alist-get 'file comment) (alist-get 'id comment)))
-    (put-text-property start (point) '+agent-panel-comment comment)))
+    (put-text-property start (point) '+agent-panel-task (cons (alist-get 'file thread) (alist-get 'id thread)))))
 
 (defun +agent-panel--draw-tasks ()
   "Draw the task tab."
-  ;; A Noema page names its document `/fs:local:...'; tasks name client paths.
+  ;; A Noema page names its document `/fs:local:...'; threads name client paths.
   (let* ((file (and +agent-panel--document (+agent-collab--client-file +agent-panel--document))))
     (if (not file)
         (insert "\n  Open a document (a note or a file) to see its tasks.\n")
       (let* ((groups (+agent-panel-tasks file +agent-panel--scope))
              (open 0) (resolved 0))
         (dolist (group groups)
-          (dolist (comment (cdr group))
-            (if (alist-get 'done comment) (cl-incf resolved) (cl-incf open))))
+          (dolist (thread (cdr group))
+            (if (equal (alist-get 'status thread) "resolved") (cl-incf resolved) (cl-incf open))))
         (insert (propertize (format "\n  %s · %d open" (alist-get +agent-panel--scope +agent-panel-scopes) open)
                             'face 'bold)
-                (propertize (format "%s   s scope  R done\n"
-                                    (if (> resolved 0) (format ", %d done%s" resolved
+                (propertize (format "%s   s scope  R resolved\n"
+                                    (if (> resolved 0) (format ", %d resolved%s" resolved
                                                                (if +agent-panel--show-resolved "" " (hidden)"))
                                       ""))
                             'face '+agent-panel-meta))
         (if (zerop (+ open (if +agent-panel--show-resolved resolved 0)))
             (insert "\n  No tasks.  Select text in a note and comment (⌘⌥M), or C-c A d.\n")
           (dolist (group groups)
-            (let ((shown (seq-filter (lambda (comment) (or +agent-panel--show-resolved (not (alist-get 'done comment))))
+            (let ((shown (seq-filter (lambda (thread) (or +agent-panel--show-resolved
+                                                          (not (equal (alist-get 'status thread) "resolved"))))
                                      (cdr group))))
               (when shown
                 (insert "\n " (propertize (file-relative-name (car group) (file-name-directory file))
                                           'face '+agent-panel-heading)
                         "\n")
                 (mapc #'+agent-panel--insert-task shown)))))
-        (insert (propertize "\n  RET open  a hand to an agent  c done/reopen  o chat  g refresh\n"
+        (insert (propertize "\n  RET open  a hand to an agent  c done/reopen  g refresh\n"
                             'face '+agent-panel-meta))))))
 
 ;;;; The panel window and its tabs
@@ -386,8 +397,15 @@ panel and never in the ordinary agent views."
                     (setq +agent-panel--timer (run-with-idle-timer 0.4 nil #'+agent-panel-redraw))))))
       ('graph (+agent-board-changed-h)))))
 
-(defun +agent-panel--comments-changed-h (&rest _)
-  "A comment or task changed: redraw the shown tab."
+(defun +agent-panel--comments-changed-h (file)
+  "A comment changed in FILE: forget a tree cache that does not know its folder."
+  (when (stringp file)
+    (let ((journal (expand-file-name +agent-collab-comments-file
+                                     (file-name-directory (+agent-collab--client-file file)))))
+      (maphash (lambda (root journals)
+                 (when (and (string-prefix-p root journal) (not (member journal journals)))
+                   (remhash root +agent-panel--journal-cache)))
+               +agent-panel--journal-cache)))
   (+agent-panel--changed-h))
 
 (defun +agent-panel--listen (on)
@@ -425,14 +443,9 @@ panel and never in the ordinary agent views."
       (user-error "Nothing here")))
 
 (defun +agent-panel--task ()
-  "Return the comment task at point, read again from its file."
-  (let* ((stale (+agent-panel--at '+agent-panel-comment))
-         (fresh (and (not (string-empty-p (or (alist-get 'id stale) "")))
-                     (+agent-collab-comment (alist-get 'file stale) (alist-get 'id stale)))))
-    (or fresh
-        (seq-find (lambda (comment) (equal (alist-get 'source comment) (alist-get 'source stale)))
-                  (+agent-collab-comments (alist-get 'file stale)))
-        (user-error "The comment is gone"))))
+  "Return the thread at point."
+  (pcase-let ((`(,file . ,id) (+agent-panel--at '+agent-panel-task)))
+    (or (+agent-collab-thread file id) (user-error "The task is gone"))))
 
 (defun +agent-panel--editing-window ()
   "Return a window to open documents in: not the panel."
@@ -442,9 +455,9 @@ panel and never in the ordinary agent views."
 (defun +agent-panel-visit ()
   "Open the task at point at its place."
   (interactive)
-  (let* ((comment (+agent-panel--task))
-         (file (alist-get 'file comment))
-         (line (alist-get 'line comment)))
+  (let* ((thread (+agent-panel--task))
+         (file (alist-get 'file thread))
+         (line (+agent-collab--thread-line thread)))
     (select-window (+agent-panel--editing-window))
     (if (and (string-match-p "\\.\\(?:md\\|markdown\\)\\'" file) (fboundp '+noema/open-file))
         (progn (+noema/open-file file)
@@ -460,7 +473,7 @@ panel and never in the ordinary agent views."
 (defun +agent-panel-chat ()
   "Open the agent of the task at point."
   (interactive)
-  (let ((session (+agent-collab--comment-session (+agent-panel--task))))
+  (let ((session (+agent-collab--thread-session (+agent-panel--task))))
     (select-window (+agent-panel--editing-window))
     (+agent-acp-show-buffer session)))
 
@@ -484,17 +497,19 @@ panel and never in the ordinary agent views."
           (+agent-shell/here choice (+agent-binding-canonical file)))))))
 
 (defun +agent-panel-dispatch ()
-  "Hand the comment at point to an agent; it changes the file through the API."
+  "Hand the task at point to an agent; its work comes back through the API."
   (interactive)
-  (let ((comment (+agent-panel--task)))
-    (+agent-collab-dispatch comment (+agent-panel--choose-agent (alist-get 'file comment)))
+  (let* ((thread (+agent-panel--task))
+         (file (alist-get 'file thread)))
+    (+agent-collab-dispatch file (alist-get 'id thread) (+agent-panel--choose-agent file))
     (+agent-panel-redraw)))
 
 (defun +agent-panel-resolve ()
-  "Mark the comment at point done, or open it again."
+  "Resolve the task at point, or reopen it."
   (interactive)
-  (let ((comment (+agent-panel--task)))
-    (+agent-collab-set-done comment (not (alist-get 'done comment)))
+  (let ((thread (+agent-panel--task)))
+    (+agent-collab--set-resolved (alist-get 'file thread) (alist-get 'id thread)
+                                 (not (equal (alist-get 'status thread) "resolved")))
     (+agent-panel-redraw)))
 
 (defun +agent-panel-cycle-scope ()
@@ -513,8 +528,9 @@ panel and never in the ordinary agent views."
   (+agent-panel-redraw))
 
 (defun +agent-panel-refresh ()
-  "Read every comment again."
+  "Re-read everything, including the folder tree's journals."
   (interactive)
+  (clrhash +agent-panel--journal-cache)
   (+agent-panel-redraw))
 
 (defun +agent-panel-show-tasks (file scope)
@@ -570,7 +586,6 @@ panel and never in the ordinary agent views."
   "j" #'+agent-panel-next
   "k" #'+agent-panel-previous
   "a" #'+agent-panel-dispatch
-  "o" #'+agent-panel-chat
   "c" #'+agent-panel-resolve
   "s" #'+agent-panel-cycle-scope
   "R" #'+agent-panel-toggle-resolved

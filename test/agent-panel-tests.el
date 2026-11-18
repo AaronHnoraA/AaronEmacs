@@ -3,49 +3,46 @@
 (require 'cl-lib)
 (require 'tools/agent/panel)
 
-(defun agent-panel-tests--note (root path &rest comments)
-  "Write note PATH under ROOT holding COMMENTS ((ID TEXT DONE) ...)."
-  (let ((file (expand-file-name path root)))
-    (make-directory (file-name-directory file) t)
-    (with-temp-file file
-      (insert "# Note\n\n")
-      (pcase-dolist (`(,id ,text ,done) comments)
-        (insert (format "Some passage @@comment%s [%s] {id: %s}\n" (if done "(done)" "") text id))))
-    file))
+(defun agent-panel-tests--journal (dir lines)
+  "Write LINES (thread specs (ID NOTE TEXT STATUS)) as DIR's comment journal."
+  (make-directory dir t)
+  (with-temp-file (expand-file-name ".noema-comments.jsonl" dir)
+    (setq buffer-file-coding-system 'utf-8-unix)
+    (pcase-dolist (`(,id ,note ,text ,status) lines)
+      (insert (format "{\"v\":1,\"op\":\"thread\",\"id\":%S,\"note\":%S,\"quote\":\"q\",\"author\":{\"name\":\"You\",\"kind\":\"person\"},\"text\":%S,\"at\":\"2026-11-17T08:00:00.000Z\"}\n" id note text))
+      (when (equal status "resolved")
+        (insert (format "{\"v\":1,\"op\":\"resolve\",\"id\":%S,\"at\":\"2026-11-17T09:00:00.000Z\"}\n" id))))))
 
 (defmacro agent-panel-tests--tree (root &rest body)
-  "Bind ROOT to a project tree with comment tasks in several folders, and run BODY."
+  "Bind ROOT to a project tree with comments in several folders, and run BODY."
   (declare (indent 1))
   `(let* ((,root (file-name-as-directory (make-temp-file "agent-panel" t))))
      (unwind-protect
          (progn
-           (agent-panel-tests--note ,root "notes/a.md" '("ca0001" "on a" nil) '("ca0002" "done on a" t))
-           (agent-panel-tests--note ,root "notes/b.md" '("cb0001" "on b" nil))
-           (agent-panel-tests--note ,root "notes/deep/d.md" '("cd0001" "deep" nil))
-           (agent-panel-tests--note ,root "other/o.md" '("co0001" "other" nil))
-           (agent-panel-tests--note ,root "node_modules/x/n.md" '("cn0001" "skipped" nil))
-           (agent-panel-tests--note ,root "notes/plain.md")
-           ;; A code file keeps its task in the folder's journal.
-           (with-temp-file (expand-file-name "other/main.py" ,root) (insert "x = 1\n"))
-           (with-temp-file (expand-file-name "other/.noema-tasks.jsonl" ,root)
-             (insert "{\"v\":1,\"op\":\"task\",\"id\":\"cm0001\",\"text\":\"rename x\",\"line\":1,\"quote\":\"x\",\"note\":\"main.py\",\"at\":\"2026-11-17T08:00:00.000Z\"}\n"))
+           (agent-panel-tests--journal (expand-file-name "notes" ,root)
+                                       '(("c-a1" "a.md" "on a" "open") ("c-a2" "a.md" "done on a" "resolved")
+                                         ("c-b1" "b.md" "on b" "open")))
+           (agent-panel-tests--journal (expand-file-name "notes/deep" ,root) '(("c-d1" "d.md" "deep" "open")))
+           (agent-panel-tests--journal (expand-file-name "other" ,root) '(("c-o1" "o.md" "other" "open")))
+           (agent-panel-tests--journal (expand-file-name "node_modules/x" ,root) '(("c-n1" "n.md" "skipped" "open")))
+           (clrhash +agent-panel--journal-cache)
            (cl-letf (((symbol-function '+agent-panel--project-root) (lambda (_) ,root))
                      ((symbol-function '+agent-collab--client-file) #'identity))
              ,@body))
        (delete-directory ,root t))))
 
 (defun agent-panel-tests--ids (groups)
-  (sort (mapcar (lambda (comment) (alist-get 'id comment)) (apply #'append (mapcar #'cdr groups))) #'string<))
+  (sort (mapcar (lambda (thread) (alist-get 'id thread)) (apply #'append (mapcar #'cdr groups))) #'string<))
 
-(ert-deftest agent-panel-c79-scopes-widen-from-the-file-to-the-project ()
+(ert-deftest agent-panel-c75-scopes-widen-from-the-file-to-the-project ()
   (agent-panel-tests--tree root
     (let ((file (expand-file-name "notes/a.md" root)))
-      (should (equal (agent-panel-tests--ids (+agent-panel-tasks file 'file)) '("ca0001" "ca0002")))
-      (should (equal (agent-panel-tests--ids (+agent-panel-tasks file 'dir)) '("ca0001" "ca0002" "cb0001")))
-      (should (equal (agent-panel-tests--ids (+agent-panel-tasks file 'tree)) '("ca0001" "ca0002" "cb0001" "cd0001")))
-      ;; The project skips dependency folders and includes a code file's task.
+      (should (equal (agent-panel-tests--ids (+agent-panel-tasks file 'file)) '("c-a1" "c-a2")))
+      (should (equal (agent-panel-tests--ids (+agent-panel-tasks file 'dir)) '("c-a1" "c-a2" "c-b1")))
+      (should (equal (agent-panel-tests--ids (+agent-panel-tasks file 'tree)) '("c-a1" "c-a2" "c-b1" "c-d1")))
+      ;; The project skips dependency folders.
       (should (equal (agent-panel-tests--ids (+agent-panel-tasks file 'project))
-                     '("ca0001" "ca0002" "cb0001" "cd0001" "cm0001" "co0001")))
+                     '("c-a1" "c-a2" "c-b1" "c-d1" "c-o1")))
       (should (equal (mapcar #'car (+agent-panel-tasks file 'dir))
                      (list (expand-file-name "notes/a.md" root) (expand-file-name "notes/b.md" root)))))))
 
@@ -61,36 +58,31 @@
         (should (string-match-p "this file · 1 open" (buffer-string)))
         (should (string-match-p "● on a" (buffer-string)))))))
 
-(ert-deftest agent-panel-c79-the-task-list-hides-done-until-asked ()
+(ert-deftest agent-panel-c75-a-new-folder-of-comments-is-found ()
+  (agent-panel-tests--tree root
+    (let ((file (expand-file-name "notes/a.md" root)))
+      (should (equal (length (agent-panel-tests--ids (+agent-panel-tasks file 'project))) 5))
+      (agent-panel-tests--journal (expand-file-name "fresh" root) '(("c-f1" "f.md" "fresh" "open")))
+      ;; Cached until a comment changes in a folder the cache does not know.
+      (should (equal (length (agent-panel-tests--ids (+agent-panel-tasks file 'project))) 5))
+      (+agent-panel--comments-changed-h (expand-file-name "fresh/f.md" root))
+      (should (equal (length (agent-panel-tests--ids (+agent-panel-tasks file 'project))) 6)))))
+
+(ert-deftest agent-panel-c75-the-task-list-hides-resolved-until-asked ()
   (agent-panel-tests--tree root
     (with-temp-buffer
       (+agent-panel-mode)
       (setq +agent-panel--document (expand-file-name "notes/a.md" root))
       (let ((inhibit-read-only t)) (+agent-panel--draw-tasks))
-      (should (string-match-p "this file · 1 open, 1 done (hidden)" (buffer-string)))
-      (should (string-match-p "after «Some passage»" (buffer-string)))
-      (should (string-match-p "not handed over · line 3" (buffer-string)))
+      (should (string-match-p "this file · 1 open" (buffer-string)))
+      (should (string-match-p "on a" (buffer-string)))
       (should-not (string-match-p "done on a" (buffer-string)))
       (setq +agent-panel--show-resolved t)
       (let ((inhibit-read-only t)) (erase-buffer) (+agent-panel--draw-tasks))
-      (should (string-match-p "✓ done on a" (buffer-string)))
+      (should (string-match-p "done on a" (buffer-string)))
       (goto-char (point-min))
       (re-search-forward "● on a$")
-      (should (equal (cdr (get-text-property (point) '+agent-panel-task)) "ca0001")))))
-
-(ert-deftest agent-panel-c79-c-marks-the-comment-done-in-its-note ()
-  (agent-panel-tests--tree root
-    (let ((+noema--ready nil))
-      (with-temp-buffer
-        (+agent-panel-mode)
-        (setq +agent-panel--document (expand-file-name "notes/a.md" root))
-        (let ((inhibit-read-only t)) (+agent-panel--draw-tasks))
-        (goto-char (point-min))
-        (re-search-forward "● on a$")
-        (cl-letf (((symbol-function '+agent-panel-redraw) #'ignore))
-          (+agent-panel-resolve))
-        (should (string-match-p "@@comment(done) \\[on a\\] {id: ca0001}"
-                                (with-temp-buffer (insert-file-contents (expand-file-name "notes/a.md" root)) (buffer-string))))))))
+      (should (equal (cdr (get-text-property (point) '+agent-panel-task)) "c-a1")))))
 
 (ert-deftest agent-panel-c75-h-t-shows-a-right-side-window-and-hides-it ()
   (agent-panel-tests--tree root

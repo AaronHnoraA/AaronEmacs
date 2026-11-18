@@ -1,15 +1,14 @@
 ;;; tools/agent/collab.el --- A document's threads, suggestions and direct changes -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; The information flow between a document and its agents.  Only Emacs and
-;; Noema change: the agents keep their own logic.
+;; The information flow between a document and its collaborators (C66-C68).
+;; Only Emacs and Noema change: the Agents keep their own logic.
 ;;
-;; A comment is a task (C79): a `@@comment' standing on its own in the note, or a
-;; task recorded for a file that cannot hold one.  Handing it to an agent sends
-;; one request; the agent changes the file through Noema's API and marks the
-;; comment done.  The folder's `.noema-tasks.jsonl' records who took what.
-;; The collaboration panel (`H-t', `tools/agent/panel') is where comments are
-;; listed and handed over.
+;; A thread is a question asked at a place in a document.  It is stored beside
+;; the Project under `.agent/collab/threads/', sent to the collaborator through
+;; the ordinary session, and the reply of the turn it started is put back in it.
+;; A collaborator takes thread turns one at a time: while it is busy the next
+;; one waits here, so a reply always belongs to the thread that asked.
 ;;
 ;; A suggestion is a proposed change to a file that cannot hold an inline review
 ;; card; the Noema host writes it under `.agent/collab/suggestions/' (C66) and
@@ -17,6 +16,9 @@
 ;;
 ;; A direct change is one an Agent applied itself with its own tools, as its
 ;; ACP tool call reported it.  It can be put back while it is still in place.
+;;
+;; The views here are plain lists; the in-document presentation is a later
+;; design (the collaboration notes' section 6).
 
 ;;; Code:
 
@@ -94,272 +96,182 @@
   "Return a fresh record id."
   (format "%s-%06x" (format-time-string "%Y%m%dT%H%M%S") (random #xffffff)))
 
-;;;; Comments are tasks (C79)
+;;;; Threads (C70 store: the folder's comment journal)
 ;;
-;; A comment stands on its own in the note, `@@comment [text] {id: …}'
-;; (`shared/comments.mjs'; this file mirrors its scanner, pinned by
-;; `comment-fixtures.json').  `@@comment(done)' is a finished one.  Handing a
-;; comment to an agent is a task: the folder's hidden `.noema-tasks.jsonl'
-;; records who took which comment, one line per handover, and nothing else:
-;; the agent changes the file through Noema's API and marks the comment done;
-;; there are no replies.  A file that cannot hold a comment (code) keeps its
-;; task, text included, in the same journal.  Every change to a note goes
-;; through Noema's `agent:document:edit', so an open page follows; without a
-;; host the file (or its buffer) is edited here.
+;; Threads are kept beside the document in its folder's hidden
+;; `.noema-comments.jsonl', the same journal the Noema host writes for page
+;; comments: one appended event per line, folded on read, so Emacs and the host
+;; can both write without losing each other's work.
 
-(defconst +agent-collab-tasks-file ".noema-tasks.jsonl"
-  "The hidden journal of a folder's comment tasks (C79).")
-
-(defun +agent-collab--markdown-p (file)
-  "Whether FILE is a note."
-  (string-match-p "\\.\\(?:md\\|markdown\\)\\'" file))
-
-(defun +agent-collab--text (file)
-  "Return FILE's text: its visiting buffer's, or the file's."
-  (let ((file (+agent-collab--client-file file)))
-    (if-let* ((buffer (find-buffer-visiting file)))
-        (with-current-buffer buffer (save-restriction (widen) (buffer-substring-no-properties (point-min) (point-max))))
-      (when (file-readable-p file)
-        (with-temp-buffer
-          (let ((coding-system-for-read 'utf-8)) (insert-file-contents file))
-          (buffer-string))))))
-
-(defun +agent-collab--mask (text)
-  "Return TEXT with code fences, code spans and HTML comments blanked."
-  (let ((chars (copy-sequence text)) (fence nil) (start 0))
-    (cl-flet ((blank (from to) (cl-loop for i from from below to
-                                         unless (eq (aref chars i) ?\n) do (aset chars i ?\s))))
-      (dolist (line (split-string text "\n"))
-        (let ((marker (and (string-match "\\`[ \t]\\{0,3\\}\\(`\\{3,\\}\\|~\\{3,\\}\\)" line) (match-string 1 line))))
-          (cond ((if fence (and marker (eq (aref marker 0) (aref fence 0)) (>= (length marker) (length fence))) marker)
-                 (blank start (+ start (length line)))
-                 (setq fence (if fence nil marker)))
-                (fence (blank start (+ start (length line))))))
-        (setq start (+ start (length line) 1)))
-      (let ((masked (copy-sequence chars)) (pos 0))
-        (while (string-match "<!--\\(?:.\\|\n\\)*?-->\\|\\(`+\\)[^`\n]*?\\1" masked pos)
-          (blank (match-beginning 0) (match-end 0))
-          (setq pos (match-end 0)))))
-    chars))
-
-(defun +agent-collab--body-end (text start)
-  "Return the index after the `]' closing the body opened at START, or nil."
-  (let ((depth 1) (i start) (end nil))
-    (while (and (not end) (< i (length text)))
-      (let ((c (aref text i)))
-        (cond ((eq c ?\\) (setq i (1+ i)))
-              ((eq c ?\[) (setq depth (1+ depth)))
-              ((eq c ?\]) (setq depth (1- depth)) (when (zerop depth) (setq end (1+ i))))
-              ((eq c ?\n) (setq i (length text)))))
-      (setq i (1+ i)))
-    end))
-
-(defun +agent-collab-scan (text)
-  "Return the comments of TEXT, as `shared/comments.mjs' reads them.
-Each is an alist: id (\"\" when none), done, text, line, from, to (0-based
-characters), source and quote, the text before it on its line."
-  (let ((masked (+agent-collab--mask text)) (pos 0) comments)
-    (while (string-match "@@comment\\(?:(\\([^)\n]*\\))\\)?[ \t]*\\[" masked pos)
-      (let* ((from (match-beginning 0))
-             (switch (match-string 1 masked))
-             (body-start (match-end 0))
-             (body-end (+agent-collab--body-end masked body-start)))
-        (if (or (not body-end) (and (> from 0) (eq (aref masked (1- from)) ?\\)))
-            (setq pos (match-end 0))
-          (let* ((to body-end) (attrs ""))
-            (when (and (string-match "[ \t]*\\({[^{}\n]*}\\)" masked body-end) (= (match-beginning 0) body-end))
-              (setq attrs (match-string 1 masked) to (match-end 0)))
-            (let* ((id (and (string-match "\\(?:\\`\\|[{;,]\\)[ \t]*id[ \t]*[:=][ \t]*[\"']?\\([A-Za-z0-9]\\{4,32\\}\\)" attrs)
-                            (downcase (match-string 1 attrs))))
-                   (line-start (let ((nl (cl-position ?\n text :end from :from-end t))) (if nl (1+ nl) 0)))
-                   (quote (string-trim (substring text line-start from))))
-              (push `((id . ,(or id "")) (done . ,(equal (downcase (string-trim (or switch ""))) "done"))
-                      (text . ,(replace-regexp-in-string "\\\\\\([]\\\\]\\)" "\\1" (substring text body-start (1- body-end))))
-                      (line . ,(1+ (cl-count ?\n text :end from))) (from . ,from) (to . ,to)
-                      (source . ,(substring text from to))
-                      (quote . ,(if (> (length quote) 160) (substring quote -160) quote)))
-                    comments))
-            (setq pos to)))))
-    (nreverse comments)))
+(defconst +agent-collab-comments-file ".noema-comments.jsonl"
+  "Name of a folder's comment journal.")
 
 (defun +agent-collab--journal (file)
-  "Return the task journal of FILE's folder."
-  (expand-file-name +agent-collab-tasks-file (file-name-directory (+agent-collab--client-file file))))
+  "Return the comment journal of FILE's folder."
+  (expand-file-name +agent-collab-comments-file
+                    (file-name-directory (+agent-collab--client-file file))))
 
-(defun +agent-collab--now-utc ()
-  "Return the current time as the journal writes it."
-  (format-time-string "%Y-%m-%dT%H:%M:%S.000Z" nil t))
+(defun +agent-collab--notify-host (file)
+  "Tell open Noema pages that FILE's threads changed, when Noema runs."
+  (when (and (fboundp '+noema-api-call) (bound-and-true-p +noema--ready))
+    (ignore-errors
+      (+noema-api-call "noema:api:comments:changed"
+                       (vector `((file . ,(+agent-collab--client-file file))))
+                       #'ignore))))
 
-(defun +agent-collab--record (file record)
-  "Append RECORD about FILE to its folder's task journal and announce it."
-  (let ((journal (+agent-collab--journal file)))
+(defun +agent-collab--append (file event)
+  "Append EVENT, an alist, to FILE's comment journal and announce the change."
+  (let ((journal (+agent-collab--journal file))
+        (event (append '((v . 1)) event `((at . ,(+agent-collab--now-utc))))))
     (with-temp-buffer
-      (setq buffer-file-coding-system 'utf-8-unix)
-      (json-insert `((v . 1) ,@record (note . ,(file-name-nondirectory (+agent-collab--client-file file)))
-                     (at . ,(+agent-collab--now-utc))))
+      (json-insert (+agent-collab--jsonable event) :null-object :null :false-object :false)
       (insert "\n")
       (let ((coding-system-for-write 'utf-8-unix))
-        (write-region nil nil journal t 'silent))))
-  (run-hook-with-args '+agent-collab-changed-functions file))
+        (write-region nil nil journal 'append 'silent)))
+    (run-hook-with-args '+agent-collab-changed-functions file)
+    (+agent-collab--notify-host file)))
 
-(defun +agent-collab--tasks (file)
-  "Return FILE's task records by comment id: its latest assignment and task."
-  (let ((journal (+agent-collab--journal file))
-        (note (file-name-nondirectory (+agent-collab--client-file file)))
-        (tasks (make-hash-table :test #'equal)))
+(defun +agent-collab--now-utc ()
+  "Return the current UTC time as the host writes it."
+  (format-time-string "%FT%T.000Z" nil t))
+
+(defun +agent-collab--author (value)
+  "Return the author alist VALUE with defaults."
+  `((name . ,(or (alist-get 'name value) "You")) (kind . ,(or (alist-get 'kind value) "person"))
+    ,@(when (alist-get 'session value) `((session . ,(alist-get 'session value))))))
+
+(defun +agent-collab--fold (file)
+  "Return a hash table of the threads in FILE's folder journal, by id."
+  (let ((threads (make-hash-table :test #'equal))
+        (journal (+agent-collab--journal file)))
     (when (file-readable-p journal)
       (with-temp-buffer
         (let ((coding-system-for-read 'utf-8)) (insert-file-contents journal))
         (dolist (line (split-string (buffer-string) "\n" t))
-          (when-let* ((event (ignore-errors (json-parse-string line :object-type 'alist :null-object nil :false-object nil)))
-                      ((equal (alist-get 'note event) note))
+          (when-let* ((event (ignore-errors
+                               (json-parse-string line :object-type 'alist :array-type 'list
+                                                  :null-object nil :false-object nil)))
                       (id (alist-get 'id event)))
-            (puthash id (append event (gethash id tasks)) tasks)))))
-    tasks))
+            (let ((thread (gethash id threads)))
+              (pcase (alist-get 'op event)
+                ("thread"
+                 (unless thread
+                   ;; `copy-tree': the template's constant conses would
+                   ;; otherwise be shared by every thread, and `setf' on one
+                   ;; thread's status would change them all.
+                   (puthash id (copy-tree `((id . ,id) (note . ,(alist-get 'note event))
+                                 (quote . ,(or (alist-get 'quote event) ""))
+                                 (line . ,(alist-get 'line event))
+                                 (status . "open") (assignee . ,(alist-get 'assignee event))
+                                 (createdAt . ,(alist-get 'at event))
+                                 (messages . (((mid . "m0") (author . ,(+agent-collab--author (alist-get 'author event)))
+                                               (text . ,(or (alist-get 'text event) "")) (at . ,(alist-get 'at event)))))))
+                            threads)))
+                ("reply"
+                 (when thread
+                   (setf (alist-get 'messages thread)
+                         (append (alist-get 'messages thread)
+                                 (list `((mid . ,(alist-get 'mid event))
+                                         (author . ,(+agent-collab--author (alist-get 'author event)))
+                                         (text . ,(or (alist-get 'text event) "")) (at . ,(alist-get 'at event))))))
+                   (puthash id thread threads)))
+                ("resolve" (when thread (setf (alist-get 'status thread) "resolved") (puthash id thread threads)))
+                ("reopen" (when thread (setf (alist-get 'status thread) "open") (puthash id thread threads)))
+                ("edit"
+                 (when-let* ((message (seq-find (lambda (m) (equal (alist-get 'mid m) (or (alist-get 'mid event) "m0")))
+                                                (alist-get 'messages thread))))
+                   (setf (alist-get 'text message) (or (alist-get 'text event) ""))))
+                ("delete"
+                 (when thread
+                   (if (member (alist-get 'mid event) '(nil "m0"))
+                       (remhash id threads)
+                     (setf (alist-get 'messages thread)
+                           (seq-remove (lambda (m) (equal (alist-get 'mid m) (alist-get 'mid event)))
+                                       (alist-get 'messages thread)))
+                     (puthash id thread threads))))
+                ("assign" (when thread (setf (alist-get 'assignee thread) (alist-get 'assignee event))
+                                (puthash id thread threads)))
+                ("move" (when thread (setf (alist-get 'note thread) (alist-get 'note event))
+                              (puthash id thread threads)))))))))
+    threads))
 
-(defun +agent-collab-comments (file)
-  "Return FILE's comment tasks, oldest first.
-A note's are its comments; another file's are the tasks recorded for it.
-Each carries file, and assignee (name . session) when handed over."
-  (let* ((client (+agent-collab--client-file file))
-         (tasks (+agent-collab--tasks client))
-         (comments (if (+agent-collab--markdown-p client)
-                       (+agent-collab-scan (or (+agent-collab--text client) ""))
-                     (let (items)
-                       (maphash (lambda (id record)
-                                  (when (alist-get 'text record)
-                                    (push `((id . ,id) (done . ,(eq (alist-get 'done record) t))
-                                            (text . ,(alist-get 'text record)) (line . ,(alist-get 'line record))
-                                            (quote . ,(or (alist-get 'quote record) "")))
-                                          items)))
-                                tasks)
-                       (sort items (lambda (a b) (< (or (alist-get 'line a) 0) (or (alist-get 'line b) 0))))))))
-    (mapcar (lambda (comment)
-              (let ((record (gethash (alist-get 'id comment) tasks)))
-                (append `((file . ,client)
-                          (assignee . ,(and (alist-get 'session record)
-                                            (cons (alist-get 'name record) (alist-get 'session record)))))
-                        comment)))
-            comments)))
+(defun +agent-collab--with-file (thread file)
+  "Return THREAD with its document FILE and display status."
+  (let* ((last (car (last (alist-get 'messages thread))))
+         (status (cond ((equal (alist-get 'status thread) "resolved") "resolved")
+                       ((equal (alist-get 'kind (alist-get 'author last)) "agent")
+                        (if (string-prefix-p "(" (alist-get 'text last)) "stopped" "replied"))
+                       ((alist-get 'assignee thread) "waiting")
+                       (t "open"))))
+    (append `((file . ,(+agent-collab--client-file file)) (state . ,status)) thread)))
 
-(defun +agent-collab-comment (file id)
-  "Return FILE's comment ID, or nil."
-  (seq-find (lambda (comment) (equal (alist-get 'id comment) id)) (+agent-collab-comments file)))
+(defun +agent-collab-thread (file id)
+  "Return FILE's thread ID, or nil."
+  (when-let* ((thread (gethash id (+agent-collab--fold file))))
+    (+agent-collab--with-file thread file)))
 
-(defun +agent-collab--new-id ()
-  "Return a fresh comment id: six base36 characters."
-  (let ((digits "0123456789abcdefghijklmnopqrstuvwxyz"))
-    (apply #'string (cl-loop repeat 6 collect (aref digits (random 36))))))
-
-(defun +agent-collab--head-edit (comment done id)
-  "Return COMMENT's source with DONE and ID; its text is kept as written."
-  (let ((next (replace-regexp-in-string "\\`@@comment\\(?:([^)\n]*)\\)?" (if done "@@comment(done)" "@@comment")
-                                        (alist-get 'source comment) t t)))
-    (if (not (string-empty-p (alist-get 'id comment))) next
-      (if (string-match "\\(\\]\\)[ \t]*{\\([^{}\n]*\\)}[ \t]*\\'" next)
-          (concat (substring next 0 (match-beginning 2)) "id: " id "; " (substring next (match-beginning 2)))
-        (format "%s {id: %s}" next id)))))
-
-(defun +agent-collab--apply-locally (file edits)
-  "Apply EDITS ((OLD . NEW) ...) to FILE's buffer or file, each OLD unique."
-  (let* ((client (+agent-collab--client-file file))
-         (buffer (find-buffer-visiting client)))
-    (cl-flet ((apply-here ()
-                (dolist (edit edits)
-                  (goto-char (point-min))
-                  (unless (search-forward (car edit) nil t) (user-error "The comment moved; refresh"))
-                  (replace-match (cdr edit) t t))))
-      (if buffer
-          (with-current-buffer buffer
-            (let ((clean (not (buffer-modified-p))))
-              (save-excursion (save-restriction (widen) (apply-here)))
-              (when clean (let ((save-silently t)) (basic-save-buffer)))))
-        (with-temp-buffer
-          (let ((coding-system-for-read 'utf-8)) (insert-file-contents client))
-          (apply-here)
-          (let ((coding-system-for-write 'utf-8-unix)) (write-region nil nil client nil 'silent)))))
-    (run-hook-with-args '+agent-collab-changed-functions client)))
-
-(defun +agent-collab--edit-note (file edits)
-  "Change note FILE by EDITS ((OLD . NEW) ...) through Noema, an open page following.
-Without a host the note is edited here."
-  (let ((client (+agent-collab--client-file file)))
-    (if (not (bound-and-true-p +noema--ready))
-        (+agent-collab--apply-locally client edits)
-      (+noema-api-call
-       "noema:api:agent:document:edit"
-       (vector `((file . ,client)
-                 (edits . ,(vconcat (mapcar (lambda (edit) `((oldText . ,(car edit)) (newText . ,(cdr edit)))) edits)))))
-       (lambda (result failure)
-         (cond (failure (+agent-collab--apply-locally client edits))
-               ((eq (alist-get 'ok result) :json-false)
-                (message "Noema: %s" (or (alist-get 'message result) "the note could not be saved")))
-               (t (run-hook-with-args '+agent-collab-changed-functions client))))))))
-
-(defvar +noema--ready)
-
-(defun +agent-collab--ensure-id (comment)
-  "Return COMMENT's id, giving an id-less comment one in its note."
-  (let ((id (alist-get 'id comment)))
-    (if (not (string-empty-p (or id ""))) id
-      (let ((id (+agent-collab--new-id)))
-        (+agent-collab--edit-note (alist-get 'file comment)
-                                  (list (cons (alist-get 'source comment) (+agent-collab--head-edit comment (alist-get 'done comment) id))))
-        id))))
-
-(defun +agent-collab-set-done (comment done)
-  "Mark COMMENT done, or open again when DONE is nil."
-  (let ((file (alist-get 'file comment)))
-    (if (+agent-collab--markdown-p file)
-        (+agent-collab--edit-note file (list (cons (alist-get 'source comment)
-                                                   (+agent-collab--head-edit comment done (+agent-collab--new-id)))))
-      (+agent-collab--record file `((op . "task") (id . ,(alist-get 'id comment)) (done . ,(if done t :json-false)))))))
-
-(defun +agent-collab--escape-body (text)
-  "Return TEXT for a command body: one line, `\\' and `]' escaped."
-  (thread-last (string-trim text)
-               (replace-regexp-in-string "[ \t]*\n[ \t]*" " ")
-               (string-replace "\\" "\\\\")
-               (string-replace "]" "\\]")))
-
-(defun +agent-collab-add (file text &optional begin end)
-  "Add a comment task TEXT to FILE about BEGIN..END (0-based characters), return its id.
-A note gains a comment after the passage, or at its end without one;
-another file keeps the task in the journal."
-  (let* ((client (+agent-collab--client-file file))
-         (id (+agent-collab--new-id))
-         (source (or (+agent-collab--text client) ""))
-         (passage (and begin end (< begin end) (<= end (length source)) (substring source begin end)))
-         (line (if begin (1+ (cl-count ?\n source :end (min begin (length source)))) 1)))
-    (if (+agent-collab--markdown-p client)
-        (let ((comment (format "@@comment [%s] {id: %s}"
-                               (+agent-collab--escape-body text)
-                               id)))
-          (if passage
-              (+agent-collab--edit-note client (list (cons passage (concat passage " " comment))))
-            (+agent-collab--edit-note client (list (cons source (concat (string-trim-right source) "\n\n" comment "\n"))))))
-      (+agent-collab--record client `((op . "task") (id . ,id) (text . ,text) (line . ,line)
-                                      (quote . ,(truncate-string-to-width (or passage "") 160 nil nil "…")))))
-    id))
+(defun +agent-collab-threads (file)
+  "Return FILE's threads, newest first."
+  (let ((note (file-name-nondirectory (+agent-collab--client-file file))) threads)
+    (maphash (lambda (_id thread)
+               (when (equal (alist-get 'note thread) note)
+                 (push (+agent-collab--with-file thread file) threads)))
+             (+agent-collab--fold file))
+    (sort threads (lambda (a b) (string> (or (alist-get 'createdAt a) "") (or (alist-get 'createdAt b) ""))))))
 
 (defun +agent-collab--collaborator (buffer)
-  "Return the task record naming session BUFFER."
-  `((name . ,(or (buffer-local-value '+agent-acp-session-name buffer) "agent"))
+  "Describe session BUFFER as a thread's assignee."
+  `((name . ,(or (buffer-local-value '+agent-acp-session-name buffer) (buffer-name buffer)))
     (session . ,(+agent-acp-session-token buffer))))
 
-;;;; Handing a comment to an agent (C73, C79)
+(defun +agent-collab--comment-id ()
+  "Return a fresh comment id, of the page's form."
+  (format "c-%s-%06x" (format-time-string "%Y%m%d%H%M%S" nil t) (random #xffffff)))
+
+(cl-defun +agent-collab-thread-create (&key file line anchor session text id)
+  "Store a new thread on FILE at LINE about ANCHOR, asked of SESSION with TEXT."
+  (let ((id (or id (+agent-collab--comment-id))))
+    (+agent-collab--append
+     file `((op . "thread") (id . ,id) (note . ,(file-name-nondirectory (+agent-collab--client-file file)))
+            (quote . ,(or anchor "")) (line . ,line)
+            (author . ((name . "You") (kind . "person"))) (text . ,text)
+            ,@(when session `((assignee . ,(+agent-collab--collaborator session))))))
+    (+agent-collab-thread file id)))
+
+(defun +agent-collab--assign (file id session)
+  "Make SESSION the assignee of FILE's thread ID."
+  (+agent-collab--append file `((op . "assign") (id . ,id) (assignee . ,(+agent-collab--collaborator session)))))
+
+(defun +agent-collab--add-message (file id session text)
+  "Append TEXT to FILE's thread ID, from SESSION's agent, or from you when nil."
+  (+agent-collab--append
+   file `((op . "reply") (id . ,id) (mid . ,(format "m-%08x" (random #xffffffff)))
+          (author . ,(if session
+                         `((name . ,(or (buffer-local-value '+agent-acp-session-name session) "agent"))
+                           (kind . "agent") (session . ,(+agent-acp-session-token session)))
+                       '((name . "You") (kind . "person"))))
+          (text . ,(or text "")))))
+
+(defun +agent-collab--set-resolved (file id resolved)
+  "Resolve FILE's thread ID, or reopen it when RESOLVED is nil."
+  (+agent-collab--append file `((op . ,(if resolved "resolve" "reopen")) (id . ,id)
+                                (author . ((name . "You") (kind . "person"))))))
+
+;;;; Dispatch (C73)
+;;
+;; A comment is a task.  Handing it to an agent sends one prompt and nothing
+;; more: the agent works through Noema's API (it edits or proposes, replies in
+;; the comment, resolves it) and Emacs does not collect what it says in its
+;; chat.  The person reads that chat when they want to.  agent-shell's own
+;; queue holds a prompt for a busy session.
 
 (defvar +agent-collab-session-instructions-function nil
-  "Function returning (KEY . TEXT), the tools guide a session learns once.
-Noema provides it: how to edit, propose and comment.")
+  "Function returning (KEY . TEXT): the tools guide a collaborator gets once per
+native session, so it knows how to comment and propose (C71).  Noema sets it.")
 
 (defconst +agent-collab-task-prompt
-  "%s\n\n(Task from comment %s on %s, line %d, after «%s».  Do it by changing the file through Noema's API: agent:document:edit, or agent:document:propose when the person should judge.  When it is done, mark the comment done: agent:document:comment {\"file\",\"id\"}.  Your chat answer is not collected.)"
-  "How a task reaches its agent: request, comment id, file, line, passage.")
-
-(defconst +agent-collab-file-task-prompt
-  "%s\n\n(Task %s on %s, line %d, about «%s».  Change the file through Noema's API: agent:file:edit.  Your chat answer is not collected.)"
-  "How a task on a file that is not a note reaches its agent.")
+  "%s\n\n(Task from comment %s on %s line %d about «%s».  Do it by changing the file through Noema's API: agent:document:edit, or agent:document:propose when the person should judge.  Comments take no replies: when it is done, mark the comment done with agent:document:comment {\"file\",\"id\"}.  Your chat answer is not collected.)"
+  "How a task reaches its agent: request, thread id, file, line, quote.")
 
 (defun +agent-collab--deliver (buffer prompt)
   "Send PROMPT to session BUFFER without taking the keyboard.
@@ -374,36 +286,37 @@ The first task of a native session carries the tools guide."
                                       (buffer-local-value '+agent-acp-session-name buffer)
                                       (or (buffer-local-value '+agent-acp-last-error buffer) "see its chat")))))
 
-(defun +agent-collab--task-prompt (comment id)
-  "Return the prompt handing COMMENT, named ID, to an agent."
-  (let ((file (alist-get 'file comment)))
-    (format (if (+agent-collab--markdown-p file) +agent-collab-task-prompt +agent-collab-file-task-prompt)
-            (alist-get 'text comment) id file (or (alist-get 'line comment) 0)
-            (truncate-string-to-width (or (alist-get 'quote comment) "") 200 nil nil "…"))))
+(defun +agent-collab--task-prompt (thread)
+  "Return the prompt handing THREAD to an agent."
+  (format +agent-collab-task-prompt
+          (alist-get 'text (car (last (alist-get 'messages thread))))
+          (alist-get 'id thread) (alist-get 'file thread)
+          (or (+agent-collab--thread-line thread) 0)
+          (truncate-string-to-width (or (alist-get 'quote thread) "") 200 nil nil "…")))
 
-(defun +agent-collab-dispatch (comment session)
-  "Hand COMMENT to SESSION as a task: record it and send the request once."
-  (let* ((id (+agent-collab--ensure-id comment))
-         (file (alist-get 'file comment)))
-    (+agent-collab--record file `((op . "assign") (id . ,id) ,@(+agent-collab--collaborator session)))
-    (+agent-collab--deliver session (+agent-collab--task-prompt comment id))
+(defun +agent-collab-dispatch (file id session)
+  "Hand FILE's thread ID to SESSION as a task: assign it and send the request."
+  (when-let* ((thread (+agent-collab-thread file id)))
+    (unless (equal (alist-get 'session (alist-get 'assignee thread))
+                   (+agent-acp-session-token session))
+      (+agent-collab--assign file id session))
+    (+agent-collab--deliver session (+agent-collab--task-prompt thread))
     (message "Handed to %s" (buffer-local-value '+agent-acp-session-name session))))
 
-(defun +agent-collab-task-delivery (file line anchor &optional begin end)
+(defun +agent-collab-task-delivery (file line anchor)
   "Return a `+agent-context--send' delivery that makes the send a task (C76).
-The request becomes a comment task on FILE about BEGIN..END (0-based) at LINE
-with ANCHOR, assigned to the session; the turn carries the references, the
-request and the task, and the keyboard stays in the document."
+The request becomes a comment thread on FILE at LINE about ANCHOR, assigned to
+the session; the turn carries the references, the request and the thread, and
+the keyboard stays in the document."
   (lambda (session blocks session-instructions question)
     (let* ((text (if (string-empty-p (string-trim (or question ""))) "Look at this place" question))
-           (id (+agent-collab-add file text begin end))
-           (comment `((file . ,(+agent-collab--client-file file)) (id . ,id) (text . ,text)
-                      (line . ,(or line 0)) (quote . ,(or anchor ""))))
+           (thread (+agent-collab-thread-create :file file :line line :anchor (or anchor "")
+                                                :session session :text text))
+           (note (string-trim (format +agent-collab-task-prompt "" (alist-get 'id thread)
+                                      (alist-get 'file thread) (or line 0)
+                                      (truncate-string-to-width (or anchor "") 200 nil nil "…"))))
            (content (copy-tree blocks)))
-      (+agent-collab--record file `((op . "assign") (id . ,id) ,@(+agent-collab--collaborator session)))
-      (setf (alist-get 'text (car content))
-            (concat (alist-get 'text (car content)) "\n\n"
-                    (string-trim (substring (+agent-collab--task-prompt comment id) (length text)))))
+      (setf (alist-get 'text (car content)) (concat (alist-get 'text (car content)) "\n\n" note))
       (+agent-context--deliver
        session content
        (or session-instructions
@@ -414,7 +327,13 @@ request and the task, and the keyboard stays in the document."
                            (or (buffer-local-value '+agent-acp-last-error session) "see its chat"))))
       (message "Handed to %s as a task on %s" (buffer-local-value '+agent-acp-session-name session)
                (file-name-nondirectory (+agent-collab--client-file file)))
-      id)))
+      thread)))
+
+(cl-defun +agent-collab-ask-region (&key file line anchor session text)
+  "Open a task TEXT about ANCHOR at LINE of FILE and hand it to SESSION."
+  (let ((thread (+agent-collab-thread-create :file file :line line :anchor anchor :text text)))
+    (+agent-collab-dispatch file (alist-get 'id thread) session)
+    (+agent-collab-thread file (alist-get 'id thread))))
 
 ;;;; Commands
 
@@ -427,24 +346,38 @@ In a collaborator's chat it is that collaborator's primary file."
              (+agent-collab--client-file file)))
       (user-error "Not in a document, and this session has no primary file")))
 
+(defun +agent-collab--anchor ()
+  "Return (LINE . TEXT) of the region or the current line."
+  (if (use-region-p)
+      (cons (line-number-at-pos (region-beginning) t)
+            (buffer-substring-no-properties (region-beginning) (region-end)))
+    (cons (line-number-at-pos nil t)
+          (buffer-substring-no-properties (line-beginning-position) (line-end-position)))))
+
 (defvar +agent-collab-ask-functions nil
   "Functions tried, without arguments, before asking in a plain buffer.
-A surface with its own comment input (a Noema page) opens it and returns non-nil.")
+A surface with its own comment box (a Noema page) opens it and returns non-nil.")
 
 ;;;###autoload
 (defun +agent-collab/ask (text)
-  "Comment TEXT on the region, or at point, of this document (C79).
-A Noema page opens its own comment input instead.  The comment is a task in
-the collaboration panel (`H-t'), handed to an agent from there."
+  "Ask this document's collaborator TEXT about the region or the current line.
+The question becomes a thread of the document; the reply comes back into it.
+A Noema page opens its own comment box instead."
   (interactive (list (unless (run-hook-with-args-until-success '+agent-collab-ask-functions)
-                       (read-string "Comment: "))))
+                       (read-string "Ask about this place: "))))
   (when text
-    (let ((file (+agent-collab--document)))
-      (if (use-region-p)
-          (+agent-collab-add file text (1- (region-beginning)) (1- (region-end)))
-        (+agent-collab-add file text (1- (line-beginning-position)) (1- (line-end-position))))
-      (deactivate-mark)
-      (message "Comment added; hand it to an agent from H-t"))))
+    (+agent-collab--ask text)))
+
+(defun +agent-collab--ask (text)
+  "Ask this document's collaborator TEXT about the region or the current line."
+  (let* ((file (+agent-collab--document))
+         (anchor (+agent-collab--anchor))
+         (session (progn (require 'tools/agent/context) (+agent-context--session))))
+    (unless (bufferp session) (user-error "A thread needs a live session"))
+    (+agent-collab-ask-region :file file :line (car anchor) :anchor (cdr anchor)
+                              :session session :text text)
+    (message "Asked %s; the reply lands in this document's threads"
+             (buffer-local-value '+agent-acp-session-name session))))
 
 (defvar-local +agent-collab--file nil
   "Document file this collaboration list shows.")
@@ -473,17 +406,130 @@ A file of another target keeps its framework name, which the /fs handler opens."
   (or (and (fboundp 'remote-client-file-name) (ignore-errors (remote-client-file-name file)))
       file))
 
+(defun +agent-collab--assignee-name (thread)
+  "Return the name of THREAD's assignee, or an empty string."
+  (or (alist-get 'name (alist-get 'assignee thread)) ""))
+
+(defun +agent-collab--last-text (thread)
+  "Return the first line of THREAD's last message."
+  (car (split-string (or (alist-get 'text (car (last (alist-get 'messages thread)))) "") "\n")))
+
+(define-derived-mode +agent-collab-threads-mode tabulated-list-mode "Threads"
+  "Threads of one document (C67)."
+  (setq tabulated-list-format [("Status" 9 t) ("Collaborator" 18 t) ("Line" 5 t) ("Last message" 0 nil)])
+  (tabulated-list-init-header))
+
+(defun +agent-collab--threads-refresh ()
+  "Redraw this thread list."
+  (let ((file +agent-collab--file))
+    (setq tabulated-list-entries
+          (mapcar (lambda (thread)
+                    (list (cons file (alist-get 'id thread))
+                          (vector (alist-get 'state thread)
+                                  (+agent-collab--assignee-name thread)
+                                  (number-to-string (or (+agent-collab--thread-line thread) 0))
+                                  (+agent-collab--last-text thread))))
+                  (+agent-collab-threads file)))
+    (tabulated-list-print t)))
+
+(defun +agent-collab--thread-line (thread)
+  "Return THREAD's line: stored, or where its anchor is in the document."
+  (or (alist-get 'line thread)
+      (let ((file (alist-get 'file thread)) (marker (format "{>>#%s<<}" (alist-get 'id thread))))
+        (when (file-readable-p file)
+          (with-temp-buffer
+            (insert-file-contents file)
+            (when (search-forward marker nil t) (line-number-at-pos)))))))
+
+(defun +agent-collab--at-thread ()
+  "Return the thread at point in a thread list."
+  (pcase-let ((`(,file . ,id) (or (tabulated-list-get-id) (user-error "No thread here"))))
+    (or (+agent-collab-thread file id) (user-error "The thread is gone"))))
+
+(defun +agent-collab-threads-visit ()
+  "Show the place this thread was asked about."
+  (interactive)
+  (let ((thread (+agent-collab--at-thread)))
+    (+agent-collab--visit-line (alist-get 'file thread) (+agent-collab--thread-line thread))))
+
+(defun +agent-collab-threads-read ()
+  "Show this thread's whole conversation."
+  (interactive)
+  (let ((thread (+agent-collab--at-thread)))
+    (with-current-buffer (get-buffer-create "*Agent thread*")
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (format "%s line %s — %s\n\n> %s\n\n" (alist-get 'file thread)
+                        (+agent-collab--thread-line thread) (alist-get 'state thread)
+                        (alist-get 'quote thread)))
+        (dolist (message (alist-get 'messages thread))
+          (insert (format "## %s\n\n%s\n\n" (alist-get 'name (alist-get 'author message))
+                          (alist-get 'text message))))
+        (goto-char (point-min))
+        (special-mode))
+      (display-buffer (current-buffer)))))
+
 (defun +agent-collab--live-collaborator (file)
   "Return FILE's most recent live collaborator, or nil."
   (seq-find #'+agent-session-live-p
             (mapcar (lambda (session) (plist-get session :buffer)) (+agent-binding-sessions file))))
 
-(defun +agent-collab--comment-session (comment &optional noerror)
-  "Return COMMENT's live assignee, else its document's collaborator, or signal.
+(defun +agent-collab--thread-session (thread &optional noerror)
+  "Return THREAD's live assignee, else its document's collaborator, or signal.
 With NOERROR return nil instead."
-  (or (+agent-acp-session-buffer-for-token (cdr (alist-get 'assignee comment)))
-      (+agent-collab--live-collaborator (alist-get 'file comment))
-      (unless noerror (user-error "No live agent for this comment"))))
+  (or (+agent-acp-session-buffer-for-token (alist-get 'session (alist-get 'assignee thread)))
+      (+agent-collab--live-collaborator (alist-get 'file thread))
+      (unless noerror (user-error "No live collaborator for this thread"))))
+
+(defun +agent-collab--named-session (to)
+  "Return the live session TO names by buffer and native ID, or nil."
+  (when-let* ((buffer (get-buffer (or (alist-get 'buffer to) "")))
+              ((+agent-acp-agent-buffer-p buffer))
+              (snapshot (+agent-session-snapshot buffer))
+              ((equal (plist-get snapshot :native-session-id) (alist-get 'nativeSessionId to))))
+    buffer))
+
+(defun +agent-collab-ask-thread (file id &optional to)
+  "Ask FILE's thread ID's latest question of its collaborator.
+A page comment arrives here from the Noema host (C70).  TO, an @-mention's
+(buffer . nativeSessionId), names who answers (C71); a stale one is refused.
+Without a live collaborator the comment simply stays for the person."
+  (when-let* ((thread (+agent-collab-thread file id)))
+    (if-let* ((session (if to
+                           (or (+agent-collab--named-session to)
+                               (progn (message "The mentioned collaborator is no longer there") nil))
+                         (+agent-collab--thread-session thread t))))
+        (progn
+          (+agent-collab-dispatch file id session))
+      (unless to
+        (message "No collaborator works on %s; the comment stays for you"
+                 (file-name-nondirectory file))))))
+
+(defun +agent-collab-threads-reply (text)
+  "Continue this thread with TEXT, asked of the same collaborator."
+  (interactive (list (read-string "Reply: ")))
+  (let* ((thread (+agent-collab--at-thread))
+         (file (alist-get 'file thread)))
+    (+agent-collab--add-message file (alist-get 'id thread) nil text)
+    (+agent-collab-ask-thread file (alist-get 'id thread))))
+
+(defun +agent-collab-threads-resolve ()
+  "Mark this thread resolved."
+  (interactive)
+  (let ((thread (+agent-collab--at-thread)))
+    (+agent-collab--set-resolved (alist-get 'file thread) (alist-get 'id thread) t)))
+
+(defun +agent-collab-threads-chat ()
+  "Open this thread's collaborator chat for a longer discussion."
+  (interactive)
+  (+agent-acp-show-buffer (+agent-collab--thread-session (+agent-collab--at-thread))))
+
+(let ((map +agent-collab-threads-mode-map))
+  (define-key map (kbd "RET") #'+agent-collab-threads-visit)
+  (define-key map (kbd "v") #'+agent-collab-threads-read)
+  (define-key map (kbd "r") #'+agent-collab-threads-reply)
+  (define-key map (kbd "c") #'+agent-collab-threads-resolve)
+  (define-key map (kbd "o") #'+agent-collab-threads-chat))
 
 (defun +agent-collab--show-list (mode name file refresh)
   "Show a collaboration list in MODE called NAME for FILE, drawn by REFRESH."
@@ -496,12 +542,10 @@ With NOERROR return nil instead."
 
 ;;;###autoload
 (defun +agent-collab/threads ()
-  "Show this document's comment tasks: the collaboration panel (C79)."
+  "List this document's threads (C67)."
   (interactive)
-  (require 'tools/agent/panel)
-  (+agent-panel-show-tasks (+agent-collab--document) 'file))
-
-(declare-function +agent-panel-show-tasks "tools/agent/panel" (file scope))
+  (+agent-collab--show-list #'+agent-collab-threads-mode "Threads" (+agent-collab--document)
+                            #'+agent-collab--threads-refresh))
 
 ;;;; Suggestions (C66)
 

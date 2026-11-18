@@ -173,6 +173,7 @@ autolinks.  Noema adds, in `src/render-html.ts` and the editor's Lezer rules:
 | `[toc]` on its own line | table of contents |
 | `> [!type] Title` | callout; `type` is any word (`note`, `tip`, `warning`, …); first line is the title |
 | `[^id]` / `[^id]: text` | footnote; continuation lines indented two or more spaces |
+| `{==text==}{>>#c-ID<<}` | comment anchor: the commented text and its comment's id (C70, C80). The comment lives in the folder's hidden `.noema-comments.jsonl`; the editor hides the markers, highlights the text and pops the comment's card up above it; the text may hold math. HTML and the Wiki index keep only the text. One line, not nested |
 | `## Heading {#slug}` | explicit heading anchor |
 | `## Heading <!-- omit from toc -->` | heading left out of the TOC and the slide list |
 | `1)` and `(a)` list markers | ordered lists with matching labels in export |
@@ -341,7 +342,7 @@ Editor rendering: `src/cm6/extensions/visual/widgets/inline-commands.ts`.
 | `@@cite(namespace) [key1; key2] {locator: "p. 12"; prefix: "see"; suffix: …}` | citation from a bibliography namespace (`shared/bibliography-syntax.mjs`, `bibliography-fixtures.json`) |
 | `@@revision(kind) [original] {advice: "…"; reason: "…"}` | review suggestion; kinds `suggest`, `question`, `error`, `ok`, `note`; old colour names `indigo`, `yellow`, `red`, `green`, `teal` still read (`shared/revision-kinds.mjs`) |
 | `@@comment [text]`, `@@comment(true) [text]` | private comment, collapsed / always shown |
-| `@@scomment [text]`, `@@scomment(done) [text] {id: k3x9qa}` | side comment, shown beside the text in the editor and LaTeX export; inside a footnote or box the LaTeX form stays inline, and long margin notes can continue across pages. A comment is a task: `id` (six base36) names it, `(done)` marks it finished ([comments.md](comments.md), `shared/scomment.mjs`, `scomment-fixtures.json`) |
+| `@@scomment [text]` | side comment, shown beside the text in the editor and LaTeX export; inside a footnote or box the LaTeX form stays inline, and long margin notes can continue across pages |
 | `@@part [title]`, `@@section(level) [title] {id: …}` | semantic headings; `level` is empty/`sec`/`section`, `sub`, `subsub`, `subsubsub` (`src/semantic-outline.ts`) |
 | `@@latexmk(mark)` | LaTeX layout mark: `newline`, `nbsp`, `allowbreak`, `noindent`, `newpage`, `clearpage`, `nopagebreak`, `keepnext`, `appendix` (`shared/latex-marks.mjs`) |
 | `@@slides(reveal) []`, `@@slides(vertical) []` | slide deck markers (below) |

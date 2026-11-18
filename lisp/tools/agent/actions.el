@@ -60,10 +60,10 @@
      ("A" "Attempts board" +agent-worktree-board)
      ("?" "Key help" +agent-acp-help))
     ("Document"
-     ("d" "Comment here…" +agent-collab/ask :slash "ask"
-      :doc "Comment on the region or line; the comment is a task in the collaboration panel")
-     ("k" "Comment tasks" +agent-collab/threads :slash "threads"
-      :doc "This document's comment tasks, in the collaboration panel")
+     ("d" "Ask about this place…" +agent-collab/ask :slash "ask"
+      :doc "Ask this document's collaborator about the region or line, as a thread")
+     ("k" "Threads" +agent-collab/threads :slash "threads"
+      :doc "This document's threads and their replies")
      ("Y" "Suggestions" +agent-collab/suggestions :slash "suggestions"
       :doc "Pending suggestions for this file from its collaborators")
      ("Z" "Direct changes" +agent-collab/direct-changes :slash "direct"
