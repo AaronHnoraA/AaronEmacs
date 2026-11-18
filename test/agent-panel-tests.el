@@ -113,18 +113,35 @@
         (when-let* ((window (+agent-panel--window))) (delete-window window))
         (when (get-buffer +agent-panel-buffer-name) (kill-buffer +agent-panel-buffer-name))))))
 
+(ert-deftest agent-panel-c78-a-pi-that-cannot-start-says-so ()
+  (let ((+agent-panel--tab 'pi))
+    (with-current-buffer (+agent-panel--pi-starting "/tmp/")
+      (cl-letf (((symbol-function 'noema-pi-project-ensure) (lambda (_) (user-error "Pi is unavailable"))))
+        (+agent-panel--start-pi "/tmp/"))
+      (should (string-match-p "Pi could not start: Pi is unavailable" (buffer-string)))
+      (kill-buffer))))
+
 (ert-deftest agent-panel-c78-tabs-are-buffers-in-one-side-window ()
   (agent-panel-tests--tree root
     (let ((+agent-binding-last-document (expand-file-name "notes/a.md" root))
           (+agent-panel--tab 'tasks)
           (pi (generate-new-buffer "*pi fixture*")))
       (unwind-protect
-          (cl-letf (((symbol-function 'noema-pi-project-ensure) (lambda (_directory) pi))
-                    ((symbol-function '+agent-topology--sessions) (lambda () nil)))
+          (cl-letf* ((started nil)
+                     ((symbol-function 'noema-pi-project-ensure) (lambda (_directory) pi))
+                     ((symbol-function 'noema-pi-router-buffer) (lambda (_directory) (and started pi)))
+                     ((symbol-function 'run-with-timer) #'ignore)
+                     ((symbol-function '+agent-topology--sessions) (lambda () nil)))
             (provide 'noema-pi-router)
             (+agent/panel)
             (let ((window (+agent-panel--window)))
+              ;; Clicking a tab works: the tabs are the window's tab line.
+              (should (lookup-key (get-text-property 3 'keymap (+agent-panel-header)) [tab-line mouse-1]))
+              ;; A Pi still to start: a starting page at once, nothing waits.
               (+agent-panel--show-tab 'pi)
+              (should (equal (buffer-name (window-buffer window)) " *Pi starting*"))
+              (+agent-panel--start-pi root)
+              (setq started t)
               (should (eq (+agent-panel--window) window))
               (should (eq (window-buffer window) pi))
               (should (buffer-local-value '+agent-panel-pi-mode pi))

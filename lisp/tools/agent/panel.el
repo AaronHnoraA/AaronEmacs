@@ -130,6 +130,8 @@ comment, and the files a task journal names.  Below ROOT only when RECURSIVE."
 (defun +agent-panel--tab-map (tab)
   "Return the header keymap that shows TAB on a click."
   (let ((map (make-sparse-keymap)))
+    ;; The tabs are the window's tab line.
+    (define-key map [tab-line mouse-1] (lambda () (interactive) (+agent-panel--show-tab tab)))
     (define-key map [header-line mouse-1] (lambda () (interactive) (+agent-panel--show-tab tab)))
     map))
 
@@ -262,18 +264,60 @@ comment, and the files a task journal names.  Below ROOT only when RECURSIVE."
     default-directory))
 
 (defun +agent-panel--show-tab (tab)
-  "Show TAB in the panel."
-  (setq +agent-panel--tab tab)
+  "Show TAB in the panel.  Nothing here waits: a Pi still to start shows a
+starting page at once and replaces it when it is there."
   (pcase tab
-    ('tasks (+agent-panel--put (+agent-panel--tasks-buffer)) (+agent-panel-redraw))
+    ('tasks (setq +agent-panel--tab 'tasks)
+            (+agent-panel--put (+agent-panel--tasks-buffer)) (+agent-panel-redraw))
     ('pi (require 'noema-pi-router)
-         ;; The display function routes the project Pi into this panel (C78).
-         (let ((buffer (noema-pi-project-ensure (+agent-panel--pi-directory))))
-           (+agent-panel-display-pi buffer)))
+         (let* ((directory (+agent-panel--pi-directory))
+                (live (noema-pi-router-buffer directory)))
+           ;; The display function routes the project Pi into this panel (C78).
+           (if live (+agent-panel-display-pi live)
+             (setq +agent-panel--tab 'pi)
+             (+agent-panel--put (+agent-panel--pi-starting directory))
+             (run-with-timer 0.05 nil #'+agent-panel--start-pi directory))))
     ('graph (require 'tools/agent/board)
+            (setq +agent-panel--tab 'graph)
             (+agent-panel--put (+agent-board-buffer))
             (+agent-board-refresh t)))
   (force-mode-line-update t))
+
+(defconst +agent-panel--pi-starting-name " *Pi starting*")
+
+(defvar-keymap +agent-panel-starting-mode-map
+  :parent special-mode-map
+  "1" #'+agent-panel-tasks-tab "2" #'+agent-panel-pi-tab "3" #'+agent-panel-graph-tab
+  "C-c 1" #'+agent-panel-tasks-tab "C-c 2" #'+agent-panel-pi-tab "C-c 3" #'+agent-panel-graph-tab
+  "q" #'+agent/panel)
+
+(define-derived-mode +agent-panel-starting-mode special-mode "Pi"
+  "The panel's page while the project Pi starts.")
+
+(defun +agent-panel--pi-starting (directory)
+  "Return the page the Pi tab shows while DIRECTORY's Pi starts."
+  (with-current-buffer (get-buffer-create +agent-panel--pi-starting-name)
+    (unless (derived-mode-p '+agent-panel-starting-mode) (+agent-panel-starting-mode))
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (insert (propertize "\n  Starting this project's Pi…\n" 'face 'bold)
+              (propertize (format "\n  %s\n" (abbreviate-file-name directory)) 'face '+agent-panel-meta)))
+    (current-buffer)))
+
+(defun +agent-panel--start-pi (directory)
+  "Start DIRECTORY's Pi and show it, if the panel still waits for it."
+  (condition-case failure
+      (let ((buffer (noema-pi-project-ensure directory)))
+        (when (and (eq +agent-panel--tab 'pi)
+                   (when-let* ((window (+agent-panel--window)))
+                     (equal (buffer-name (window-buffer window)) +agent-panel--pi-starting-name)))
+          (+agent-panel-display-pi buffer)))
+    (error
+     (when-let* ((page (get-buffer +agent-panel--pi-starting-name)))
+       (with-current-buffer page
+         (let ((inhibit-read-only t))
+           (goto-char (point-max))
+           (insert (propertize (format "\n  Pi could not start: %s\n" (error-message-string failure)) 'face 'error))))))))
 
 (defun +agent-panel-redraw ()
   "Redraw the task list."
