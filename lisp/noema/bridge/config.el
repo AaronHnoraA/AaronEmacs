@@ -1553,10 +1553,10 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
 
 (defvar +agent-collab-changed-functions)
 (defvar +noema--comment-signatures (make-hash-table :test #'equal)
-  "Note file -> the signature of its side comments when last saved.")
+  "Note file -> the signature of its comments when last saved.")
 
 (defun +noema--comments-saved-h (payload)
-  "Announce PAYLOAD's note when the ids or states of its side comments changed."
+  "Announce PAYLOAD's note when the ids or states of its comments changed."
   (when-let* ((file (alist-get 'file payload))
               ((string-match-p "\\.\\(?:md\\|markdown\\)\\'" file))
               ((file-readable-p file)))
@@ -1564,7 +1564,7 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
                        (insert-file-contents file)
                        (let (marks)
                          (goto-char (point-min))
-                         (while (re-search-forward "@@scomment\\(?:([^)\n]*)\\)?[ \t]*\\[" nil t)
+                         (while (re-search-forward "@@comment\\(?:([^)\n]*)\\)?[ \t]*\\[" nil t)
                            (push (buffer-substring-no-properties (match-beginning 0) (min (point-max) (+ (point) 80))) marks))
                          (secure-hash 'sha1 (string-join marks "\n"))))))
       (unless (equal signature (gethash file +noema--comment-signatures))
@@ -1710,7 +1710,7 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
              nil)
             ((or "open" "system-open" "zotero" "zotero-import"
                  "current-file" "saved")
-             ;; A saved note whose side comments changed: the task panel
+             ;; A saved note whose comments changed: the task panel
              ;; follows (C79).  Only once collaboration is in use.
              (when (and (equal type "saved") (featurep 'tools/agent/collab))
                (+noema--defer-host-event #'+noema--comments-saved-h payload))

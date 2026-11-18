@@ -4,7 +4,7 @@
 ;; The information flow between a document and its agents.  Only Emacs and
 ;; Noema change: the agents keep their own logic.
 ;;
-;; A comment is a task (C79): a side comment `@@scomment' in the note, or a
+;; A comment is a task (C79): a `@@comment' standing on its own in the note, or a
 ;; task recorded for a file that cannot hold one.  Handing it to an agent sends
 ;; one request; the agent changes the file through Noema's API and marks the
 ;; comment done.  The folder's `.noema-tasks.jsonl' records who took what.
@@ -96,9 +96,9 @@
 
 ;;;; Comments are tasks (C79)
 ;;
-;; A comment is a side comment of the note, `@@scomment [text] {id: …}'
-;; (`shared/scomment.mjs'; this file mirrors its scanner, pinned by
-;; `scomment-fixtures.json').  `@@scomment(done)' is a finished one.  Handing a
+;; A comment stands on its own in the note, `@@comment [text] {id: …}'
+;; (`shared/comments.mjs'; this file mirrors its scanner, pinned by
+;; `comment-fixtures.json').  `@@comment(done)' is a finished one.  Handing a
 ;; comment to an agent is a task: the folder's hidden `.noema-tasks.jsonl'
 ;; records who took which comment, one line per handover, and nothing else:
 ;; the agent changes the file through Noema's API and marks the comment done;
@@ -155,11 +155,11 @@
     end))
 
 (defun +agent-collab-scan (text)
-  "Return the side comments of TEXT, as `shared/scomment.mjs' reads them.
+  "Return the comments of TEXT, as `shared/comments.mjs' reads them.
 Each is an alist: id (\"\" when none), done, text, line, from, to (0-based
 characters), source and quote, the text before it on its line."
   (let ((masked (+agent-collab--mask text)) (pos 0) comments)
-    (while (string-match "@@scomment\\(?:(\\([^)\n]*\\))\\)?[ \t]*\\[" masked pos)
+    (while (string-match "@@comment\\(?:(\\([^)\n]*\\))\\)?[ \t]*\\[" masked pos)
       (let* ((from (match-beginning 0))
              (switch (match-string 1 masked))
              (body-start (match-end 0))
@@ -219,7 +219,7 @@ characters), source and quote, the text before it on its line."
 
 (defun +agent-collab-comments (file)
   "Return FILE's comment tasks, oldest first.
-A note's are its side comments; another file's are the tasks recorded for it.
+A note's are its comments; another file's are the tasks recorded for it.
 Each carries file, and assignee (name . session) when handed over."
   (let* ((client (+agent-collab--client-file file))
          (tasks (+agent-collab--tasks client))
@@ -253,7 +253,7 @@ Each carries file, and assignee (name . session) when handed over."
 
 (defun +agent-collab--head-edit (comment done id)
   "Return COMMENT's source with DONE and ID; its text is kept as written."
-  (let ((next (replace-regexp-in-string "\\`@@scomment\\(?:([^)\n]*)\\)?" (if done "@@scomment(done)" "@@scomment")
+  (let ((next (replace-regexp-in-string "\\`@@comment\\(?:([^)\n]*)\\)?" (if done "@@comment(done)" "@@comment")
                                         (alist-get 'source comment) t t)))
     (if (not (string-empty-p (alist-get 'id comment))) next
       (if (string-match "\\(\\]\\)[ \t]*{\\([^{}\n]*\\)}[ \t]*\\'" next)
@@ -299,7 +299,7 @@ Without a host the note is edited here."
 (defvar +noema--ready)
 
 (defun +agent-collab--ensure-id (comment)
-  "Return COMMENT's id, giving an id-less side comment one in its note."
+  "Return COMMENT's id, giving an id-less comment one in its note."
   (let ((id (alist-get 'id comment)))
     (if (not (string-empty-p (or id ""))) id
       (let ((id (+agent-collab--new-id)))
@@ -324,7 +324,7 @@ Without a host the note is edited here."
 
 (defun +agent-collab-add (file text &optional begin end)
   "Add a comment task TEXT to FILE about BEGIN..END (0-based characters), return its id.
-A note gains a side comment after the passage, or at its end without one;
+A note gains a comment after the passage, or at its end without one;
 another file keeps the task in the journal."
   (let* ((client (+agent-collab--client-file file))
          (id (+agent-collab--new-id))
@@ -332,7 +332,7 @@ another file keeps the task in the journal."
          (passage (and begin end (< begin end) (<= end (length source)) (substring source begin end)))
          (line (if begin (1+ (cl-count ?\n source :end (min begin (length source)))) 1)))
     (if (+agent-collab--markdown-p client)
-        (let ((comment (format "@@scomment [%s] {id: %s}"
+        (let ((comment (format "@@comment [%s] {id: %s}"
                                (+agent-collab--escape-body text)
                                id)))
           (if passage
@@ -354,7 +354,7 @@ another file keeps the task in the journal."
 Noema provides it: how to edit, propose and comment.")
 
 (defconst +agent-collab-task-prompt
-  "%s\n\n(Task from side comment %s on %s, line %d, after «%s».  Do it by changing the file through Noema's API: agent:document:edit, or agent:document:propose when the person should judge.  When it is done, mark the comment done: agent:document:comment {\"file\",\"id\"}.  Your chat answer is not collected.)"
+  "%s\n\n(Task from comment %s on %s, line %d, after «%s».  Do it by changing the file through Noema's API: agent:document:edit, or agent:document:propose when the person should judge.  When it is done, mark the comment done: agent:document:comment {\"file\",\"id\"}.  Your chat answer is not collected.)"
   "How a task reaches its agent: request, comment id, file, line, passage.")
 
 (defconst +agent-collab-file-task-prompt

@@ -4,7 +4,7 @@
 ;; `H-t' (C75) opens a side window on the right that stays until `H-t' or `q'
 ;; hides it.  Its three tabs are three buffers shown in that one window:
 ;;
-;;   Tasks  the side comments (`@@scomment', C79) of the focused document, its
+;;   Tasks  the comments (`@@comment', C79) of the focused document, its
 ;;          folder, the folder and its subfolders, or the whole Project, as a
 ;;          task list; a comment is handed to an agent from here.
 ;;   Pi     the Project's own Pi, its chat embedded here: a project Pi is shown
@@ -88,13 +88,13 @@ comment, and the files a task journal names.  Below ROOT only when RECURSIVE."
          (notes (when rg
                   (ignore-errors
                     (apply #'process-lines rg "-l" "-F" "--glob" "*.md" "--glob" "*.markdown"
-                           (append depth skip (list "@@scomment" "."))))))
+                           (append depth skip (list "@@comment" "."))))))
          (journals (when rg
                      (ignore-errors
                        (apply #'process-lines rg "--files" "--hidden" "--glob" +agent-collab-tasks-file
                               (append depth skip (list ".")))))))
     (unless rg
-      (setq notes (seq-filter (lambda (file) (with-temp-buffer (insert-file-contents file) (search-forward "@@scomment" nil t)))
+      (setq notes (seq-filter (lambda (file) (with-temp-buffer (insert-file-contents file) (search-forward "@@comment" nil t)))
                               (if recursive (directory-files-recursively root "\\.md\\'")
                                 (directory-files root t "\\.md\\'")))))
     (delete-dups

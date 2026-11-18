@@ -10,7 +10,7 @@
     (with-temp-file file
       (insert "# Note\n\n")
       (pcase-dolist (`(,id ,text ,done) comments)
-        (insert (format "Some passage @@scomment%s [%s] {id: %s}\n" (if done "(done)" "") text id))))
+        (insert (format "Some passage @@comment%s [%s] {id: %s}\n" (if done "(done)" "") text id))))
     file))
 
 (defmacro agent-panel-tests--tree (root &rest body)
@@ -89,7 +89,7 @@
         (re-search-forward "● on a$")
         (cl-letf (((symbol-function '+agent-panel-redraw) #'ignore))
           (+agent-panel-resolve))
-        (should (string-match-p "@@scomment(done) \\[on a\\] {id: ca0001}"
+        (should (string-match-p "@@comment(done) \\[on a\\] {id: ca0001}"
                                 (with-temp-buffer (insert-file-contents (expand-file-name "notes/a.md" root)) (buffer-string))))))))
 
 (ert-deftest agent-panel-c75-h-t-shows-a-right-side-window-and-hides-it ()

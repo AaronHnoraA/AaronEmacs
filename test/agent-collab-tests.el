@@ -214,11 +214,11 @@
         (should (equal (nth 2 delivered) nil))))))
 
 
-;;;; C79: comments are side comments in the note; tasks are journal lines.
+;;;; C79: comments are comments in the note; tasks are journal lines.
 
 (ert-deftest agent-collab-c79-the-scanner-reads-the-shared-fixtures ()
   (let ((fixtures (with-temp-buffer
-                    (insert-file-contents (expand-file-name "site-lisp/noema/shared/scomment-fixtures.json" user-emacs-directory))
+                    (insert-file-contents (expand-file-name "site-lisp/noema/shared/comment-fixtures.json" user-emacs-directory))
                     (json-parse-buffer :object-type 'alist :array-type 'list :false-object nil))))
     (dolist (fixture fixtures)
       (should (equal (mapcar (lambda (c) (list (alist-get 'id c) (alist-get 'done c) (alist-get 'text c)
@@ -241,16 +241,16 @@
   (agent-collab-tests--project root
     (agent-collab-tests--agent-buffer agent
       (let* ((+noema--ready nil)
-             (file (agent-collab-tests--note root "# SAI\n\nThe bound @@scomment [Prove [it]] holds.\n"))
+             (file (agent-collab-tests--note root "# SAI\n\nThe bound @@comment [Prove [it]] holds.\n"))
              (comment (car (+agent-collab-comments file)))
              delivered)
         (should (equal (alist-get 'id comment) ""))
         (cl-letf (((symbol-function '+agent-collab--deliver) (lambda (_b prompt) (push prompt delivered))))
           (+agent-collab-dispatch comment agent))
         ;; An id-less comment is given one; its text stays as written.
-        (should (string-match "The bound @@scomment \\[Prove \\[it\\]\\] {id: \\([a-z0-9]\\{6\\}\\)} holds" (agent-collab-tests--disk file)))
+        (should (string-match "The bound @@comment \\[Prove \\[it\\]\\] {id: \\([a-z0-9]\\{6\\}\\)} holds" (agent-collab-tests--disk file)))
         (let ((id (match-string 1 (agent-collab-tests--disk file))))
-          (should (string-match-p (format "side comment %s on .*SAI.md, line 3, after «The bound»" id) (car delivered)))
+          (should (string-match-p (format "comment %s on .*SAI.md, line 3, after «The bound»" id) (car delivered)))
           (should (string-match-p "agent:document:comment" (car delivered)))
           (should (equal (alist-get 'assignee (+agent-collab-comment file id))
                          (cons "claude·SAI" (+agent-acp-session-token agent)))))))))
@@ -258,13 +258,13 @@
 (ert-deftest agent-collab-c79-done-and-reopen-edit-only-the-head ()
   (agent-collab-tests--project root
     (let* ((+noema--ready nil)
-           (file (agent-collab-tests--note root "a @@scomment [x \\] y] {id: ab12cd; by: You}\nb @@scomment [z] {id: cd34ef}\n")))
+           (file (agent-collab-tests--note root "a @@comment [x \\] y] {id: ab12cd; by: You}\nb @@comment [z] {id: cd34ef}\n")))
       (+agent-collab-set-done (+agent-collab-comment file "ab12cd") t)
-      (should (equal (agent-collab-tests--disk file) "a @@scomment(done) [x \\] y] {id: ab12cd; by: You}\nb @@scomment [z] {id: cd34ef}\n"))
+      (should (equal (agent-collab-tests--disk file) "a @@comment(done) [x \\] y] {id: ab12cd; by: You}\nb @@comment [z] {id: cd34ef}\n"))
       (should (alist-get 'done (+agent-collab-comment file "ab12cd")))
       (should-not (alist-get 'done (+agent-collab-comment file "cd34ef")))
       (+agent-collab-set-done (+agent-collab-comment file "ab12cd") nil)
-      (should (string-prefix-p "a @@scomment [x \\] y]" (agent-collab-tests--disk file))))))
+      (should (string-prefix-p "a @@comment [x \\] y]" (agent-collab-tests--disk file))))))
 
 (ert-deftest agent-collab-c79-a-note-gains-a-side-comment-and-code-keeps-a-journal-task ()
   (agent-collab-tests--project root
@@ -273,7 +273,7 @@
            (code (expand-file-name "src/main.py" root))
            (begin (string-match "alpha" (agent-collab-tests--disk note)))
            (id (+agent-collab-add note "Why ] alpha?" begin (+ begin 5))))
-      (should (equal (agent-collab-tests--disk note) (format "# SAI\n\nalpha @@scomment [Why \\] alpha?] {id: %s}\nbeta\n" id)))
+      (should (equal (agent-collab-tests--disk note) (format "# SAI\n\nalpha @@comment [Why \\] alpha?] {id: %s}\nbeta\n" id)))
       (let ((task (+agent-collab-add code "Rename y" 6 11)))
         (should (equal (agent-collab-tests--disk code) "x = 1\ny = 2\n"))
         (let ((comment (+agent-collab-comment code task)))
@@ -293,9 +293,9 @@
                      (setq sent (list buffer (alist-get 'text (car blocks)) no-focus)))))
           (setq id (funcall (+agent-collab-task-delivery file 3 "alpha" begin (+ begin 5))
                             agent '(((type . "text") (text . "Why?")) ((type . "resource_link"))) nil "Why?")))
-        (should (string-match-p (format "alpha @@scomment \\[Why\\?\\] {id: %s}" id) (agent-collab-tests--disk file)))
+        (should (string-match-p (format "alpha @@comment \\[Why\\?\\] {id: %s}" id) (agent-collab-tests--disk file)))
         (should (eq (nth 0 sent) agent))
-        (should (string-prefix-p "Why?\n\n(Task from side comment " (nth 1 sent)))
+        (should (string-prefix-p "Why?\n\n(Task from comment " (nth 1 sent)))
         (should (nth 2 sent))
         (should (equal (car (alist-get 'assignee (+agent-collab-comment file id))) "claude·SAI"))))))
 
