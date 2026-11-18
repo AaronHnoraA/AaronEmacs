@@ -242,6 +242,10 @@
   "Make SESSION the assignee of FILE's thread ID."
   (+agent-collab--append file `((op . "assign") (id . ,id) (assignee . ,(+agent-collab--collaborator session)))))
 
+(defun +agent-collab-unassign (file id)
+  "Take FILE's comment ID back from its agent: it waits to be handed over again."
+  (+agent-collab--append file `((op . "assign") (id . ,id) (assignee . :null))))
+
 (defun +agent-collab--add-message (file id session text)
   "Append TEXT to FILE's thread ID, from SESSION's agent, or from you when nil."
   (+agent-collab--append

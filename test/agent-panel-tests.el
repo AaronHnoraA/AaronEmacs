@@ -55,8 +55,8 @@
         (+agent-panel-mode)
         (setq +agent-panel--document (concat "/fs:local:" (expand-file-name "notes/a.md" root)))
         (let ((inhibit-read-only t)) (+agent-panel--draw-tasks))
-        (should (string-match-p "this file · 1 open" (buffer-string)))
-        (should (string-match-p "● on a" (buffer-string)))))))
+        (should (string-match-p "Tasks of this file · 1 open" (buffer-string)))
+        (should (string-match-p "▌ on a" (buffer-string)))))))
 
 (ert-deftest agent-panel-c75-a-new-folder-of-comments-is-found ()
   (agent-panel-tests--tree root
@@ -68,21 +68,69 @@
       (+agent-panel--comments-changed-h (expand-file-name "fresh/f.md" root))
       (should (equal (length (agent-panel-tests--ids (+agent-panel-tasks file 'project))) 6)))))
 
-(ert-deftest agent-panel-c75-the-task-list-hides-resolved-until-asked ()
+(defun agent-panel-tests--board (file)
+  "Return the board of FILE as drawn."
+  (with-temp-buffer
+    (+agent-panel-mode)
+    (setq +agent-panel--document file)
+    (let ((inhibit-read-only t)) (+agent-panel--draw-tasks))
+    (buffer-string)))
+
+(ert-deftest agent-panel-c81-cards-sit-in-the-lane-their-state-means ()
+  (let* ((agent (generate-new-buffer "*panel agent*"))
+         (snapshot nil)
+         (lane (lambda (thread) (car (+agent-panel--card-lane thread)))))
+    (unwind-protect
+        (cl-letf (((symbol-function '+agent-acp-session-buffer-for-token) (lambda (token) (and (equal token "tok") agent)))
+                  ((symbol-function '+agent-session-snapshot) (lambda (_) snapshot)))
+          (should (eq (funcall lane '((status . "open"))) 'todo))
+          (should (eq (funcall lane '((status . "resolved") (assignee (session . "tok")))) 'done))
+          (setq snapshot '(:turn-state running))
+          (should (eq (funcall lane '((status . "open") (assignee (session . "tok")))) 'doing))
+          (setq snapshot '(:turn-state idle :attention-kind permission))
+          (should (eq (funcall lane '((status . "open") (assignee (session . "tok")))) 'waiting))
+          (setq snapshot '(:process-state disconnected))
+          (should (eq (funcall lane '((status . "open") (assignee (session . "tok")))) 'paused))
+          (should (eq (funcall lane '((status . "open") (assignee (session . "gone")))) 'paused))
+          (should (equal (+agent-panel--agent-state '(:turn-state running)) '("working" . "●"))))
+      (kill-buffer agent))))
+
+(ert-deftest agent-panel-c81-the-board-shows-lanes-cards-and-agents ()
   (agent-panel-tests--tree root
-    (with-temp-buffer
-      (+agent-panel-mode)
-      (setq +agent-panel--document (expand-file-name "notes/a.md" root))
-      (let ((inhibit-read-only t)) (+agent-panel--draw-tasks))
-      (should (string-match-p "this file · 1 open" (buffer-string)))
-      (should (string-match-p "on a" (buffer-string)))
-      (should-not (string-match-p "done on a" (buffer-string)))
-      (setq +agent-panel--show-resolved t)
-      (let ((inhibit-read-only t)) (erase-buffer) (+agent-panel--draw-tasks))
-      (should (string-match-p "done on a" (buffer-string)))
-      (goto-char (point-min))
-      (re-search-forward "● on a$")
-      (should (equal (cdr (get-text-property (point) '+agent-panel-task)) "c-a1")))))
+    (cl-letf (((symbol-function '+agent-panel--project-sessions)
+               (lambda (_) (list (list :name "claude·SAI" :turn-state 'running :buffer 'a)
+                                 (list :name "codex·SAI" :attention-kind 'permission :buffer 'b)))))
+      (let ((board (agent-panel-tests--board (expand-file-name "notes/a.md" root))))
+        (should (string-match-p "Agents  ● claude·SAI   ! codex·SAI" board))
+        (should (string-match-p "▾ To do  1\n ▌ on a\n ▌ «q»\n ▌ a.md" board))
+        (should (string-match-p "▾ In progress  0\n   —" board))
+        ;; Done is folded to its count.
+        (should (string-match-p "▸ Done  1" board))
+        (should-not (string-match-p "done on a" board))))))
+
+(ert-deftest agent-panel-c81-moving-a-card-does-what-its-lane-means ()
+  (agent-panel-tests--tree root
+    (let* ((file (expand-file-name "notes/a.md" root))
+           (thread (+agent-collab-thread file "c-a1"))
+           dispatched)
+      (cl-letf (((symbol-function '+agent-panel--choose-agent) (lambda (_) 'agent))
+                ((symbol-function '+agent-collab-dispatch) (lambda (f id session) (setq dispatched (list f id session)))))
+        ;; To do → In progress hands it over.
+        (+agent-panel--move-to thread 'doing)
+        (should (equal dispatched (list file "c-a1" 'agent)))
+        ;; → Done marks it done; back to To do reopens it.
+        (+agent-panel--move-to thread 'done)
+        (should (equal (alist-get 'status (+agent-collab-thread file "c-a1")) "resolved"))
+        (+agent-panel--move-to (+agent-collab-thread file "c-a1") 'todo)
+        (should (equal (alist-get 'status (+agent-collab-thread file "c-a1")) "open"))))))
+
+(ert-deftest agent-panel-c81-taking-back-unassigns ()
+  (agent-panel-tests--tree root
+    (let ((file (expand-file-name "notes/a.md" root)))
+      (+agent-collab--append file '((op . "assign") (id . "c-a1") (assignee . ((name . "claude·SAI") (session . "tok")))))
+      (should (alist-get 'assignee (+agent-collab-thread file "c-a1")))
+      (+agent-panel--move-to (+agent-collab-thread file "c-a1") 'todo)
+      (should-not (alist-get 'assignee (+agent-collab-thread file "c-a1"))))))
 
 (ert-deftest agent-panel-c75-h-t-shows-a-right-side-window-and-hides-it ()
   (agent-panel-tests--tree root
