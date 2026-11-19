@@ -35,6 +35,7 @@
 (declare-function noema-pi-project-ensure "noema-pi-router" (directory))
 (declare-function noema-pi-emacs-open "noema-pi-router" (&rest args))
 (declare-function +agent-shell/here "tools/agent/config" (agent &optional file))
+(declare-function evil-define-minor-mode-key "evil-core" (state mode key def &rest bindings))
 
 (defgroup +agent-panel nil
   "The collaboration side panel."
@@ -452,6 +453,12 @@ starting page at once and replaces it when it is there."
 (define-minor-mode +agent-panel-pi-mode
   "A project Pi shown in the collaboration panel."
   :lighter nil)
+
+(after! evil
+  (evil-define-minor-mode-key 'normal '+agent-panel-pi-mode
+    (kbd "1") #'+agent-panel-tasks-tab
+    (kbd "2") #'+agent-panel-pi-tab
+    (kbd "3") #'+agent-panel-graph-tab))
 
 (defvar +portal-popup-buffers)
 (declare-function +portal-popup-agent-keys-mode "term/portal/popup" (&optional arg))

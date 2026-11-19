@@ -223,6 +223,25 @@
       (should (string-match-p "Pi could not start: Pi is unavailable" (buffer-string)))
       (kill-buffer))))
 
+(ert-deftest agent-panel-c78-pi-normal-state-switches-tabs-with-digits ()
+  "Pi's normal-state digits switch the panel; insert and other chats keep theirs."
+  (require 'evil)
+  (with-temp-buffer
+    (agent-shell-mode)
+    (evil-local-mode 1)
+    (evil-normal-state)
+    (let* ((keys '("1" "2" "3"))
+           (original (mapcar #'key-binding keys)))
+      (+agent-panel-pi-mode 1)
+      (should (equal (mapcar #'key-binding keys)
+                     '(+agent-panel-tasks-tab +agent-panel-pi-tab +agent-panel-graph-tab)))
+      (evil-insert-state)
+      (should (equal (mapcar #'key-binding keys)
+                     '(self-insert-command self-insert-command self-insert-command)))
+      (evil-normal-state)
+      (+agent-panel-pi-mode -1)
+      (should (equal (mapcar #'key-binding keys) original)))))
+
 (ert-deftest agent-panel-c78-tabs-are-buffers-in-one-side-window ()
   (agent-panel-tests--tree root
     (let ((+agent-binding-last-document (expand-file-name "notes/a.md" root))
