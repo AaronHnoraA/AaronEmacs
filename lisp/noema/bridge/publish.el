@@ -99,7 +99,10 @@ them would be a licence violation, so a missing one is a hard failure.")
         (push rel missing)))
     (when missing
       (error "Publish repo is incomplete, refusing to deploy; missing: %s"
-             (string-join (nreverse missing) ", ")))))
+             (string-join (nreverse missing) ", "))))
+  ;; Hand edits to db.json that were never rendered would deploy a CV and a
+  ;; homepage that disagree with it.
+  (+noema-publish--render-sync 'check))
 
 (defun +noema-publish--log (msg)
   "Append MSG to the publish log buffer."
@@ -195,8 +198,30 @@ Signal an error when staging, inspection, or committing fails."
                 (error "rsync NAS failed (exit %d)" exit)))))
       (kill-buffer out-buf))))
 
+(defconst +noema-publish--render-script "scripts/render.py"
+  "Script, relative to the publish root, that renders db.json into the
+generated regions of CV/main.tex and index.html.")
+
+(defun +noema-publish--render-sync (&optional check)
+  "Render db.json into the CV and homepage; with CHECK, only verify.
+Does nothing when the publish repo has no render script."
+  (let ((script (expand-file-name +noema-publish--render-script +noema-publish-root)))
+    (when (file-exists-p script)
+      (princ (if check "[publish] checking db.json render...\n"
+               "[publish] rendering db.json...\n"))
+      (let ((exit-code (apply #'call-process "python3" nil
+                              (get-buffer-create +noema-publish--log-buffer) nil
+                              script (and check '("--check")))))
+        (unless (zerop exit-code)
+          (error (if check
+                     "Generated regions are stale or invalid; run python3 %s (exit %d)"
+                   "Rendering db.json failed: see %s (exit %d)")
+                 (if check +noema-publish--render-script +noema-publish--log-buffer)
+                 exit-code))))))
+
 (defun +noema-publish--cv-build-sync ()
-  "Compile the LaTeX CV synchronously; copy PDF into the publish repo."
+  "Render db.json, then compile the LaTeX CV; copy PDF into the publish repo."
+  (+noema-publish--render-sync)
   (let* ((cv-state (expand-file-name "cv" +noema-publish-state-dir))
          (jobname "Aaron_He_CV")
          (pdf-in (expand-file-name (concat jobname ".pdf") cv-state))
@@ -222,8 +247,8 @@ Signal an error when staging, inspection, or committing fails."
 
 ;;;###autoload
 (defun +noema/publish-build ()
-  "Build what the site needs generating: the CV PDF.
-The pages themselves are hand-written and need no build step."
+  "Build what the site needs generating: db.json regions and the CV PDF.
+Everything outside the generated regions is hand-written."
   (interactive)
   (+noema-publish--cv-build-sync)
   (+noema-publish--check-site)
