@@ -121,6 +121,12 @@
 
 (defun +agent-collab--append (file event)
   "Append EVENT, an alist, to FILE's comment journal and announce the change."
+  (let ((id (alist-get 'id event)))
+    (if (equal (alist-get 'op event) "thread")
+        (when (gethash id (+agent-collab--fold file))
+          (user-error "That comment already exists"))
+      (unless (+agent-collab-thread file id)
+        (user-error "No such comment thread in %s" file))))
   (let ((journal (+agent-collab--journal file))
         (event (append '((v . 1)) event `((at . ,(+agent-collab--now-utc))))))
     (with-temp-buffer
@@ -207,7 +213,9 @@
 
 (defun +agent-collab-thread (file id)
   "Return FILE's thread ID, or nil."
-  (when-let* ((thread (gethash id (+agent-collab--fold file))))
+  (when-let* ((thread (gethash id (+agent-collab--fold file)))
+              ((equal (alist-get 'note thread)
+                      (file-name-nondirectory (+agent-collab--client-file file)))))
     (+agent-collab--with-file thread file)))
 
 (defun +agent-collab-threads (file)
@@ -277,6 +285,17 @@ native session, so it knows how to comment and propose (C71).  Noema sets it.")
   "%s\n\n(Task from comment %s on %s line %d about «%s».  Do it by changing the file through Noema's API: agent:document:edit, or agent:document:propose when the person should judge.  Comments take no replies: when it is done, mark the comment done with agent:document:comment {\"file\",\"id\"}.  Your chat answer is not collected.)"
   "How a task reaches its agent: request, thread id, file, line, quote.")
 
+(defconst +agent-collab-inline-quote-limit 1200
+  "Maximum quote length in characters sent in full with a comment task.")
+
+(defun +agent-collab--task-quote (quote)
+  "Return QUOTE complete when short, or explicitly as an excerpt to read."
+  (let ((quote (or quote "")))
+    (if (<= (length quote) +agent-collab-inline-quote-limit)
+        quote
+      (concat (substring quote 0 +agent-collab-inline-quote-limit)
+              "… [excerpt; use agent:document:read for exact oldText]"))))
+
 (defun +agent-collab--deliver (buffer prompt)
   "Send PROMPT to session BUFFER without taking the keyboard.
 The first task of a native session carries the tools guide."
@@ -296,7 +315,7 @@ The first task of a native session carries the tools guide."
           (alist-get 'text (car (last (alist-get 'messages thread))))
           (alist-get 'id thread) (alist-get 'file thread)
           (or (+agent-collab--thread-line thread) 0)
-          (truncate-string-to-width (or (alist-get 'quote thread) "") 200 nil nil "…")))
+          (+agent-collab--task-quote (alist-get 'quote thread))))
 
 (defun +agent-collab-dispatch (file id session)
   "Hand FILE's thread ID to SESSION as a task: assign it and send the request."
@@ -318,7 +337,7 @@ the keyboard stays in the document."
                                                 :session session :text text))
            (note (string-trim (format +agent-collab-task-prompt "" (alist-get 'id thread)
                                       (alist-get 'file thread) (or line 0)
-                                      (truncate-string-to-width (or anchor "") 200 nil nil "…"))))
+                                      (+agent-collab--task-quote anchor))))
            (content (copy-tree blocks)))
       (setf (alist-get 'text (car content)) (concat (alist-get 'text (car content)) "\n\n" note))
       (+agent-context--deliver

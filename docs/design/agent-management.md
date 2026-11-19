@@ -26,6 +26,20 @@ Research 的逻辑 Session 和 Run ID 不可互换。关闭视图只改变显示
 通用实现位于 Emacs。Noema 通过薄适配关联 Research 身份和文档动作；普通会话
 操作不会启动 Noema host，也不会创建研究项目。
 
+### 文档协作的设计原则
+
+文档保存工作内容和可检查的结果；批注保存请求、位置和协作事实。看板、Agenda
+与图谱从这些事实展示工作，会话承担执行。选区发起任务后，用户仍可留在正文继续工作。
+
+原生化沿用 Emacs 的 buffer、region、命令、会话池、窗口与 Remote 所有权。Noema
+负责 Markdown 的呈现与保存；Agent 继续使用自己的运行时。入口提供完成当前操作
+所需的最少信息，深入规则按需读取。明确授权的翻译、润色与精简直接编辑；需要人
+判断的额外改动才提出审阅。
+
+长期使用依靠稳定的文档与任务身份、可重放记录、原文守护和真实错误。隐藏界面
+退订观察，后台执行和持久记录继续存在；重连不自动重放未知结果的请求。会话快照
+说明协作者当前在做什么，不能据此证明某条任务已交付。批注结案以明确日志事件为准。
+
 ### 工作流
 
 `agent-shell` 指令用来打开新会话，`C-c a` 用来回到已有会话，两者分工不同。
@@ -558,7 +572,9 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   （`+agent-collab-dispatch`）：只发一条提示（请求、批注 id、文件、行、引文，每个原生会话的第一条附
   Noema 工具指南），之后 Agent 经 `agent:document:edit` 修改文件，并用 `agent:document:comment
   {file,id}` 标为完成；批注不接受回复。Emacs 不读 Agent 的聊天；忙的会话由 agent-shell 自己的队列
-  排队。测试：`agent-collab-c73-*`、`C80 *`。
+  排队。1200 字符以内的引文完整传递；更长的注明是摘录，并要求读取原文后编辑。
+  翻译、润色、精简等明确修改直接编辑；明确要审阅或额外提出的改动用 proposal。
+  保留批注锚点，只改内文；`oldText` 继续核对当前源码。测试：`agent-collab-c73-*`、`C80 *`。
 - **C74 Agent 经 API 修改，不必等，也不让人等。** `agent:document:edit`（笔记）与 `agent:file:edit`
   （任何文本文件）接受同一组写法：`{oldText,newText}`（原文唯一，像 Agent 自带的 Edit）、
   `{lines:[a,b],newText}`、`{after|before:行内文字,newText}`、`{append}`、位置 `{from,to,oldText,newText}`
@@ -574,7 +590,10 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   `s` 切换；`a` 交给 Agent、`c` 标为完成或重开、`R` 显示已完成）、Pi、拓扑。面板说的是最近聚焦的
   文档（`+agent-binding-last-document`，由 `aaron-switch-buffer-hook` 记录）；只在显示时监听状态
   事件并合并为一次重绘，隐藏后什么都不挂。`H-T` 是原来的 Agent 选择器，默认针对同一篇文档。
-  页面里没有打开 Agent 的按钮。测试：`agent-panel-c75-*`。
+  重绘按文档与批注 id（Agent 行按会话 buffer）保留选择，前方卡片增删不改变键盘操作对象；
+  原对象不在当前视图时回到面板顶部，避免选中另一张卡片。空行上的任务操作只向上查找
+  当前泳道；泳道标题与 Agent 行不指向上一项任务。页面里没有打开 Agent 的按钮。
+  测试：`agent-panel-c75-*`。
 - **C78 面板里的 Pi 与图谱。** 面板三页是同一侧窗里的三个 buffer。Pi 页就是这个项目 Pi 的
   agent-shell 会话本身：项目 Pi 的 `+agent-acp-display-buffer-function` 是 `+agent-panel-display-pi`
   （由 `noema-pi-router-project-display-function` 在挂接时设上，重启后保留），所以 `pi`、Pi 的提醒
@@ -593,7 +612,8 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   其余在“进行中”。卡片带接手 Agent 的实时标记（● 在做 / ! 等你 / ◌ 空闲 / × 已不在）。移动卡片即做
   泳道的动作：`>` 从待处理交给 Agent、从其余标为完成；`<` 往回（完成→进行中或待处理，其余→待处理）；
   `u` 收回（日志追加空指派）；`d` 完成；`TAB` 折叠泳道（“完成”默认折叠）。顶部一行列出本项目的
-  Agent 与其状态，`RET` 进聊天。只在面板显示时随事件重绘。测试：`agent-panel-c81-*`。
+  Agent 与其状态，`RET` 进聊天。等你的卡片从已有会话快照显示具体请求或错误；过长时
+  截短显示，鼠标悬停可读完整内容。只在面板显示时随事件重绘。测试：`agent-panel-c81-*`。
 - **C76 发送即任务。** 指向文档某处的发送（`C-c A c` 的区域/整篇/光标处、页面选区、旧的
   `noema-interaction-send-*`）经 `+agent-collab-task-delivery` 变成该处的批注线程、指派给选中会话
   并立即交出，不夺键盘；聊天与草稿、剪贴板路径不变。测试：`agent-collab-c76-*`。

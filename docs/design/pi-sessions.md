@@ -172,6 +172,8 @@ prompt 文档和交接，按需参与，不是派工必经层。执行 Agent 只
   工具指南 `resources/agent/tools.md`：有哪些工具、什么请求用哪个，是唯一一份，
   MCP 说明、CLI `help` 和页面审阅引导都读它。入口文本：只补这个入口特有的事实（传输方式、
   选区、项目、会话身份）。Pi 的 `SYSTEM.md`：身份和协作规则。Skill：需要时才读的深入判断。
+  shell 入口先在 Emacs 中解析客户端 Node 的绝对路径并作 shell 引用，不依赖 Agent
+  非登录 shell 的 PATH；项目入口、页面入口和 LaTeX 修复入口共用这项解析。
   文本是数据：这些都放在 `resources/agent/`（Pi 的放在 `resources/pi/`，Skill 和 preamble 各在
   其位），用到时才读，改提示词不需要编译、重载或重启。Elisp 和 JS 里只留占位填充，不写指导
   句子，读取函数 `noema-agent-text` 不依赖任何模块。引导的会话键取自文本哈希，所以新文本

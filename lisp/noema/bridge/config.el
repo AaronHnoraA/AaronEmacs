@@ -1830,16 +1830,18 @@ run in this buffer, or they would end the session shown in that other frame."
 
 (defun +noema--latex-intervention-prompt (params)
   "Draft a reviewable manual repair request from failed export PARAMS."
+  (require 'noema-agent-text)
   (format (concat "Investigate this failed Noema LaTeX export.\n"
                   "Source note: %s\nOutput target: %s\n\n"
                   "Error:\n%s\n\n"
                   "Inspect the source and make only the needed edits, through "
-                  "agent:document:edit so the open page follows (`node %s help` "
+                  "agent:document:edit so the open page follows (`%s %s help` "
                   "shows the call). "
                   "Tell me what changed; I will rerun the export from Task Manager.")
           (or (alist-get 'file params) "")
           (or (alist-get 'outputPath params) "")
           (or (alist-get 'error params) "LaTeX export failed")
+          (noema-agent-text-node-command)
           (shell-quote-argument
            (expand-file-name "../scripts/agent-api.mjs"
                              (file-name-directory (locate-library "noema-md-bridge"))))))

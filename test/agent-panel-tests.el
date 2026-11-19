@@ -132,6 +132,68 @@
       (+agent-panel--move-to (+agent-collab-thread file "c-a1") 'todo)
       (should-not (alist-get 'assignee (+agent-collab-thread file "c-a1"))))))
 
+(ert-deftest agent-panel-c75-redraw-keeps-the-selected-task ()
+  "A new card before point must not redirect the next keyboard action to it."
+  (dolist (between-cards '(nil t))
+    (agent-panel-tests--tree root
+      (let* ((+agent-panel-buffer-name " *panel selection test*")
+             (+agent-panel--document (expand-file-name "notes/a.md" root))
+             (buffer (+agent-panel--tasks-buffer)))
+        (unwind-protect
+            (with-current-buffer buffer
+              (cl-letf (((symbol-function '+agent-panel--project-sessions) (lambda (_) nil)))
+                (agent-panel-tests--journal
+                 (expand-file-name "notes" root)
+                 '(("c-tail" "a.md" "last task" "open")
+                   ("c-a1" "a.md" "on a" "open")))
+                (+agent-panel-redraw)
+                (goto-char (point-min))
+                (search-forward "on a")
+                (when between-cards
+                  (goto-char (next-single-property-change (point) '+agent-panel-task))
+                  (should-not (get-text-property (point) '+agent-panel-task))
+                  (should-not (get-text-property (point) '+agent-panel-lane)))
+                (should (equal (cdr (+agent-panel--at '+agent-panel-task)) "c-a1"))
+                (agent-panel-tests--journal
+                 (expand-file-name "notes" root)
+                 '(("c-a1" "a.md" "on a" "open")
+                   ("c-new" "a.md" "new first task" "open")))
+                (+agent-panel-redraw)
+                ;; Verify the fixture actually puts the new card before the selected one.
+                (save-excursion
+                  (goto-char (point-min))
+                  (search-forward "new first task")
+                  (should (search-forward "on a" nil t)))
+                (should (equal (+agent-panel--at '+agent-panel-task)
+                               (cons +agent-panel--document "c-a1")))
+                (agent-panel-tests--journal (expand-file-name "notes" root)
+                                            '(("c-new" "a.md" "new first task" "open")))
+                (+agent-panel-redraw)
+                (should-error (+agent-panel--task) :type 'user-error)))
+          (kill-buffer buffer))))))
+
+(ert-deftest agent-panel-c81-lane-headers-do-not-select-previous-cards ()
+  "A task action at an empty lane must not reach back into a different lane."
+  (agent-panel-tests--tree root
+    (with-temp-buffer
+      (+agent-panel-mode)
+      (let ((+agent-panel--document (expand-file-name "notes/a.md" root))
+            (inhibit-read-only t))
+        (+agent-panel--draw-tasks)
+        (goto-char (point-min))
+        (search-forward "In progress")
+        (should (eq (get-text-property (point) '+agent-panel-lane) 'doing))
+        (should-error (+agent-panel--task) :type 'user-error)))))
+
+(ert-deftest agent-panel-c81-waiting-cards-explain-the-request ()
+  "The panel can show the exact approval or question from the shared snapshot."
+  (with-temp-buffer
+    (+agent-panel--insert-card
+     '((file . "/tmp/a.md") (id . "c-1111") (line . 1)
+       (messages . (((text . "修订证明")))) (assignee . ((name . "codex"))))
+     'waiting '(:attention-kind permission :request "Allow editing proof.md?"))
+    (should (string-match-p "Allow editing proof.md?" (buffer-string)))))
+
 (ert-deftest agent-panel-c75-h-t-shows-a-right-side-window-and-hides-it ()
   (agent-panel-tests--tree root
     (let ((+agent-binding-last-document (expand-file-name "notes/a.md" root))

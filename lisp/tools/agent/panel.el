@@ -22,6 +22,7 @@
 (require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
+(require 'text-property-search)
 (require 'tools/agent/acp)
 (require 'tools/agent/binding)
 (require 'tools/agent/collab)
@@ -239,6 +240,16 @@
               "")
             (propertize (concat "  " (+agent-panel--age (alist-get 'at (car (last (alist-get 'messages thread)))))) 'face '+agent-panel-meta)
             "\n")
+    (when-let* (((eq lane 'waiting))
+                (request (or (plist-get snapshot :request) (plist-get snapshot :last-error)))
+                ((stringp request))
+                ((not (string-empty-p request))))
+      (insert " " bar " "
+              (propertize (truncate-string-to-width
+                           (concat "Needs: " (string-join (split-string request) " "))
+                           width nil nil "…")
+                          'face '+agent-panel-meta 'help-echo request)
+              "\n"))
     (put-text-property start (point) '+agent-panel-task (cons (alist-get 'file thread) (alist-get 'id thread)))))
 
 (defun +agent-panel--project-sessions (file)
@@ -412,6 +423,12 @@ starting page at once and replaces it when it is there."
       (when (timerp +agent-panel--timer) (cancel-timer +agent-panel--timer))
       (setq +agent-panel--timer nil)
       (let ((inhibit-read-only t)
+            (identity (cond ((get-text-property (point) '+agent-panel-agent)
+                             (cons '+agent-panel-agent (get-text-property (point) '+agent-panel-agent)))
+                            ((get-text-property (point) '+agent-panel-lane)
+                             (cons '+agent-panel-lane (get-text-property (point) '+agent-panel-lane)))
+                            ((ignore-errors (+agent-panel--at '+agent-panel-task))
+                             (cons '+agent-panel-task (+agent-panel--at '+agent-panel-task)))))
             (line (line-number-at-pos)))
         (erase-buffer)
         (condition-case failure
@@ -420,7 +437,10 @@ starting page at once and replaces it when it is there."
           (error (insert (propertize (format "\n  The task list failed: %s\n" (error-message-string failure))
                                      'face 'error))))
         (goto-char (point-min))
-        (forward-line (1- line))))))
+        (if identity
+            (when-let* ((match (text-property-search-forward (car identity) (cdr identity) #'equal)))
+              (goto-char (prop-match-beginning match)))
+          (forward-line (1- line)))))))
 
 ;;;; The project Pi, embedded (C78)
 
@@ -507,11 +527,14 @@ panel and never in the ordinary agent views."
 ;;;; Task commands
 
 (defun +agent-panel--at (property)
-  "Return PROPERTY at point or on the nearest item line above."
+  "Return PROPERTY at point or on the nearest item above in the same lane."
   (or (get-text-property (point) property)
       (save-excursion
         (let ((found nil))
-          (while (and (not found) (zerop (forward-line -1)))
+          (while (and (not found)
+                      (not (get-text-property (point) '+agent-panel-lane))
+                      (not (get-text-property (point) '+agent-panel-agent))
+                      (zerop (forward-line -1)))
             (setq found (get-text-property (point) property)))
           found))
       (user-error "Nothing here")))

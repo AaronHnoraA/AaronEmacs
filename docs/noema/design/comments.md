@@ -26,11 +26,17 @@ shown beside the text. They are not tasks.
   handed to), `resolve`, `reopen`, `edit`, `delete`, `move`. A comment is
   folded from its events on read. The Noema host and Emacs both only append.
   There are no replies: the work is the change to the file.
+- **Identity.** A lookup or mutation requires the owning note as well as its
+  comment id. A sibling note cannot read or change the thread by id. New ids
+  stay unique across the folder's shared journal.
 - **Cache.** The host keeps each folder's fold in memory, keyed by the
   journal's size and mtime. Every write announces `comments-changed` to open
   pages and Emacs; nothing polls.
-- **Moves.** A rename through Noema appends `move` events; a move to another
-  folder carries the comment's events into that folder's journal.
+- **Migration helper.** `moveThreads` appends rename events or carries a note's
+  events to another folder's journal. Destination id collisions are refused
+  before either journal is changed. This is a preflight check, not a transaction
+  across folders or external writers. The helper is not yet wired into ordinary
+  file moves, so automatic comment migration on moving a note is not provided.
 
 ## Interaction
 
@@ -54,6 +60,14 @@ session also carries Noema's tools guide. The agent changes the document with
 the comment done with `agent:document:comment {file, id}`; `resolve: false`
 reopens it. It may also comment on text it names (`{file, from, to, oldText,
 text}`) to ask the person something. Emacs collects nothing from the chat.
+
+Quotes of up to 1200 characters travel complete, including whitespace and CJK
+text. Longer quotes are explicitly labelled excerpts requiring
+`agent:document:read` before editing. A quote may have become stale; `oldText`
+still guards the current source. Agents preserve `{==text==}{>>#id<<}` and edit
+the inner text. Translation, polishing and shortening requests authorize direct
+editing; explicit review requests and additional changes requiring judgement
+use proposals.
 
 ## Agenda (C77)
 

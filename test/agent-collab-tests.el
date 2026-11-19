@@ -95,6 +95,21 @@
       (+agent-collab--set-resolved file "c-1111" t)
       (should (equal (alist-get 'state (+agent-collab-thread file "c-1111")) "resolved")))))
 
+(ert-deftest agent-collab-c70-thread-identity-includes-its-document ()
+  "A sibling note must not be able to read, resolve, reassign or replace a task."
+  (agent-collab-tests--project root
+    (let* ((a (expand-file-name "src/SAI.md" root))
+           (b (expand-file-name "src/main.py" root))
+           (journal (expand-file-name "src/.noema-comments.jsonl" root)))
+      (+agent-collab-thread-create :file a :id "c-owned" :text "on a")
+      (let ((before (with-temp-buffer (insert-file-contents journal) (buffer-string))))
+        (should-not (+agent-collab-thread b "c-owned"))
+        (should-error (+agent-collab--set-resolved b "c-owned" t) :type 'user-error)
+        (should-error (+agent-collab-unassign b "c-owned") :type 'user-error)
+        (should-error (+agent-collab-thread-create :file b :id "c-owned" :text "collision") :type 'user-error)
+        (should (equal before (with-temp-buffer (insert-file-contents journal) (buffer-string)))))
+      (should (equal (alist-get 'status (+agent-collab-thread a "c-owned")) "open")))))
+
 (ert-deftest agent-collab-c73-a-dispatched-comment-is-sent-to-its-agent ()
   (agent-collab-tests--project root
     (agent-collab-tests--agent-buffer agent
@@ -309,6 +324,37 @@
         (let ((+agent-collab-session-instructions-function nil))
           (+agent-collab--deliver agent "q"))
         (should (equal (nth 2 delivered) nil))))))
+
+(ert-deftest agent-collab-c73-short-quotes-arrive-complete ()
+  "A quote short enough to inline remains usable as exact oldText, even in CJK."
+  (let* ((quote (make-string 1200 ?字))
+         (prompt (+agent-collab--task-prompt
+                  `((id . "c-1111") (file . "/tmp/a.md") (line . 1)
+                    (quote . ,quote) (messages . (((text . "改成中文"))))))))
+    (should (string-match "about «\\([^»]*\\)»" prompt))
+    (should (equal (match-string 1 prompt) quote))))
+
+(ert-deftest agent-collab-c73-long-quotes-require-a-read ()
+  "A shortened excerpt must never be presented as exact source for editing."
+  (let* ((quote (make-string 1201 ?x))
+         (prompt (+agent-collab--task-prompt
+                  `((id . "c-1111") (file . "/tmp/a.md") (line . 1)
+                    (quote . ,quote) (messages . (((text . "精简一下"))))))))
+    (should-not (string-match-p (regexp-quote quote) prompt))
+    (should (string-match-p "agent:document:read" prompt))))
+
+(ert-deftest agent-collab-c76-context-delivery-keeps-short-quotes ()
+  "Sending a selection and dispatching a stored comment use the same quote policy."
+  (agent-collab-tests--project root
+    (agent-collab-tests--agent-buffer agent
+      (let* ((file (expand-file-name "src/SAI.md" root))
+             (quote (concat (make-string 240 ?a) " full ending")) delivered)
+        (cl-letf (((symbol-function '+agent-collab--notify-host) #'ignore)
+                  ((symbol-function '+agent-context--deliver)
+                   (lambda (_session blocks &rest _) (setq delivered blocks))))
+          (funcall (+agent-collab-task-delivery file 3 quote)
+                   agent '(((type . "text") (text . "Rewrite"))) nil "Rewrite"))
+        (should (string-match-p (regexp-quote quote) (alist-get 'text (car delivered))))))))
 
 (ert-deftest agent-collab-c75-resolving-one-thread-leaves-the-others-open ()
   "Each folded thread is its own structure: no state leaks between threads."

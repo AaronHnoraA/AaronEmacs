@@ -134,6 +134,7 @@ Dated and append-only. Read them for why something is the way it is, never for h
 - [terminal-remote-placement-2026-11.md](records/audits/terminal-remote-placement-2026-11.md) Portal/Ghostty, Web and Eshell placement: workspace ownership versus cwd, native PTY plans, client environment and lifecycle verification.
 - [zcode-llm-wiki-agent-2026-11.md](records/audits/zcode-llm-wiki-agent-2026-11.md) Study of ZCode and Karpathy's LLM Wiki with adopt/reject decisions; filing replies into the Wiki, the Portal Wiki open fix, and the session-rewind gap.
 - [zcode-llm-wiki-followup-2026-11.md](records/audits/zcode-llm-wiki-followup-2026-11.md) Follow-up source comparison: late permission decisions, native turn ownership, and the difference between document editing APIs and a source-ingest workflow.
+- [sharpmd-agent-native-2026-11.md](records/audits/sharpmd-agent-native-2026-11.md) SharpMD 产品与源码学习：文档原处协作、Emacs 生命周期边界，以及命令入口、批注身份和看板选择的修复与验证。
 - [doom-template-2026-10.md](records/audits/doom-template-2026-10.md) Completed Doom-template restructuring workbench.
 - [doom-template-comparison-2026-10.md](records/audits/doom-template-comparison-2026-10.md) Source-by-source Doom audit and optional behavior differences.
 - [entrypoint-audit-2026-10.md](records/audits/entrypoint-audit-2026-10.md) Current entry map, comparisons with Lunarymacs, Doom, Spacemacs and Prelude, and the ongoing command and lifecycle review.
