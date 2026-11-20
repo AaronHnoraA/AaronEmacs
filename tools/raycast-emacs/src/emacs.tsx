@@ -50,6 +50,7 @@ function OpenFile() {
 }
 
 export default function Command() {
+  const [selectedItem, setSelectedItem] = useState<string | undefined>("open-emacs");
   const [state, setState] = useState<State>();
   const [failed, setFailed] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -116,9 +117,14 @@ export default function Command() {
     { title: "Wiki Home", icon: Icon.House, command: "wiki-home" },
   ] as const;
   return (
-    <List searchBarPlaceholder="Search Emacs and Noema actions">
+    <List
+      searchBarPlaceholder="Search Emacs and Noema actions"
+      selectedItemId={selectedItem}
+      onSelectionChange={(id) => setSelectedItem(id ?? undefined)}
+    >
       <List.Section title="Emacs">
         <List.Item
+          id="open-emacs"
           title="Open Emacs"
           subtitle={statusLabels[status]}
           icon={Icon.AppWindow}
@@ -132,6 +138,7 @@ export default function Command() {
         />
         {commands.map(({ title, icon, command }) => (
           <List.Item
+            id={command}
             key={command}
             title={title}
             icon={icon}
@@ -144,6 +151,7 @@ export default function Command() {
           />
         ))}
         <List.Item
+          id="open-file"
           title="Open File"
           icon={Icon.Document}
           actions={
@@ -155,6 +163,7 @@ export default function Command() {
         />
         {status === "visible" && (
           <List.Item
+            id="hide"
             title="Hide Emacs"
             icon={Icon.EyeDisabled}
             actions={
@@ -167,6 +176,7 @@ export default function Command() {
         )}
         {running && (
           <List.Item
+            id="quit"
             title="Quit Emacs"
             icon={Icon.Power}
             actions={
@@ -179,6 +189,7 @@ export default function Command() {
       </List.Section>
       <List.Section title="Noema">
         <List.Item
+          id="find-note"
           title="Find Note"
           icon={Icon.MagnifyingGlass}
           actions={
@@ -189,6 +200,7 @@ export default function Command() {
           }
         />
         <List.Item
+          id="noema"
           title="Noema Maintenance"
           icon={Icon.Gear}
           actions={
@@ -201,6 +213,7 @@ export default function Command() {
       </List.Section>
       <List.Section title="Status">
         <List.Item
+          id="status"
           title="Emacs Status"
           subtitle={statusLabels[status]}
           icon={{
@@ -225,6 +238,7 @@ export default function Command() {
       <List.Section title="Frames">
         {state?.frames?.map((frame) => (
           <List.Item
+            id={`frame-${frame.id}`}
             key={frame.id}
             title={frame.title}
             subtitle={frame.buffers === frame.title ? "" : frame.buffers}

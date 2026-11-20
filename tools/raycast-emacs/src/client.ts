@@ -26,7 +26,6 @@ export async function run(
 ) {
   try {
     const args = command === "quit" || command === "restart" ? [command, "--app"] : [command];
-    await closeMainWindow({ clearRootSearch: true, popToRootType: PopToRootType.Immediate });
     // A save prompt or a cold start can outlive this menu.
     await new Promise<void>((resolve, reject) => {
       const child = spawn(launcher, args, { detached: true, stdio: "ignore" });
@@ -36,6 +35,7 @@ export async function run(
         resolve();
       });
     });
+    await closeMainWindow({ clearRootSearch: true, popToRootType: PopToRootType.Immediate });
   } catch (error) {
     await showToast({
       style: Toast.Style.Failure,
