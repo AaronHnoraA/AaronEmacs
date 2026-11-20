@@ -1,14 +1,15 @@
 ;;; tools/agent/history.el --- One conversation history across agents -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; Claude Code, Codex and OpenCode each keep every conversation on the machine
+;; Claude Code, Codex, OpenCode and Antigravity keep conversations on the machine
 ;; where they run.  This file reads those stores, read-only and without a copy
-;; or index of its own, so one picker lists the conversations of all three
+;; or index of its own, so one picker lists their conversations
 ;; (C63 in docs/design/agent-management.md):
 ;;
 ;;   claude    ~/.claude/projects/<folder>/<id>.jsonl   (one file per session)
 ;;   codex     ~/.codex/state_5.sqlite, table threads  (index of rollout files)
 ;;   opencode  ~/.local/share/opencode/opencode.db     (sessions and messages)
+;;   agy       ~/.gemini/antigravity-cli/conversation_summaries.db
 ;;
 ;; A conversation of the session's own agent resumes natively.  One of another
 ;; agent, or one whose native restore fails, opens in a new session that is
@@ -22,6 +23,9 @@
 (require 'map)
 (require 'seq)
 (require 'subr-x)
+(require 'hex-util)
+(require 'url-parse)
+(require 'url-util)
 (require 'tools/agent/acp)
 (require 'noema-agent-text)
 
@@ -48,7 +52,7 @@
 (declare-function remote-canonicalize-emacs-file-name "remote-fs" (file-name &optional directory))
 
 (defgroup +agent-history nil
-  "One conversation history across Claude Code, Codex and OpenCode."
+  "One conversation history across Claude Code, Codex, OpenCode and Antigravity."
   :group '+agent-session)
 
 (defcustom +agent-history-limit 300
@@ -91,21 +95,39 @@
 
 ;;;; ── Reading the stores ───────────────────────────────────────────────────
 
-(defun +agent-history--sqlite (db query)
+(defun +agent-history--sqlite-name (db &optional closed-wal)
+  "Return DB's native SQLite name, optionally reading a CLOSED-WAL snapshot.
+Use immutable mode only when no WAL file exists, so active writes stay visible."
+  (let ((native (+agent-history--native db)))
+    (if (and closed-wal (not (file-exists-p (concat db "-wal"))))
+        (concat (url-encode-url (concat "file://" native)) "?immutable=1")
+      native)))
+
+(defun +agent-history--sqlite (db query &optional closed-wal)
   "Return QUERY's rows on database file DB as alists, or nil.
-sqlite3 runs read-only on the machine that holds DB."
+sqlite3 runs read-only on the machine that holds DB.  CLOSED-WAL permits a
+retry without sidecars when the native reader cannot open a closed WAL file."
   (when (file-readable-p db)
     (let ((default-directory (file-name-directory db)))
       (with-temp-buffer
-        (when (eq 0 (ignore-errors
-                      (process-file "sqlite3" nil '(t nil) nil
-                                    "-readonly" "-json" (+agent-history--native db) query)))
-          (goto-char (point-min))
-          (and (re-search-forward "\\S-" nil t)
-               (progn (goto-char (point-min))
-                      (ignore-errors
-                        (json-parse-buffer :object-type 'alist :array-type 'list
-                                           :null-object nil :false-object nil)))))))))
+        (let* ((native (+agent-history--native db))
+               (status (ignore-errors
+                         (process-file "sqlite3" nil '(t nil) nil
+                                       "-readonly" "-json" native query)))
+               (snapshot (and closed-wal (not (eq status 0))
+                              (+agent-history--sqlite-name db t))))
+          (when (and snapshot (not (equal snapshot native)))
+            (erase-buffer)
+            (setq status (ignore-errors
+                           (process-file "sqlite3" nil '(t nil) nil
+                                         "-readonly" "-json" snapshot query))))
+          (when (eq status 0)
+            (goto-char (point-min))
+            (and (re-search-forward "\\S-" nil t)
+                 (progn (goto-char (point-min))
+                        (ignore-errors
+                          (json-parse-buffer :object-type 'alist :array-type 'list
+                                             :null-object nil :false-object nil))))))))))
 
 (defun +agent-history--sql-string (text)
   "Return TEXT as an SQL string literal."
@@ -300,12 +322,75 @@ FROM session s WHERE s.parent_id IS NULL AND s.time_archived IS NULL AND %s
 ORDER BY s.time_updated DESC LIMIT %d"
                    (+agent-history--sql-scope "s.directory" dirs) +agent-history-limit))))
 
+;;; Antigravity
+
+(defun +agent-history--agy-db (home)
+  "Return Antigravity's native summary database under HOME."
+  (expand-file-name ".gemini/antigravity-cli/conversation_summaries.db" home))
+
+(defun +agent-history--agy-scope (dirs)
+  "Return a summary SQL condition matching any workspace URI in native DIRS."
+  (if (null dirs) "1"
+    (format
+     "EXISTS (SELECT 1 FROM json_each(s.workspace_uris) w WHERE %s)"
+     (mapconcat
+      (lambda (dir)
+        (let ((uri (url-encode-url (concat "file://" (directory-file-name dir)))))
+          (format "w.value = %s OR instr(w.value, %s) = 1"
+                  (+agent-history--sql-string uri)
+                  (+agent-history--sql-string
+                   (if (string-suffix-p "/" uri) uri (concat uri "/"))))))
+      dirs " OR "))))
+
+(defun +agent-history--agy (home dirs)
+  "Read Antigravity's native conversations under HOME, scoped to native DIRS."
+  (let ((db (+agent-history--agy-db home)))
+    (delq nil
+          (mapcar
+           (lambda (row)
+             (let* ((uris (ignore-errors (json-parse-string
+                                         (map-elt row 'workspace_uris) :array-type 'list)))
+                    (directories
+                     (delq nil
+                           (mapcar (lambda (uri)
+                                     (let ((url (url-generic-parse-url uri)))
+                                       (when (and (equal (url-type url) "file")
+                                                  (member (url-host url) '(nil "" "localhost")))
+                                         (decode-coding-string
+                                          (url-unhex-string (url-filename url)) 'utf-8))))
+                                   uris)))
+                    (cwd (seq-find (lambda (dir) (+agent-history--in-scope-p dir dirs))
+                                   directories)))
+               (when cwd
+                 (list :agent "agy" :id (map-elt row 'conversation_id) :cwd cwd
+                       :title (if (string-empty-p (or (map-elt row 'title) ""))
+                                  (map-elt row 'preview) (map-elt row 'title))
+                       :prompt (map-elt row 'preview) :turns (map-elt row 'turns)
+                       :updated (float (or (map-elt row 'updated) 0))
+                       :db (expand-file-name
+                            (concat "conversations/" (map-elt row 'conversation_id) ".db")
+                            (file-name-directory db))))))
+           (+agent-history--sqlite
+            db
+            (format "SELECT s.conversation_id, s.title, s.preview, s.workspace_uris,
+ CAST(strftime('%%s', s.last_modified_time) AS INTEGER) AS updated,
+ (SELECT sum(json_array_length(CAST(f.user_step_byte_offsets AS TEXT)))
+  FROM conversations_fts f WHERE f.conversation_id = s.conversation_id
+  AND f.chunk_index >= 0) AS turns
+FROM conversation_summaries s
+WHERE s.step_count > 0 AND s.parent_conversation_id = '' AND s.nesting_depth = 0
+ AND NOT EXISTS (SELECT 1 FROM conversations_fts f
+ WHERE f.conversation_id = s.conversation_id AND f.archived = 1) AND %s
+ORDER BY s.last_modified_time DESC LIMIT %d"
+                    (+agent-history--agy-scope dirs) +agent-history-limit) t)))))
+
 ;;;; ── The history ──────────────────────────────────────────────────────────
 
 (defconst +agent-history-readers
   '(("claude" . +agent-history--claude)
     ("codex" . +agent-history--codex)
-    ("opencode" . +agent-history--opencode))
+    ("opencode" . +agent-history--opencode)
+    ("agy" . +agent-history--agy))
   "Each agent and the function that lists its conversations (HOME DIRS).")
 
 (defun +agent-history-scope (directory &optional buffer)
@@ -493,12 +578,83 @@ ORDER BY p.time_created DESC LIMIT %d"
           (and (= (length rows) +agent-history--page-messages)
                (map-elt (car (last rows)) 't)))))
 
+(defun +agent-history--agy-fields (bytes wanted)
+  "Return length-delimited protobuf fields WANTED from unibyte BYTES.
+Skip other wire fields without decoding them.  A bounded read may cut the
+last field short; complete earlier fields remain usable."
+  (let ((index 0) values)
+    (cl-labels ((varint ()
+                  (let ((value 0) (shift 0) byte)
+                    (while (progn
+                             (when (or (>= index (length bytes)) (>= shift 70))
+                               (error "Truncated or invalid protobuf varint"))
+                             (setq byte (aref bytes index) index (1+ index)
+                                   value (logior value (ash (logand byte 127) shift))
+                                   shift (+ shift 7))
+                             (>= byte 128)))
+                    value)))
+      (ignore-errors
+        (while (< index (length bytes))
+          (let* ((tag (varint)) (field (ash tag -3)) (wire (logand tag 7)))
+            (when (zerop field) (error "Invalid protobuf field"))
+            (pcase wire
+              (0 (varint))
+              (1 (setq index (+ index 8)))
+              (2 (let* ((size (varint)) (end (+ index size)))
+                   (when (= field wanted)
+                     (push (substring bytes index (min end (length bytes))) values))
+                   (setq index end)))
+              (5 (setq index (+ index 4)))
+              (_ (error "Unsupported protobuf wire type")))))))
+    (nreverse values)))
+
+(defun +agent-history--agy-message (entry)
+  "Decode ENTRY's original user text or public assistant reply, never thoughts.
+Native steps 14/15 wrap their payload in protobuf fields 19/20 respectively."
+  (ignore-errors
+    (let* ((user (= (map-elt entry 'step_type) 14))
+           (payload (decode-hex-string (map-elt entry 'payload)))
+           (body (car (+agent-history--agy-fields payload (if user 19 20))))
+           (text (if user
+                     (or (when-let* ((parts (+agent-history--agy-fields body 3)))
+                           (mapconcat (lambda (part)
+                                        (or (car (+agent-history--agy-fields part 1)) ""))
+                                      parts "\n"))
+                         (car (+agent-history--agy-fields body 2)))
+                   (or (car (+agent-history--agy-fields body 1))
+                       (car (+agent-history--agy-fields body 8)))))
+           (text (and text (decode-coding-string text 'utf-8))))
+      (when (+agent-history--prompt-p text)
+        (cons (if user "user" "assistant")
+              (truncate-string-to-width (string-trim text)
+                                        +agent-history--message-chars nil nil "…"))))))
+
+(defun +agent-history--agy-page (row before)
+  "Return (MESSAGES . NEXT) of ROW's native database before step BEFORE.
+Read bounded step windows; the search index may not contain this conversation."
+  (let ((next before) (windows 0) (more t) messages)
+    (while (and more (< windows +agent-history--page-windows)
+                (< (length messages) +agent-history--page-messages))
+      (cl-incf windows)
+      (let* ((count (- +agent-history--page-messages (length messages)))
+             (rows (+agent-history--sqlite
+                    (plist-get row :db)
+                    (format "SELECT idx, step_type, hex(substr(step_payload, 1, %d)) AS payload
+FROM steps WHERE step_type IN (14,15)%s ORDER BY idx DESC LIMIT %d"
+                            +agent-history-page-bytes
+                            (if next (format " AND idx < %d" next) "") count) t)))
+        (setq messages (append messages (delq nil (mapcar #'+agent-history--agy-message rows)))
+              more (= (length rows) count)
+              next (and more (map-elt (car (last rows)) 'idx)))))
+    (cons messages next)))
+
 (defun +agent-history--page (row &optional next)
   "Return (MESSAGES . NEXT) of ROW, newest first, starting at NEXT."
   (or (ignore-errors
         (pcase (plist-get row :agent)
           ((or "claude" "codex") (and (plist-get row :file) (+agent-history--file-page row next)))
-          ("opencode" (+agent-history--opencode-page row next))))
+          ("opencode" (+agent-history--opencode-page row next))
+          ("agy" (+agent-history--agy-page row next))))
       (list nil)))
 
 (defun +agent-history--exchanges (row)
@@ -860,6 +1016,24 @@ kept.  The preview frame is deleted on exit."
                                                (plist-get row :cwd))))))
     (if (and dir (file-directory-p dir)) dir fallback)))
 
+(defun +agent-history--transcript-reference (row)
+  "Return a path or read-only command for ROW's native transcript."
+  (cond
+   ((plist-get row :file)
+    (format "transcript (JSON lines): %s"
+            (+agent-history--native (plist-get row :file))))
+   ((equal (plist-get row :agent) "agy")
+    (format
+     (concat "transcript (SQLite): `sqlite3 -readonly %s %s`. "
+             "step_payload is protobuf (hex): user text is in field 19, "
+             "repeated field 3, field 1 (fallback: 19.2); public assistant text "
+             "is in 20.1 (fallback: 20.8). Other fields are not conversation text.")
+     (shell-quote-argument (+agent-history--sqlite-name (plist-get row :db) t))
+     (shell-quote-argument
+      "SELECT idx, step_type, hex(step_payload) FROM steps WHERE step_type IN (14,15) ORDER BY idx")))
+   (t (format "transcript: `opencode session export %s` (JSON)"
+              (plist-get row :id)))))
+
 (defun +agent-history-transcript-prompt (row)
   "Return the short prompt pointing a session at ROW's transcript.
 It carries a link and a one-line title, never the transcript or its first
@@ -872,11 +1046,7 @@ message: the session looks up only what a later request needs."
    :title (truncate-string-to-width
            (replace-regexp-in-string "[\n\t ]+" " " (or (plist-get row :title) ""))
            80 nil nil "…")
-   :read (if (plist-get row :file)
-             (format "transcript (JSON lines): %s"
-                     (+agent-history--native (plist-get row :file)))
-           (format "transcript: `opencode session export %s` (JSON)"
-                   (plist-get row :id)))))
+   :read (+agent-history--transcript-reference row)))
 
 (defun +agent-history-continue (row agent directory)
   "Open a new AGENT session in DIRECTORY that reads ROW's transcript."
@@ -936,11 +1106,15 @@ to ID keeps its name and logical identity."
 (defvar +agent-history--rows (make-hash-table :test #'equal)
   "The rows of the conversations last offered, by ID, for a failed restore.")
 
+(defun +agent-history--agent-id (agent)
+  "Normalize AGENT's upstream identity for the shared history."
+  (if (equal agent "antigravity") "agy" agent))
+
 (defun +agent-history-open (row &optional agent source)
   "Open conversation ROW with AGENT, by default its own.
 Its own agent restores it natively: in SOURCE, an agent session of that
 agent, or else in a new one.  Another agent continues it from its transcript."
-  (let* ((agent (or agent (plist-get row :agent)))
+  (let* ((agent (+agent-history--agent-id (or agent (plist-get row :agent))))
          (id (plist-get row :id))
          (directory (+agent-history--directory
                      row (if (buffer-live-p source)
@@ -955,7 +1129,8 @@ agent, or else in a new one.  Another agent continues it from its transcript."
      ((not (equal agent (plist-get row :agent)))
       (+agent-history-continue row agent directory))
      ((and (buffer-live-p source)
-           (equal agent (buffer-local-value '+agent-acp-session-agent source)))
+           (equal agent (+agent-history--agent-id
+                         (buffer-local-value '+agent-acp-session-agent source))))
       (+agent-history--restore-in source id directory))
      (t (+agent-history--restore row directory)))))
 
@@ -1114,11 +1289,11 @@ agent, or else in a new one.  Another agent continues it from its transcript."
   (if-let* ((file (plist-get +agent-history--view-row :file)))
       (let ((+programmatic-file-visit t))
         (view-file file))
-    (user-error "This conversation is in a database: opencode session export %s"
-                (plist-get +agent-history--view-row :id))))
+    (user-error "This conversation is in a database: %s"
+                (+agent-history--transcript-reference +agent-history--view-row))))
 
 (defun +agent/history (&optional all)
-  "Choose any saved conversation of Claude Code, Codex or OpenCode and open it.
+  "Choose a saved conversation of Claude, Codex, OpenCode or Antigravity.
 In an agent session the conversation opens with that session's agent: its own
 conversations resume natively, another agent's continue from the transcript.
 Elsewhere each opens with its own agent.  With a prefix argument ALL, list every

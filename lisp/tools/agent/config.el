@@ -64,6 +64,13 @@
 (aaron-package-ensure-vc 'agent-shell-fork-tree "https://github.com/roife/agent-shell-fork-tree"
                       "c0a61ff6a3ceae53473a8533a06cb7648297d5eb")
 
+;; The installed Antigravity CLI includes its own ACP server.
+;; Tool permissions are auto-approved, as requested for these sessions.
+(defvar agent-shell-antigravity-acp-command)
+(after! agent-shell-antigravity
+  (setq agent-shell-antigravity-acp-command
+        '("agy" "acp" "--dangerously-skip-permissions")))
+
 ;; Noema keeps the native ACP transcript as the conversation record.  The
 ;; tree's index is useful while Emacs runs, but must not write a second copy
 ;; of prompt/reply text to disk.
@@ -389,7 +396,8 @@ agent sends must resolve against the session's target."
   "Non-nil when this frontend could not acquire its requested Codex task.")
 
 (defconst +agent-shell-agents
-  '((claude . "Claude") (codex . "Codex") (opencode . "OpenCode"))
+  '((claude . "Claude") (codex . "Codex") (opencode . "OpenCode")
+    (agy . "Antigravity"))
   "Agents started through Noema's ACP boundary, as (ID . LABEL).
 The pickers here and in the Portal popup offer exactly these.")
 

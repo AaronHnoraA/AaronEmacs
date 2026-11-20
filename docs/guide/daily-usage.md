@@ -553,8 +553,9 @@ metadata 同时支持 Noema meta block 与 YAML front matter；BibTeX value 支�
 带行列位置的诊断。quoted `bib:` 路径可包含逗号，链接 URL 中的 `@@cite` 保持字面量，而可见链接
 label 中的 citation 正常解析。
 
-后端可用 `+noema-latex-export-agent` 选择：`codex`（默认）/ `claude` / `opencode`，都以
-非交互、免确认方式运行，且在配置里选定、不会每次询问。引擎开关 `+noema-latex-export-engine`
+LaTeX 导出默认通过 Antigravity（`agy`）使用 Gemini 4 Neon，思考强度为 High。
+在 Emacs Config 中修改 `+noema-latex-export-agy-model` 和 `+noema-latex-export-agy-effort`，下一次 agy 导出会读取新值。
+`+noema-latex-export-agent` 也支持 `codex`、`claude` 和 `opencode`。引擎开关 `+noema-latex-export-engine`
 （`codex` = verified-first + 单次 gated polish / 必要时 repair；`mechanical` = 从不启动 agent）。中间校验用 draft
 模式加速；编译会按日志重跑，最多三遍，直到引用稳定。见 Noema 的 `docs/latex-export-style.md`。
 空闲存活检查和硬上限分别由 `+noema-latex-export-agent-idle-timeout`（默认 180 秒）与
@@ -981,14 +982,14 @@ Helpful 页里的源码位置链接会在发起帮助的窗口打开文件，Hel
 
 顶部 `+term` 右键可打开启动菜单，`Applications` 列出上述已配置程序。
 弹窗终端的标签左键切换，右键可重命名、关闭或移动标签位置。
-`Agent` 子菜单（也可点击 `+Agent`）提供 Claude / Codex / OpenCode；它们使用
+`Agent` 子菜单（也可点击 `+Agent`）提供 Claude / Codex / OpenCode / Antigravity；它们使用
 原生 `agent-shell` / ACP buffer，不在 portal 里运行 CLI，共用同一个顶部弹窗、
 标签池、自动收起和固定逻辑。终端用 `C-c C-e` 折叠/打开；Agent 用
 `C-c C-e` 聚焦输入、`C-c C-o` 隐藏返回。`C-c E` 切换标签，
 `C-c M-e` 固定。Agent 原有的模型、会话模式和权限提示保留；仅点击启动时
 加载 Agent 依赖。ACP adapter 沿用现有 agent-shell 配置；在远端 `/fs:` 工作区里
 启动时，agent 进程直接运行在该 target 上，只要 target 的 PATH 里有对应二进制
-（如 `claude-agent-acp`、`codex-acp`、`opencode`）。本地与远端走同一条路径，
+（如 `claude-agent-acp`、`codex-acp`、`opencode`、`agy`）。本地与远端走同一条路径，
 裸 `M-x agent-shell` 同样适用。查找用的是该 workspace 的环境（PATH 与项目
 direnv），因此项目 `.envrc` 提供的 agent 也能找到。popup agent 与 popup 终端一样从
 项目根目录启动（本地与远端相同），不在项目里时用当前目录。
@@ -1006,6 +1007,12 @@ target。本机已删除适配器内置的 CLI（`@anthropic-ai/claude-agent-sdk
 `@openai/codex*`），`npm update -g` 重装适配器后会重新带回，需再删一次；唯一的
 `claude` / `codex` 在 `~/.local/bin`，由 `~/.zprofile` 放进登录 shell 的 PATH，
 Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，不受影响。
+Antigravity 使用已安装 CLI 的 `agy acp --dangerously-skip-permissions`，
+自动批准所有工具权限请求；在 `M-x agent-shell` 选择
+`Antigravity`，或在 `M-x +agent/start`、`M-x agent-spawn` 与 worktree 入口选择
+`agy`。也可直接调用 `M-x agent-shell-antigravity-start-agent`。认证使用原生
+Google 登录；`/resume`、`C-c A h` 与 Manager 历史已统一列出 agy 的已保存对话，
+支持预览与原生恢复。`M-x +agent/resume-saved` 仍可单独查询 agy 的 ACP 历史。
 - `SPC o V`
   命名 `portal`
 - `SPC o f`
@@ -1766,8 +1773,8 @@ Emacs 通用 agent 层统一管理轻量模型交互与结构化 coding-agent �
 | 键 | 功能 |
 |----|------|
 | `H-A` / `SPC a a` / `C-c A RET` | Agent Manager 浮窗；再次调用隐藏返回 |
-| `H-t` / `M-x agent-panel` | 协作面板：右侧固定侧窗，`H-t` 或 `q` 收起。`1` 任务看板（批注是卡片，泳道：待处理 / 进行中 / 等你 / 暂停 / 完成；顶部一行是本项目各 Agent 的状态；`RET` 打开卡片或进 Agent 聊天，`a` 交给 Agent，`>` / `<` 在泳道间移动，`d` 完成，`u` 收回，`TAB` 折叠泳道，`s` 切换范围：本文件、本目录、目录及子目录、项目），`2` 这个项目的 Pi（它的会话就嵌在这里，和其他会话分开），`3` 图谱；任务/图谱页直接按 `1/2/3`，Pi 页在 normal 模式下也可这样切换，insert 模式正常输入数字；三页都可 `C-c 1/2/3` 或点页签切换 |
-| `H-T`（macOS `Option-Shift-T`；`C-S-t` 保留为备用）/ `M-x agent-switcher` | 像 `Cmd-T` 选终端一样选 agent：列出不在屏幕上的会话、新建 Claude/Codex/OpenCode 和历史；`RET` 当前窗口，`S-RET` 右侧，`Cmd-RET` 下方。默认针对最近聚焦的文档（文件 buffer 或 Noema 页面），最前面是它的协作者（`◆`，在屏幕上的直接跳过去），然后是“＋ New … for 文件名”，新建的 Agent 绑定这篇 |
+| `H-t` / `M-x agent-panel` | 协作面板：右侧固定侧窗，`H-t` 或 `q` 收起。`1` 任务看板（批注是卡片，泳道：待处理 / 进行中 / 等你 / 暂停 / 完成；顶部一行是本项目各 Agent 的状态；`RET` 回到文档锚点或进 Agent 聊天，`o` / `S-RET` 打开选中任务或 Agent 行的聊天，`i` 展开全文及批注历史；`/` 搜索全部批注内容，`f` 筛选状态，`\` 清除筛选；`a` 交给 Agent，`>` / `<` 移动，`d` 完成或重开，`u` 收回，`TAB` 折叠泳道，`R` 展开完成项，`s` 切换范围：本文件、本目录、目录及子目录、项目，`?` 帮助），`2` 这个项目的 Pi（会话嵌在这里），`3` 图谱；任务/图谱页直接按 `1/2/3`，Pi 页在 normal 模式下也可这样切换，insert 模式正常输入数字；三页都可 `C-c 1/2/3` 或点页签切换 |
+| `H-T`（macOS `Option-Shift-T`；`C-S-t` 保留为备用）/ `M-x agent-switcher` | 像 `Cmd-T` 选终端一样选 agent：列出不在屏幕上的会话、新建 Claude/Codex/OpenCode/Antigravity 和历史；`RET` 当前窗口，`S-RET` 右侧，`Cmd-RET` 下方。默认针对最近聚焦的文档（文件 buffer 或 Noema 页面），最前面是它的协作者（`◆`，在屏幕上的直接跳过去），然后是“＋ New … for 文件名”，新建的 Agent 绑定这篇 |
 | `C-c A d` / `C-c A k` | 在文档里就选区或当前行加一条批注（Noema 页面里选中文字按 ⌘⌥M，卡片在文字上方弹出）；批注就是任务，`k` 列出批注，在 `H-t` 任务页交给 Agent |
 | `C-c A H` / `M-x agent-topology` | 面板的图谱页：Pi、项目、文档、协作者及其状态。单击选中、拖动平移、双击打开、右键菜单、`C-` 滚轮缩放；`h/j/k/l` 按方位移动，`H`/`L` 沿边，`TAB` 折叠，`+ - 0 = .` 视图；`RET` 打开、`o` 聊天、`t` 任务、`n` 新建 Agent、`s` 停止、`r` 重启、`x` 关闭，`?` 全部命令。Treemacs 里文件旁的 `◆N` 是协作者数、`✎M` 是待审项、`◇` 是只被 Agent 改过 |
 | `C-c A Y` / `C-c A Z` | 审阅协作者对非 Markdown 文件的修订（`a` 接受、`x` 拒绝）；列出 Agent 直接改过这篇的地方（`u` 放回） |
@@ -1776,7 +1783,7 @@ Emacs 通用 agent 层统一管理轻量模型交互与结构化 coding-agent �
 | `C-c A M` | 发起数学探索：几个后台 Agent 各取一个方向攻同一问题，当前聊天当裁判；可给 Lean 冻结陈述，证明先经 Lean 判定（`noema-exploration-start`） |
 | `C-c A V` | 当前项目的探索：问题、成员笔记本、待裁决的报告；`a`/`r` 以人的身份裁决（`noema-exploration`） |
 | `C-c A n` | 编辑区新建执行 Agent；Pi 中新建同作用域的对话 |
-| `C-c A w` | 在当前 Project 仓库的新 Git worktree 里启动 Codex/Claude/OpenCode 会话 |
+| `C-c A w` | 在当前 Project 仓库的新 Git worktree 里启动 Codex/Claude/OpenCode/Antigravity 会话 |
 | `C-c A N` | 同一任务交给几个 agent 并行尝试，各自一个 worktree |
 | `C-c A A` | 并行尝试看板：比较各尝试的状态与改动 |
 | `C-c A c c` | 请求项目 Pi 创建并打开普通 Noema Markdown prompt 文档 |
@@ -2021,7 +2028,7 @@ agent-shell 自己写引用的格式），每个文件再附一个 `resource_lin
 pending 队列。
 
 在 agent-shell 输入 `/resume` 并回车（或 `C-c A h`、Manager 的 `h`），会列出本项目
-Claude Code、Codex、OpenCode 三家的已保存对话，像它们的 CLI 一样一行一个：agent、
+Claude Code、Codex、OpenCode、Antigravity 的已保存对话，像它们的 CLI 一样一行一个：agent、
 多久以前、轮数、分支、目录、标题，别处已打开的标 `● open`；上下移动时在悬浮框里预览最后
 几轮（列表够高、窗口够宽时在候选右侧，否则在 minibuffer 正上方）；滚轮或 `C-M-v` /
 `C-M-S-v` 滚动它，不会离开选择器；长会话分块加载，滚到底再读更早的。`Cmd-RET` 不恢复，
@@ -2030,6 +2037,8 @@ Claude Code、Codex、OpenCode 三家的已保存对话，像它们的 CLI 一�
 沿用 Noema 登记的会话名）；另一 agent 的对话（例如在 Codex 里选 Claude Code 的）
 会开一个新会话，只告诉它 transcript 的位置，需要时它自己去查。原生恢复失败时也自动走这条路。
 各家历史仍由它们自己保存，Emacs 只读取，不复制 transcript。
+Antigravity 的预览按原生消息 step 分页，`agy` 与上游的 `antigravity` 名称视为
+同一家；跨 agent 接续时提供其原生 SQLite 库的只读查询命令。
 
 输入区的 `@` 补全文件：直接输入在会话目录（agent 的工作目录）下的文件里搜索，补全出的路径
 相对会话目录，发送时能找到文件；`@./`、`@../`、`@~/`、`@/` 改为按文件夹一级级补全，

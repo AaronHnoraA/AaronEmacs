@@ -32,6 +32,7 @@
 (declare-function +agent-board-changed-h "tools/agent/board" (&rest _))
 (declare-function +noema/open-file "noema/bridge/config" (file &optional origin-window))
 (declare-function +noema/command "noema/bridge/config" (command &optional params))
+(declare-function noema-agenda-visit-record "noema-agenda" (record))
 (declare-function noema-pi-project-ensure "noema-pi-router" (directory))
 (declare-function noema-pi-emacs-open "noema-pi-router" (&rest args))
 (declare-function +agent-shell/here "tools/agent/config" (agent &optional file))
@@ -74,6 +75,14 @@
 (defvar +agent-panel--document nil "The document the panel speaks about.")
 (defvar-local +agent-panel--scope 'file "The task scope.")
 (defvar-local +agent-panel--timer nil "Pending coalesced redraw.")
+(defvar-local +agent-panel--query "" "Literal, case-insensitive task search.")
+(defvar-local +agent-panel--filter 'all "Task state shown by this view.")
+(defvar-local +agent-panel--expanded nil "Expanded task identities (FILE . ID).")
+
+(defconst +agent-panel-filters
+  '((all . "All tasks") (open . "Open tasks") (todo . "Unassigned")
+    (doing . "In progress") (waiting . "Waiting for you")
+    (paused . "Paused") (done . "Done")))
 
 (defvar +agent-panel--journal-cache (make-hash-table :test #'equal)
   "Folder tree -> the comment journals found under it.")
@@ -251,7 +260,35 @@
                            width nil nil "…")
                           'face '+agent-panel-meta 'help-echo request)
               "\n"))
+    (when (member (cons (alist-get 'file thread) (alist-get 'id thread)) +agent-panel--expanded)
+      (insert (propertize (concat "\n   " (alist-get 'file thread) "\n") 'face '+agent-panel-meta))
+      (when (alist-get 'quote thread)
+        (insert (propertize (concat "\n   Quoted text\n" (alist-get 'quote thread) "\n")
+                            'face '+agent-panel-quote)))
+      (dolist (message (alist-get 'messages thread))
+        (insert (propertize (format "\n   %s  %s\n"
+                                    (or (alist-get 'name (alist-get 'author message)) "Unknown")
+                                    (or (alist-get 'at message) "")) 'face '+agent-panel-meta)
+                (or (alist-get 'text message) "") "\n"))
+      (when (eq lane 'waiting)
+        (when-let* ((request (or (plist-get snapshot :request) (plist-get snapshot :last-error))))
+          (insert (propertize (format "\n   Needs: %s\n" request) 'face 'warning)))))
     (put-text-property start (point) '+agent-panel-task (cons (alist-get 'file thread) (alist-get 'id thread)))))
+
+(defun +agent-panel--matches-p (card)
+  "Whether CARD matches the view's state and full-thread text filters."
+  (let* ((thread (car card)) (lane (cadr card))
+         (case-fold-search t))
+    (and (pcase +agent-panel--filter
+           ('all t) ('open (not (eq lane 'done))) (_ (eq lane +agent-panel--filter)))
+         (or (string-empty-p +agent-panel--query)
+             (string-match-p
+              (regexp-quote +agent-panel--query)
+              (string-join
+               (append (list (alist-get 'file thread) (alist-get 'quote thread)
+                             (alist-get 'name (alist-get 'assignee thread)))
+                       (mapcar (lambda (message) (alist-get 'text message)) (alist-get 'messages thread)))
+               "\n"))))))
 
 (defun +agent-panel--project-sessions (file)
   "Return the agent sessions of FILE's project, Pi first."
@@ -283,21 +320,29 @@
   (let* ((file (and +agent-panel--document (+agent-collab--client-file +agent-panel--document))))
     (if (not file)
         (insert "\n  Open a document (a note or a file) to see its tasks.\n")
-      (let ((cards (mapcar (lambda (thread) (cons thread (+agent-panel--card-lane thread)))
-                           (apply #'append (mapcar #'cdr (+agent-panel-tasks file +agent-panel--scope))))))
+      (let* ((all (mapcar (lambda (thread) (cons thread (+agent-panel--card-lane thread)))
+                          (apply #'append (mapcar #'cdr (+agent-panel-tasks file +agent-panel--scope)))))
+             (cards (seq-filter #'+agent-panel--matches-p all))
+             (filtered (or (not (eq +agent-panel--filter 'all)) (not (string-empty-p +agent-panel--query)))))
         (insert "\n")
         (+agent-panel--insert-agents file)
         (insert (propertize (format "  Tasks of %s · %d open"
                                     (alist-get +agent-panel--scope +agent-panel-scopes)
-                                    (seq-count (lambda (card) (not (eq (cadr card) 'done))) cards))
+                                    (seq-count (lambda (card) (not (eq (cadr card) 'done))) all))
                             'face '+agent-panel-meta)
                 "\n")
+        (when filtered
+          (insert (propertize (format "  %s · %d/%d shown%s\n"
+                                      (alist-get +agent-panel--filter +agent-panel-filters) (length cards) (length all)
+                                      (if (string-empty-p +agent-panel--query) "" (concat " · / " +agent-panel--query)))
+                              'face '+agent-panel-meta)))
         (if (null cards)
-            (insert "\n  No comments.  Select text in a note and comment (⌘⌥M), or C-c A d.\n")
+            (insert (if filtered "\n  No tasks match.  Press \\ to clear search and filters.\n"
+                      "\n  No comments.  Select text in a note and comment (⌘⌥M), or C-c A d.\n"))
           (pcase-dolist (`(,lane ,title ,meaning) +agent-panel-lanes)
             (let ((here (seq-filter (lambda (card) (eq (cadr card) lane)) cards))
                   (start (point)))
-              (when (or here (memq lane '(todo doing)))
+              (when (or here (and (not filtered) (memq lane '(todo doing))))
                 (insert "\n " (propertize (format "%s %s" (if (memq lane +agent-panel--folded) "▸" "▾") title)
                                           'face (+agent-panel--lane-face lane))
                         (propertize (format "  %d" (length here)) 'face '+agent-panel-meta)
@@ -312,7 +357,7 @@
                           (setq first nil)
                           (+agent-panel--insert-card (car card) lane (cddr card))))
                     (insert (propertize "   —\n" 'face '+agent-panel-meta))))))))
-        (insert (propertize "\n  RET open  a hand over  > < move  d done  u take back  o chat\n  TAB fold lane  s scope  g refresh\n"
+        (insert (propertize "\n  RET source/agent  o chat  i details  a hand over\n  > < move  d done/reopen  u take back  TAB fold  R done lane\n  / search  f state  \\ clear  s scope  g refresh  ? help\n"
                             'face '+agent-panel-meta))))))
 
 ;;;; The panel window and its tabs
@@ -564,22 +609,83 @@ panel and never in the ordinary agent views."
          (line (+agent-collab--thread-line thread)))
     (select-window (+agent-panel--editing-window))
     (if (and (string-match-p "\\.\\(?:md\\|markdown\\)\\'" file) (fboundp '+noema/open-file))
-        (progn (+noema/open-file file)
-               (when (and line (fboundp '+noema/command))
-                 (run-at-time 0.3 nil #'+agent-panel--goto-page-line line)))
+        (progn
+          (require 'noema-agenda)
+          (noema-agenda-visit-record
+           `((file . ,file) (id . ,(concat "#" (alist-get 'id thread)))
+             ;; Native region/file sends keep a quote and line in the journal,
+             ;; whereas page comments have a CriticMarkup identity in the text.
+             (sourceKind . ,(if (integerp (alist-get 'line thread)) "comment-reference" "comment"))
+             (quote . ,(alist-get 'quote thread)))))
       (find-file file)
       (when line (goto-char (point-min)) (forward-line (1- line))))))
 
-(defun +agent-panel--goto-page-line (line)
-  "Move the selected Noema page to LINE."
-  (ignore-errors (+noema/command "goto-line" `((value . ,line)))))
-
 (defun +agent-panel-chat ()
-  "Open the agent of the task at point."
+  "Open the selected task's agent or the agent row at point."
   (interactive)
-  (let ((session (+agent-collab--thread-session (+agent-panel--task))))
+  (let ((session
+         (or (get-text-property (point) '+agent-panel-agent)
+             (let* ((thread (+agent-panel--task))
+                    (token (alist-get 'session (alist-get 'assignee thread))))
+               (if token (+agent-acp-session-buffer-for-token token)
+                 (+agent-collab--thread-session thread t))))))
+    (unless (buffer-live-p session)
+      (user-error "No live chat for this task; press a to hand it to an agent"))
     (select-window (+agent-panel--editing-window))
     (+agent-acp-show-buffer session)))
+
+(defun +agent-panel-toggle-details ()
+  "Expand or collapse the selected task's full quote and comment history."
+  (interactive)
+  (let* ((thread (+agent-panel--task))
+         (key (cons (alist-get 'file thread) (alist-get 'id thread))))
+    (setq +agent-panel--expanded (if (member key +agent-panel--expanded)
+                                    (delete key +agent-panel--expanded)
+                                  (cons key +agent-panel--expanded)))
+    (+agent-panel-redraw)))
+
+(defun +agent-panel-set-query (query)
+  "Search task text, replies, quoted text, assignee and file for literal QUERY."
+  (interactive (list (read-string "Search tasks: " +agent-panel--query)))
+  (setq +agent-panel--query (string-trim query))
+  (unless (string-empty-p +agent-panel--query) (setq +agent-panel--folded nil))
+  (+agent-panel-redraw))
+
+(defun +agent-panel-set-filter (filter)
+  "Show tasks matching FILTER, without changing the tasks themselves."
+  (interactive
+   (list (car (rassoc (completing-read "Task state: " (mapcar #'cdr +agent-panel-filters) nil t
+                                      nil nil (alist-get +agent-panel--filter +agent-panel-filters))
+                      +agent-panel-filters))))
+  (unless (assq filter +agent-panel-filters) (user-error "Unknown task filter"))
+  (setq +agent-panel--filter filter)
+  (when (eq filter 'done) (setq +agent-panel--folded (remq 'done +agent-panel--folded)))
+  (+agent-panel-redraw))
+
+(defun +agent-panel-reset-filters ()
+  "Clear the task search and state filter, keeping scope and task state."
+  (interactive)
+  (setq +agent-panel--query "" +agent-panel--filter 'all)
+  (+agent-panel-redraw))
+
+(defun +agent-panel-toggle-done ()
+  "Show or fold completed tasks."
+  (interactive)
+  (setq +agent-panel--folded (if (memq 'done +agent-panel--folded) (remq 'done +agent-panel--folded)
+                               (cons 'done +agent-panel--folded)))
+  (+agent-panel-redraw))
+
+(defun +agent-panel-help ()
+  "Show the Tasks tab's navigation and task actions."
+  (interactive)
+  (with-help-window "*Collaboration help*"
+    (princ "Collaboration · Tasks\n\n1/2/3  Tasks / project Pi / graph\n")
+    (princ "n/p, j/k  next/previous task    RET  source, agent chat or lane\n")
+    (princ "o, S-RET  selected chat    i  full quote and comment history\n")
+    (princ "/  literal search    f  state filter    \\  clear filters    s  scope\n")
+    (princ "a  hand over    >/<  move card    d/c  done or reopen    u  take back\n")
+    (princ "TAB  fold lane    R  show/fold Done    g  refresh    q  hide panel\n\n")
+    (princ "Search includes all replies and the file and assignee names.\nOpening a chat does not start or send a task.\n")))
 
 (defun +agent-panel--choose-agent (file)
   "Read which session takes a task on FILE: its collaborators first."
@@ -744,6 +850,13 @@ panel and never in the ordinary agent views."
   "u" #'+agent-panel-take-back
   "TAB" #'+agent-panel-toggle-lane
   "S-<return>" #'+agent-panel-chat
+  "o" #'+agent-panel-chat
+  "i" #'+agent-panel-toggle-details
+  "/" #'+agent-panel-set-query
+  "f" #'+agent-panel-set-filter
+  "\\" #'+agent-panel-reset-filters
+  "R" #'+agent-panel-toggle-done
+  "?" #'+agent-panel-help
   "n" #'+agent-panel-next
   "p" #'+agent-panel-previous
   "j" #'+agent-panel-next
@@ -757,7 +870,7 @@ panel and never in the ordinary agent views."
 
 (define-derived-mode +agent-panel-mode special-mode "Collaboration"
   "The collaboration panel's task list (C75)."
-  (setq truncate-lines t)
+  (setq truncate-lines nil word-wrap t)
   (setq-local cursor-type 'bar)
   (add-hook 'kill-buffer-hook #'+agent-panel--teardown-h nil t))
 

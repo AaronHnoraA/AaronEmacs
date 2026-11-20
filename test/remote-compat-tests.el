@@ -323,13 +323,18 @@
 (defvar tramp-rpc--file-stat-cache)
 (defvar tramp-rpc-cache-invalidate-functions)
 
+;; The real struct when tramp-rpc is installed; the stand-in only on a machine
+;; without it.  The stand-in is quoted: eager macroexpansion of a plain
+;; `cl-defstruct' registers its layout even when this `unless' does not run,
+;; replacing tramp-rpc's real layout, so accessors expanded below read the
+;; stand-in's slots out of real objects (probing at 6 reads async-callbacks).
+(require 'tramp-rpc-connection nil t)
 (unless (featurep 'tramp-rpc-connection)
-  ;; Ask for the feature: expanding `cl-defstruct' at load time already
-  ;; defines its predicate before this test runs.
-  (cl-defstruct (tramp-rpc-connection
-                 (:constructor tramp-rpc--make-connection)
-                 (:copier nil))
-    process buffer stderr-buffer vec cleanup-started probing))
+  (eval '(cl-defstruct (tramp-rpc-connection
+                        (:constructor tramp-rpc--make-connection)
+                        (:copier nil))
+           process buffer stderr-buffer vec cleanup-started probing)
+        t))
 
 (defmacro remote-tramp-rpc-test--readable (&rest body)
   "Run BODY with tramp-rpc connection generations readable."
@@ -1113,14 +1118,30 @@ absence costs nothing, and an unlisted directory leaves it to the probe."
                 (apply #'remote-backend-tramp-rpc--read-only-command-a
                        (lambda (&rest _) (push process-file-side-effects seen))
                        program arguments)))
-      (let ((process-file-side-effects t))
-        (run "git" nil t nil "ls-files")
-        (run "git" nil t nil "commit")
-        (run "/bin/sh" nil t nil "-c" "rg x | wc -l"))
-      ;; A caller that already said "no side effects" keeps that.
-      (let ((process-file-side-effects nil))
-        (run "make" nil t nil))
-      (should (equal (reverse seen) '(nil t nil nil))))))
+      ;; Without settled watcher events a writing command flushes everything.
+      (let ((remote-backend-tramp-rpc-event-settle-time nil))
+        (let ((process-file-side-effects t))
+          (run "git" nil t nil "ls-files")
+          (run "git" nil t nil "commit")
+          (run "/bin/sh" nil t nil "-c" "rg x | wc -l"))
+        ;; A caller that already said "no side effects" keeps that.
+        (let ((process-file-side-effects nil))
+          (run "make" nil t nil)))
+      (should (equal (reverse seen) '(nil t nil nil)))
+      ;; With them, it runs without the blanket flush and then forgets only
+      ;; what no watch reports; a read-only command flushes nothing.
+      (setq seen nil)
+      (let ((remote-backend-tramp-rpc-event-settle-time 1.0)
+            (process-file-side-effects t)
+            (flushes 0))
+        (cl-letf (((symbol-function 'advice-member-p) (lambda (&rest _) t))
+                  ((symbol-function 'tramp-dissect-file-name) (lambda (&rest _) 'vec))
+                  ((symbol-function 'remote-backend-tramp-rpc--flush-after-command)
+                   (lambda (vec) (should (eq vec 'vec)) (cl-incf flushes))))
+          (run "git" nil t nil "commit")
+          (run "git" nil t nil "ls-files"))
+        (should (equal (reverse seen) '(nil nil)))
+        (should (= flushes 1))))))
 
 (ert-deftest remote-fs-forgets-ancestor-scans-per-target ()
   "Dropping a backend's seeded answers lets the next walk scan again."
@@ -1316,7 +1337,11 @@ used until its events have had time to arrive; the rest are dropped."
                    ((symbol-function 'tramp-rpc--get-connection)
                     (lambda (_vector) current))
                    ((symbol-function 'delete-process)
-                    (lambda (_process) (cl-incf deletions))))
+                    (lambda (_process) (cl-incf deletions)))
+                   ;; With tramp-rpc loaded, retiring goes through upstream's
+                   ;; invalidation (it also tears down a half-open master).
+                   ((symbol-function 'tramp-rpc--invalidate-timed-out-connection)
+                    (lambda (&rest _) (cl-incf deletions))))
            (should-error
             (remote-backend-tramp-rpc--adapter-timeout-a
              #'ignore 'vector "file.stat" 'params generation)

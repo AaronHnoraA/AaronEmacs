@@ -7,7 +7,7 @@
 (defun +agent/spawn (agent name prompt root)
   "Run PROMPT in a background AGENT named NAME under ROOT."
   (interactive
-   (list (completing-read "Worker provider: " '("codex" "claude" "opencode" "pi") nil t nil nil "codex")
+   (list (completing-read "Worker provider: " '("codex" "claude" "opencode" "agy" "pi") nil t nil nil "codex")
          (read-string "Worker name: ")
          (read-string "Task: ")
          (read-directory-name "Task workspace: "

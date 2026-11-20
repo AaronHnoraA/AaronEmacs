@@ -20,12 +20,14 @@
     (should-not (+modeline--state))
     (cl-letf (((symbol-function 'doom-modeline--active) (lambda () t)))
       (should-not (doom-modeline-segment--+modeline-state)))
+    ;; Portal shows the keyboard's owner as a light: lit while the view has
+    ;; it, dimmed while Emacs has it (portal-input-mode-line-light).
     (cl-letf (((symbol-function 'portal-input--focused-p) (lambda () t)))
-      (should (equal (substring-no-properties (portal-input--mode-line-process))
-                     "[app]")))
+      (should (eq (get-text-property 0 'face (portal-input--mode-line-process))
+                  'portal-mode-line-app)))
     (cl-letf (((symbol-function 'portal-input--focused-p) (lambda () nil)))
-      (should (equal (substring-no-properties (portal-input--mode-line-process))
-                     "[emacs]")))
+      (should (eq (get-text-property 0 'face (portal-input--mode-line-process))
+                  'portal-mode-line-emacs)))
     (should-not (+modeline--state))))
 
 (ert-deftest modeline-c3-doom-main-upgrades-existing-buffers-and-preserves-special ()

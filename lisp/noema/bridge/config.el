@@ -33,6 +33,7 @@
 (declare-function +noema--apple-request "noema/bridge/agenda-apple" (body callback &optional timeout))
 (declare-function +project-activate "tools/project/config" (root &optional remember))
 (declare-function noema-agenda-activate-project "noema-agenda" (root &optional callback))
+(declare-function +noema-agenda-visit-record "noema/bridge/agenda-navigation" (record request))
 (declare-function noema-agenda-attention "noema-agenda-attention" ())
 (declare-function noema-agenda-attention-handle-change "noema-agenda-attention" (payload))
 (declare-function +xwidget-current-url "app/browser/config" (&optional buffer))
@@ -278,13 +279,23 @@ At this limit Noema requests graceful termination before using a hard kill."
   :type 'integer
   :group '+noema)
 
-(config-defvar +noema-latex-export-agent "codex"
-  "AI backend for the Noema LaTeX export repair step.
-One of \"codex\", \"claude\", or \"opencode\".  All run non-interactively in the
-single-export staging directory with external-directory writes blocked and
-network access available.  Clean mechanically verified exports do not launch
-the backend.  The backend is chosen here, not per export."
-  :type '(choice (const "codex") (const "claude") (const "opencode"))
+(defconst +noema--latex-agent-ids '("agy" "codex" "claude" "opencode")
+  "Agent backends supported by Noema LaTeX export.")
+
+(config-defvar +noema-latex-export-agent "agy"
+  "Agent backend for Noema LaTeX export polish and repair."
+  :type '(choice (const "agy") (const "codex") (const "claude") (const "opencode"))
+  :group '+noema)
+
+(config-defvar +noema-latex-export-agy-model ""
+  "Antigravity ACP model ID for LaTeX export, without the thought-level suffix."
+  :type 'string
+  :group '+noema)
+
+(config-defvar +noema-latex-export-agy-effort ""
+  "Antigravity thought level for LaTeX export."
+  :type '(choice (const :tag "Provider default" "") (const "low") (const "medium")
+                 (const "high") (const "xhigh") (const "max"))
   :group '+noema)
 
 (config-defvar +noema-codex-model ""
@@ -294,8 +305,7 @@ the backend.  The backend is chosen here, not per export."
 
 (config-defvar +noema-latex-export-model ""
   "Optional model id for LaTeX export polish.
-Empty selects gpt-5.6-terra for Codex, Sonnet for Claude, or the OpenCode
-default.  This setting does not change interactive agent sessions."
+An empty string selects the provider-specific export model."
   :type 'string
   :group '+noema)
 
@@ -416,6 +426,11 @@ default.  This setting does not change interactive agent sessions."
   "Client id for this Noema browser buffer.")
 
 (put '+noema--client-id 'permanent-local t)
+
+(defvar-local +noema--loaded-file nil
+  "Note identity last confirmed loaded by this page's current-file event.")
+(defvar +noema-current-file-functions nil
+  "Functions called with (FILE BUFFER) after a page confirms its live note.")
 
 (defvar-local +noema--registered-file nil
   "File path currently registered for this Noema browser buffer.")
@@ -926,7 +941,7 @@ reconnect without a reload and without losing their in-memory editor state."
             (format "NOEMA_LATEX_EXPORT_ENGINE=%s"
                     (or +noema-latex-export-engine "codex"))
             (format "NOEMA_LATEX_EXPORT_AGENT=%s"
-                    (or (bound-and-true-p +noema-latex-export-agent) "codex"))
+                    (or (bound-and-true-p +noema-latex-export-agent) "agy"))
             (format "NOEMA_LATEX_EXPORT_MAX_ATTEMPTS=%d"
                     (or +noema-latex-export-max-attempts 3))
             (format "NOEMA_LATEX_EXPORT_AGENT_IDLE_TIMEOUT_MS=%d"
@@ -1852,11 +1867,9 @@ run in this buffer, or they would end the session shown in that other frame."
   (let* ((task-id (alist-get 'taskId params))
          (file (alist-get 'file params))
          (output-path (alist-get 'outputPath params))
-         (preferred-backend (or (alist-get 'backend params) "codex"))
+         (preferred-backend (or (alist-get 'backend params) +noema-latex-export-agent))
          (backend (seq-find #'+agent-acp-config-for
-                            (delete-dups
-                             (append (list preferred-backend)
-                                     '("codex" "claude" "opencode")))))
+                            (cons preferred-backend +noema--latex-agent-ids)))
          (directory (cond ((and (stringp file) (not (string-empty-p file))
                                 (file-directory-p
                                  (file-name-directory (expand-file-name file))))
@@ -1969,7 +1982,7 @@ run in this buffer, or they would end the session shown in that other frame."
                           `((id . ,id)
                             (available . ,(if (+agent-acp-config-for id)
                                               t :json-false))))
-                        '("codex" "claude" "opencode"))))))
+                        +noema--latex-agent-ids)))))
 
 (defun +noema--latex-agent-retire-buffer (buffer)
   "Close export ACP BUFFER after the current ACP callback returns."
@@ -2061,11 +2074,16 @@ run in this buffer, or they would end the session shown in that other frame."
          (workdir (alist-get 'workdir params))
          (prompt (alist-get 'prompt params))
          (context-items (alist-get 'contextItems params))
-         (model (alist-get 'model params))
-         (base-config (and (member backend '("codex" "claude" "opencode"))
+         (agy (equal backend "agy"))
+         (requested-model (alist-get 'model params))
+         (model (if (and agy (string-empty-p (or requested-model "")))
+                    +noema-latex-export-agy-model
+                  requested-model))
+         (effort (and agy +noema-latex-export-agy-effort))
+         (base-config (and (member backend +noema--latex-agent-ids)
                            (+agent-acp-config-for backend)))
          (config (and base-config
-                      (noema-agent-export-config base-config model))))
+                      (noema-agent-export-config base-config model effort))))
     (unless (and (stringp request-id) (not (string-empty-p request-id))
                  (not (gethash request-id +noema--latex-agent-requests))
                  config (stringp workdir) (file-directory-p workdir)
@@ -2108,12 +2126,8 @@ run in this buffer, or they would end the session shown in that other frame."
                      (when (gethash request-id +noema--latex-agent-requests)
                        (condition-case prompt-error
                            (progn
-                             (when (and (stringp model) (not (string-empty-p model)))
-                               (let ((selected (+agent-acp-export-model-id model buffer))
-                                     (current (+agent-acp-current-model-id buffer)))
-                                 (unless (and selected (equal current selected))
-                                   (error "Export model %s unavailable or not selected (current: %s)"
-                                          model (or current "unknown")))))
+                             (with-current-buffer buffer
+                               (+agent-acp-verify-task-options))
                              (+agent-acp-prompt
                             :buffer buffer
                             :content (+agent-acp-context-blocks
@@ -2239,6 +2253,9 @@ run in this buffer, or they would end the session shown in that other frame."
     (+noema--latex-agent-cancel-all)
     (when (fboundp 'noema-agenda-host-stopped)
       (noema-agenda-host-stopped))
+    (dolist (buffer (buffer-list))
+      (with-current-buffer buffer
+        (when +noema--client-id (setq +noema--loaded-file nil))))
     (when +noema--ready-watchdog
       (cancel-timer +noema--ready-watchdog)
       (setq +noema--ready-watchdog nil))
@@ -2480,12 +2497,13 @@ file switch."
     (when (buffer-live-p target)
       (+noema--register-buffer target file client t)
       (with-current-buffer target
-        (setq-local +noema--activity-paused :unknown))
+        (setq-local +noema--activity-paused :unknown +noema--loaded-file file))
       (when file
         (setq +noema--app-buffer target))
       (when +noema--activity-hooks-installed
         (setq +noema--last-activity-signature :unknown)
-        (+noema--update-activity)))))
+        (+noema--update-activity))
+      (run-hook-with-args '+noema-current-file-functions file target))))
 
 (defun +noema--track-app-buffer (buffer &optional file client)
   "Record BUFFER as the active Noema browser buffer.
@@ -3497,31 +3515,41 @@ and every renderer uses the same `runHostCommand' pause implementation."
   "Explicitly activate and open the source of a global attention REFERENCE."
   (require 'tools/project/config)
   (require 'noema-agenda)
-  (let ((request (cl-incf +noema--attention-visit-request)))
+  (let ((request (cl-incf +noema--attention-visit-request))
+        (navigation (noema-agenda--begin-visit)))
     (+project-activate (alist-get 'root reference) t)
-    (noema-agenda-activate-project
-     +project-active-root
-     (lambda (scope problem)
-       (when (= request +noema--attention-visit-request)
-         (if problem (noema-agenda--error problem)
-           (let ((scope-id (noema-agenda--get scope 'id))
-                 (project-generation noema-agenda--project-request))
-             (noema-agenda--call
-              "query" `((scopes . ,(vector scope-id)))
-              (lambda (snapshot error-object)
-                (when (and (= request +noema--attention-visit-request)
-                           (= project-generation noema-agenda--project-request)
-                           (equal scope-id noema-agenda--project-scope))
-                  (if error-object (noema-agenda--error error-object)
-                    (let ((matches
-                           (seq-filter
-                            (lambda (todo)
-                              (and (equal (noema-agenda--get todo 'uid) (alist-get 'uid reference))
-                                   (equal (noema-agenda--get todo 'file) (alist-get 'file reference))))
-                            (noema-agenda--list (noema-agenda--get snapshot 'todos)))))
-                      (if (= (length matches) 1)
-                          (noema-agenda-visit-record (car matches))
-                        (noema-agenda--error "Bound task moved, disappeared or became ambiguous; refresh its source"))))))))))))))
+    (let* ((window (selected-window)) (buffer (window-buffer window)))
+      (noema-agenda-activate-project
+       +project-active-root
+       (lambda (scope problem)
+         (when (and (= request +noema--attention-visit-request)
+                    (= navigation noema-agenda--visit-request)
+                    (window-live-p window) (eq window (selected-window))
+                    (eq buffer (window-buffer window)))
+           (if problem (progn (noema-agenda--finish-visit navigation)
+                              (noema-agenda--error problem))
+             (let ((scope-id (noema-agenda--get scope 'id))
+                   (project-generation noema-agenda--project-request))
+               (noema-agenda--call
+                "query" `((scopes . ,(vector scope-id)))
+                (lambda (snapshot error-object)
+                  (noema-agenda--finish-visit navigation)
+                  (when (and (= request +noema--attention-visit-request)
+                             (= navigation noema-agenda--visit-request)
+                             (window-live-p window) (eq window (selected-window))
+                             (eq buffer (window-buffer window))
+                             (= project-generation noema-agenda--project-request)
+                             (equal scope-id noema-agenda--project-scope))
+                    (if error-object (noema-agenda--error error-object)
+                      (let ((matches
+                             (seq-filter
+                              (lambda (todo)
+                                (and (equal (noema-agenda--get todo 'uid) (alist-get 'uid reference))
+                                     (equal (noema-agenda--get todo 'file) (alist-get 'file reference))))
+                              (noema-agenda--list (noema-agenda--get snapshot 'todos)))))
+                        (if (= (length matches) 1)
+                            (noema-agenda-visit-record (car matches))
+                          (noema-agenda--error "Bound task moved, disappeared or became ambiguous; refresh its source")))))))))))))))
 
 (defun +noema/agenda-attention ()
   "Open the native global attention view over explicitly promoted bindings."
@@ -3638,8 +3666,14 @@ and every renderer uses the same `runHostCommand' pause implementation."
   (let ((logical (remote-canonicalize-emacs-file-name root)))
     (or (remote-client-file-name logical) logical)))
 
+(defun +noema--agenda-visit-note (record request)
+  "Let the rendered Markdown navigation adapter handle RECORD and REQUEST."
+  (require 'noema/bridge/agenda-navigation)
+  (+noema-agenda-visit-record record request))
+
 (with-eval-after-load 'noema-agenda
-  (setq noema-agenda-project-root-function #'+noema--agenda-host-project-root))
+  (setq noema-agenda-project-root-function #'+noema--agenda-host-project-root
+        noema-agenda-visit-function #'+noema--agenda-visit-note))
 
 (defun +noema/agenda (&optional query)
   "Open native Noema Agenda for the knowledge vault and current project."

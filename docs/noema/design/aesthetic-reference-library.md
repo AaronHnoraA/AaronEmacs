@@ -38,7 +38,8 @@ heading, table, figure and theorem structure.
   English text uses Libertinus with a portable fallback. Chinese follows the
   Noema Markdown face when installed locally, with Fandol on other machines;
   mathematics stays in Computer Modern/AMS. XeLaTeX is the default engine.
-- The PDF must compile on a standard Overleaf XeLaTeX setup. Optional
+- The default article centers its title and byline. The same English article
+  source must compile with both pdfLaTeX and XeLaTeX on Overleaf. Optional
   typography packages have plain fallbacks. A decorative feature must never
   make a note with Chinese, mathematics, figures or annotations fail to export.
 - Test layout with a real long note, a short Chinese note, headings, tables,

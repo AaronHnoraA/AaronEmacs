@@ -72,7 +72,7 @@ Research 的逻辑 Session 和 Run ID 不可互换。关闭视图只改变显示
 
 `/next`（`C-c A j`）跳到下一个等待你的会话，待审批和问答直接落在原生控件上，
 按其上的 `y`/`n` 决定；`/queue`（`q`）管理排队的 prompt；`/changes`（`l`）打开这个
-会话改过的文件；`/resume`（`h`）从 Claude Code、Codex、OpenCode 的统一历史恢复或接续对话，没有活动会话时也可用，列表按时间从新到旧（C55、C63）。
+会话改过的文件；`/resume`（`h`）从 Claude Code、Codex、OpenCode、Antigravity 的统一历史恢复或接续对话，没有活动会话时也可用，列表按时间从新到旧（C55、C63）。
 `H-A`（macOS Option-Shift-A）、`SPC a a` 和 `M-x agent-manager` 打开项目池管理器，
 加前缀查看所有项目；从管理器里再次执行返回。`C-c A S/G/U` 分别选择同一浮窗的
 All、Inbox、Usage 页签。GUI 使用 Aaron ETAF，按 target/workspace 分组；
@@ -197,6 +197,12 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
 - **C4 保留原生执行权威。** 已有 agent-shell/acp/shell-maker 依赖继续按组锁定。
   ECA 的工具循环、模型请求与子代理调度用于研究，不复制成与 CLI 竞争的第二套
   执行权威。借鉴 UI 时复用真实 buffer、原生队列与权限回应。
+  Google Antigravity 复用 agent-shell 内置的 `antigravity` 配置，以
+  `agy acp --dangerously-skip-permissions` 启动，自动批准所有工具权限请求；
+  公共 agent ID `agy` 映射到 `antigravity`，普通、Portal、worktree、
+  后台执行与 ACP 恢复入口均可选择。认证沿用原生 Google 登录，进程放置仍走
+  workspace 的 Remote 环境。`+agent/resume-saved` 可查询其 ACP 原生历史，
+  `/resume` 按 C63 纳入统一历史。
 - **C5 遵守本地 UI 体系。** 使用 Aaron UI、原生 buffer、Transient 和现有窗口
   生命周期。新交互界面遵守 [Elegant UI](elegant-ui.md)。预览可取消并恢复原
   窗口；分组使用 target/workspace 身份，不另启 workspace 管理栈。
@@ -490,7 +496,8 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
 - **C63 一份跨 agent 的对话历史。** `/resume`（`h`）、Manager 的历史、项目池的恢复项
   都打开 `+agent/history`（`tools/agent/history`）。它只读 Claude Code
   （`~/.claude/projects/<目录>/<id>.jsonl`）、Codex（`~/.codex/state_5.sqlite` 的
-  `threads`）和 OpenCode（`~/.local/share/opencode/opencode.db`）各自的存储，不复制、
+  `threads`）、OpenCode（`~/.local/share/opencode/opencode.db`）和 Antigravity
+  （`~/.gemini/antigravity-cli/conversation_summaries.db`）各自的存储，不复制、
   不另建索引；存储在 agent 运行的 target 上，经 Remote 文件与进程接口读取。范围是
   C55 的目录（当前目录、会话项目根、外层项目及其子目录），`C-u` 列出全部目录，本项目
   没有对话时自动列全部；临时目录（tmp、`var/noema/tmp`）里的会话和 Codex 的 `exec`、
@@ -510,6 +517,15 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   `resources/agent/resume-transcript.md`：只给 transcript 的链接（文件路径，或
   `opencode session export <id>`）和一行标题，不嵌入内容，也不要求先读或概括；之后的请求
   需要时由 agent 自己在文件里查找所需部分，以免占满长会话的上下文。
+  Antigravity 的列表只读原生摘要库，排除空会话、已标记归档和子会话；
+  多 workspace 按匹配的目录归属，URI 解码后显示。搜索索引未收录的会话仍列出，
+  缺少索引时轮数留空。分页预览只读 `conversations/<id>.db` 的 `steps`，
+  按原生 step 编号排序和翻页，每页限制读取数量和 payload 字节数；
+  仅解码用户原文及公开回复的 protobuf 字段，跳过思考、工具记录与损坏消息，保留单条字数上限。
+  原生 SQLite 无法打开已关闭的 WAL 数据库时，仅在没有 `-wal` 文件的情况下
+  以 immutable 只读快照重试；仍有 WAL 的库保留正常读取，包含尚未 checkpoint 的记录。
+  `agy` 与 agent-shell 的 `antigravity` 身份视为同一 agent，走原生恢复；
+  跨 agent 接续和恢复失败时提供原生数据库路径及只读 SQL 命令，不导出或注入整份对话。
   已在运行的对话直接切过去。测试：`agent-c63-*`。
 
 - **C64 结构化回合里输入照常 steer。** Noema 页面发起的请求、带回执的 API 任务和 Research Run
@@ -593,6 +609,12 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   重绘按文档与批注 id（Agent 行按会话 buffer）保留选择，前方卡片增删不改变键盘操作对象；
   原对象不在当前视图时回到面板顶部，避免选中另一张卡片。空行上的任务操作只向上查找
   当前泳道；泳道标题与 Agent 行不指向上一项任务。页面里没有打开 Agent 的按钮。
+  任务与顶部 Agent 行都可 `o` / `S-RET` 打开聊天；已指派会话不存在时提示重新交派，
+  不打开另一位协作者。Markdown 卡片的 `RET` 共用 Agenda 的笔记锚点定位，
+  等待页面就绪并守护 client 与窗口身份，不使用延时后向当前页发送行号。
+  原生选区发送产生的线程有日志内的行号和完整引用而没有源码批注标记；这类
+  `comment-reference` 优先定位同 id 的源码锚点，否则只定位当前文稿里唯一、精确匹配
+  的原始引用。引用为空、失效或重复时提示，不猜旧行号；普通页面批注仍须有源码锚点。
   测试：`agent-panel-c75-*`。
 - **C78 面板里的 Pi 与图谱。** 面板三页是同一侧窗里的三个 buffer。Pi 页就是这个项目 Pi 的
   agent-shell 会话本身：项目 Pi 的 `+agent-acp-display-buffer-function` 是 `+agent-panel-display-pi`
@@ -614,7 +636,12 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   泳道的动作：`>` 从待处理交给 Agent、从其余标为完成；`<` 往回（完成→进行中或待处理，其余→待处理）；
   `u` 收回（日志追加空指派）；`d` 完成；`TAB` 折叠泳道（“完成”默认折叠）。顶部一行列出本项目的
   Agent 与其状态，`RET` 进聊天。等你的卡片从已有会话快照显示具体请求或错误；过长时
-  截短显示，鼠标悬停可读完整内容。只在面板显示时随事件重绘。测试：`agent-panel-c81-*`。
+  截短显示，鼠标悬停可读完整内容。`i` 就地展开或折叠完整引用、批注历史和等待请求，
+  展开区域仍属于同一文档与批注 id，重绘保留展开状态。`/` 按字面搜索全部消息、引用、
+  文件路径和接手人（不区分大小写）；搜索时展开泳道。`f` 筛选全部、未完成或某一泳道，
+  选“完成”会展开完成泳道；`\` 清除搜索与状态筛选，保留范围；`R` 显示或折叠完成泳道。
+  筛选显示命中数与总数；空结果可直接清除筛选。筛选、展开和打开聊天不写任务状态，
+  不发送 prompt。`?` 显示操作帮助。只在面板显示时随事件重绘。测试：`agent-panel-c81-*`。
 - **C76 发送即任务。** 指向文档某处的发送（`C-c A c` 的区域/整篇/光标处、页面选区、旧的
   `noema-interaction-send-*`）经 `+agent-collab-task-delivery` 变成该处的批注线程、指派给选中会话
   并立即交出，不夺键盘；聊天与草稿、剪贴板路径不变。测试：`agent-collab-c76-*`。

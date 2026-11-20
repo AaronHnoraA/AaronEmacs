@@ -140,6 +140,7 @@ block is also read (`src/simple-frontmatter.ts`).  Parsers:
 | --- | --- | --- |
 | `id` | stable page identity (UUIDv7; older ids kept) | index, links |
 | `title` | page title | index, cover, export |
+| `author` | article byline | LaTeX export |
 | `date` | date shown on the cover and exported | cover, export |
 | `tags` | tags (also inline `@@tag[…]`) | index |
 | `aliases` | other titles the page answers to | index, links |
@@ -148,7 +149,7 @@ block is also read (`src/simple-frontmatter.ts`).  Parsers:
 | `namespace` | overrides the repository namespace | index, links |
 | `project` (`proj`) | planning project key | agenda |
 | `source` | where the content came from; also a key the note is found by | index, lookups |
-| `summary` | one-line summary (or the `summary` block) | index, cover |
+| `summary` | one-line summary (or the `summary` block) | index, cover, article export |
 | `roam` | `off` keeps the page out of the Wiki graph | index |
 | `macros-from` | `.cls/.sty/.tex` files whose macros the note imports | `shared/note-macros.mjs` |
 | `css` | absolute path or URL of an extra stylesheet | HTML export |

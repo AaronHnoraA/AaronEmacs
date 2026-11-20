@@ -505,7 +505,7 @@ jupyter-export-live-smoke:
 
 agenda-test:
 	$(EMACS) --batch -Q -L site-lisp/noema/lisp -L site-lisp/noema/tests/elisp -l noema-agenda-tests -l noema-agenda-attention-tests -l noema-agenda-capture-tests -f ert-run-tests-batch-and-exit
-	$(BATCH) -l test/init-noema-agenda-source-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-noema-agenda-source-tests.el -l test/init-noema-agenda-navigation-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/md-roam-tests.el -f ert-run-tests-batch-and-exit
 
 agenda-apple-test:

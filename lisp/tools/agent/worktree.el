@@ -52,7 +52,7 @@ outside the checkout so they never appear in its status or searches."
   :type 'string
   :group '+agent-worktree)
 
-(defconst +agent-worktree-agents '("codex" "claude" "opencode")
+(defconst +agent-worktree-agents '("codex" "claude" "opencode" "agy")
   "Agents whose sessions can start in a chosen directory.")
 
 (defvar-local +agent-worktree--checkout nil

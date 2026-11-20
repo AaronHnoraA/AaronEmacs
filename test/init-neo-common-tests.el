@@ -41,17 +41,19 @@
       (should (equal (current-kill 0)
                      (format "%s:2,3" (file-name-nondirectory buffer-file-name)))))))
 
-(ert-deftest macos-copy-file-to-clipboard-hands-osascript-a-client-path ()
+(ert-deftest macos-copy-file-to-clipboard-hands-the-native-boundary-a-client-path ()
+  "The clipboard is set through the macOS boundary's native files call, never osascript."
   (skip-unless (fboundp '+macos/copy-file-to-clipboard))
   (init-neo-common-tests--in-file "x"
-    (let (args)
-      (cl-letf (((symbol-function 'call-process)
-                 (lambda (&rest a) (setq args a) 0)))
+    (let (paths)
+      (cl-letf (((symbol-function '+macos-native-p) (lambda () t))
+                ((symbol-function 'macos-clipboard-set-files)
+                 (lambda (given) (setq paths given) t))
+                ((symbol-function 'call-process)
+                 (lambda (&rest _) (error "Must not shell out"))))
         (+macos/copy-file-to-clipboard))
-      (should (equal (car args) "osascript"))
-      (should (string-match-p (regexp-quote (file-truename buffer-file-name))
-                              (file-truename (car (last args)))))
-      (should (string-prefix-p "set the clipboard to (POSIX file " (car (last args)))))))
+      (should (= (length paths) 1))
+      (should (equal (file-truename (car paths)) (file-truename buffer-file-name))))))
 
 (ert-deftest macos-copy-file-to-clipboard-refuses-files-of-other-targets ()
   (skip-unless (fboundp '+macos/copy-file-to-clipboard))

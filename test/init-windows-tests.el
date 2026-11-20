@@ -109,8 +109,7 @@
         (gained nil)
         (+portal-focus-gained-hook
          (list (lambda () (push (current-buffer) gained))))
-        (+portal--selected-pane-state nil)
-        (+portal--selected-view-state nil))
+        (+portal--frame-selections (make-hash-table :test #'eq)))
     (unwind-protect
         (save-window-excursion
           (delete-other-windows)
@@ -134,8 +133,9 @@
                          ("unfocus"
                           (push target unfocuses)
                           (puthash target nil focused)))))
-                    ((symbol-function 'portal-input-focus)
-                     (lambda ()
+                    ((symbol-function 'portal-view-focus)
+                     (lambda (only-in-key-window)
+                       (should only-in-key-window)
                        (push portal-view--target focuses)
                        (puthash portal-view--target t focused)))
                     ((symbol-function 'frame-focus-state)
@@ -160,7 +160,7 @@
             (select-window ordinary-window)
             (+portal--focus-after-command)
             (should (equal unfocuses '("web:first")))
-            (should (equal frame-focuses (list (selected-frame))))
+            (should-not frame-focuses)
             (select-window second-window)
             (+portal--focus-after-command)
             (should (equal (car focuses) "web:second"))

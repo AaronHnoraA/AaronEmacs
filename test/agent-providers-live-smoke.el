@@ -4,7 +4,7 @@
 (require 'json)
 (let ((directory (file-name-as-directory (make-temp-file "agent-provider-startup-" t))) results)
   (unwind-protect
-      (dolist (provider '(codex claude opencode))
+      (dolist (provider '(codex claude opencode agy))
         (let (buffer)
           (unwind-protect
               (condition-case err

@@ -14,6 +14,41 @@ tasks, `v r` Markdown repeat, `e` effort, `%` progress, and `RET` original
 source. `C-u r` explicitly rescans active scopes. Writes check source revisions and refuse to overwrite
 modified Emacs source buffers.
 
+Click, middle-click and `RET` share the guarded task visit. In Emacs, Markdown
+tasks reuse their canonical Noema pane, selecting an already visible note
+window instead of opening a raw source buffer or duplicating the page. Cold
+pages wait for that exact client's `current-file` confirmation. The host applies
+its current foreground activity before delivering the visit, respecting manual
+pause. While native navigation waits, the next Emacs command cancels it; leaving
+and returning cannot revive a request. Host exit and newer visits also cancel it.
+
+The page resolves the task against its live text, including unsaved edits,
+through read-only `agenda:document` native computation. Stable task ids survive
+text and position changes; repeated anonymous tasks are disambiguated by offsets
+only within the same source revision. Missing or ambiguous tasks report an
+error, never fall back to the first matching code example or a stale line.
+Comment tasks select their unique anchored text. Native journal-only reference
+tasks carry `comment-reference` and the original, unnormalised quote. Without
+an anchor they require one exact occurrence in the live text; empty, missing or
+ambiguous quotes fail. A reference may intentionally quote source code. Ordinary
+page comments still require their anchor. Navigation does not save,
+mutate, activate scopes or replace the editor's undo history. A changed document,
+selection or paused pane cancels a pending source inspection. A request received
+while paused cannot revive on resume. Document identity compares complete paths,
+normalising only known local aliases and retaining remote target identity.
+
+Hosted Agenda includes its originating client in visits; superseded source
+lookups from that page do not send late navigation events. The Markdown page,
+native Agenda and global attention enter the same visit adapter. WorkNode
+documents retain their explicit legacy source visit. Standalone native Agenda
+without the Emacs renderer adapter keeps its guarded text-buffer visitor.
+
+The regression checks live in `make agenda-test` (Emacs) and the Agenda
+navigation/visit unit tests (Noema). `scripts/check-agenda-navigation.mjs` runs
+the real editor and host command listener in WebKit with a read-only fake host;
+it covers unsaved task selection and cancellation through the actual activity
+gate. This does not replace testing mouse and focus in a live Emacs frame.
+
 Additional native commands:
 
 | Keys | Action |

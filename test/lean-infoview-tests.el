@@ -19,7 +19,7 @@
         (should-not (equal first second))
         (should (equal (lean--proxy-gateway-binding root) second))))))
 
-(ert-deftest lean-infoview-project-root-shares-eglot-proxy-identity ()
+(ert-deftest lean-infoview-project-root-shares-the-proxy-identity ()
   (let* ((directory (make-temp-file "lean-infoview-root-" t))
          (default-directory (file-name-as-directory directory))
          (buffer-file-name (expand-file-name "Main.lean" directory))
@@ -32,11 +32,11 @@
           (cl-letf (((symbol-function 'remote-gateway-prepare-client)
                      (lambda (&rest _arguments)
                        '(:binding-id "lean-binding"))))
-            (let* ((eglot-root (lean-project-root))
+            (let* ((server-root (lean-project-root))
                    (binding
-                    (lean--proxy-allocate-gateway-binding eglot-root))
+                    (lean--proxy-allocate-gateway-binding server-root))
                    (infoview-root (lean--iv-project-root)))
-              (should (equal infoview-root eglot-root))
+              (should (equal infoview-root server-root))
               (should
                (equal (lean--proxy-gateway-binding infoview-root)
                       binding)))))
@@ -60,16 +60,14 @@
       (should (equal seen-exec-path '("/client/bin"))))))
 
 (ert-deftest lean-infoview-remote-contact-is-local-proxy-over-stdio-bridge ()
+  "On another target the infoview proxy runs here and bridges stdio to `lake serve' there."
   (let ((remote-targets (copy-hash-table remote-targets))
         bridge-arguments)
     (remote-register-target "box" :trusted t)
     (remote-register-link "box" "native" "native")
     (cl-letf (((symbol-function 'lean-project-root)
                (lambda () "/fs:box:/work/"))
-              ((symbol-function 'lean-root-dir-p)
-               (lambda (_directory) t))
-              ((symbol-function 'locate-dominating-file)
-               (lambda (_file _predicate) "/fs:box:/work/"))
+              ((symbol-function 'lean--locate-root) (lambda (_file) "/fs:box:/work/"))
               ((symbol-function 'lean--proxy-available-p) (lambda () t))
               ((symbol-function 'lean--proxy-script-for-root)
                (lambda (_root) "/client/lean-proxy.mjs"))
@@ -80,95 +78,74 @@
                  '(:websocket-url "ws://127.0.0.1:4242/ws"
                    :binding-id "lean-binding"
                    :client-id "lean-client")))
-              ((symbol-function 'remote-file-name-target)
-               (lambda (_root) "box"))
               ((symbol-function 'remote-client-file-name)
                (lambda (_root &optional _adapter) nil))
               ((symbol-function 'remote-local-bridge-command)
                (lambda (program &rest keys)
                  (setq bridge-arguments (cons program keys))
                  '("/usr/bin/ssh" "-T" "box" "remote-lake-command"))))
-      (let ((default-directory "/fs:box:/work/"))
-        (let* ((contact (lean--server-contact))
-               (factory (plist-get (cdr contact) :process))
-               process-arguments)
-          (should (eq (car contact) 'eglot-lsp-server))
-          (should (functionp factory))
-          (cl-letf (((symbol-function 'remote-make-client-process)
-                     (lambda (&rest plist)
-                       (setq process-arguments plist)
-                       'local-proxy-process)))
-            (should (eq (funcall factory) 'local-proxy-process)))
-          (should
-           (equal
-            (plist-get process-arguments :command)
-            (list
-             "/client/node" "/client/lean-proxy.mjs"
-             "--root" temporary-file-directory
-             "--gateway-url" "ws://127.0.0.1:4242/ws"
-             "--gateway-binding" "lean-binding"
-             "--gateway-client-id" "lean-client"
-             "--" "/usr/bin/ssh" "-T" "box" "remote-lake-command")))
-          (should
-           (equal (plist-get process-arguments :connection-type) 'pipe)))
+      (let* ((default-directory "/fs:box:/work/")
+             (buffer-file-name "/fs:box:/work/Main.lean")
+             (proxy (lean--proxy-process-command)))
+        (should (equal (cdr proxy)
+                       (list "/client/node" "/client/lean-proxy.mjs"
+                             "--root" temporary-file-directory
+                             "--gateway-url" "ws://127.0.0.1:4242/ws"
+                             "--gateway-binding" "lean-binding"
+                             "--gateway-client-id" "lean-client"
+                             "--" "/usr/bin/ssh" "-T" "box" "remote-lake-command")))
         (should
-         (equal
-          bridge-arguments
-          '("lake" :args ("serve") :context "/fs:box:/work/"
-            :adapter "language-server" :directory "/fs:box:/work/")))))))
+         (equal bridge-arguments
+                '("lake" :args ("serve") :context "/fs:box:/work/"
+                  :adapter "language-server" :directory "/fs:box:/work/")))))))
 
 (ert-deftest lean-infoview-manual-start-cancels-automatic-timer ()
+  "A manual start owns startup: the delayed automatic start must not open a second server."
   (with-temp-buffer
     (let ((buffer-file-name
            (expand-file-name "Main.lean" temporary-file-directory))
           (default-directory temporary-file-directory)
-          (lean--eglot-waiting-for-environment nil)
-          (lean-eglot-connect-timeout nil)
+          (lean--lsp-waiting-for-environment nil)
           (starts 0))
-      (setq lean--eglot-start-timer
-            (run-at-time 60 nil #'ignore))
+      (setq lean--lsp-start-timer (run-at-time 60 nil #'ignore))
       (unwind-protect
-          (cl-letf (((symbol-function 'eglot-managed-p)
-                     (lambda () nil))
-                    ((symbol-function '+direnv-update-environment-maybe)
+          (cl-letf (((symbol-function '+direnv-update-environment-maybe)
                      (lambda (&optional _path _callback) nil))
-                    ((symbol-function '+eglot-start-now)
-                     (lambda (&optional _interactive)
-                       (cl-incf starts))))
-            (lean--ensure-eglot)
+                    ((symbol-function 'lean--start-lsp-now)
+                     (lambda () (cl-incf starts))))
+            (lean--ensure-lsp)
             (should (= starts 1))
-            (should-not lean--eglot-start-timer))
-        (lean--cancel-eglot-start-timer)))))
+            (should-not lean--lsp-start-timer))
+        (lean--cancel-lsp-start-timer)))))
 
-(ert-deftest lean-eglot-recovers-a-stale-direnv-wait-latch ()
+(ert-deftest lean-lsp-recovers-a-stale-direnv-wait-latch ()
+  "An applied direnv layer clears a wait whose callback was lost."
   (with-temp-buffer
     (let ((buffer-file-name
            (expand-file-name "Main.lean" temporary-file-directory))
           (default-directory temporary-file-directory)
           (direnv--active-root "/fs:box:/work/")
-          (lean--eglot-waiting-for-environment t)
+          (lean--lsp-waiting-for-environment t)
           (starts 0))
-      (cl-letf (((symbol-function 'eglot-managed-p) (lambda () nil))
-                ((symbol-function '+direnv-update-environment-maybe)
+      (cl-letf (((symbol-function '+direnv-update-environment-maybe)
                  (lambda (&optional _path _callback) 'ready))
-                ((symbol-function '+eglot-start-now)
-                 (lambda (&optional _interactive) (cl-incf starts))))
-        (lean--ensure-eglot)
-        (should-not lean--eglot-waiting-for-environment)
+                ((symbol-function 'lean--start-lsp-now)
+                 (lambda () (cl-incf starts))))
+        (lean--ensure-lsp)
+        (should-not lean--lsp-waiting-for-environment)
         (should (= starts 1))))))
 
-(ert-deftest lean-eglot-direnv-failure-falls-back-to-target-base-environment ()
+(ert-deftest lean-lsp-direnv-failure-falls-back-to-target-base-environment ()
+  "Availability first: a failed direnv layer still starts the server."
   (with-temp-buffer
-    (let ((lean--eglot-waiting-for-environment t)
-          seen)
-      (cl-letf (((symbol-function '+eglot-start-now)
-                 (lambda (&optional interactive)
-                   (setq seen interactive)))
+    (let ((lean--lsp-waiting-for-environment t)
+          (starts 0))
+      (cl-letf (((symbol-function 'lean--start-lsp-now)
+                 (lambda () (cl-incf starts)))
                 ((symbol-function 'message) #'ignore))
-        (lean--eglot-direnv-ready
-         nil '(remote-file-error "direnv unavailable"))
-        (should-not lean--eglot-waiting-for-environment)
-        (should seen)))))
+        (lean--lsp-direnv-ready nil '(remote-file-error "direnv unavailable"))
+        (should-not lean--lsp-waiting-for-environment)
+        (should (= starts 1))))))
 
 (ert-deftest lean-infoview-reads-port-from-live-gateway-endpoint ()
   (cl-letf (((symbol-function 'lean--proxy-endpoint)
@@ -220,14 +197,14 @@
             (should-not (memq first timer-list)))
         (lean--iv-cancel-port-wait)))))
 
-(ert-deftest lean-infoview-reconnect-uses-eglots-interactive-server-lookup ()
-  (let (seen)
-    (cl-letf (((symbol-function 'eglot-reconnect)
-               (lambda (server &optional interactive)
-                 (interactive (list 'current-server t))
-                 (setq seen (list server interactive)))))
-      (lean--iv-reconnect-eglot)
-      (should (equal seen '(current-server t))))))
+(ert-deftest lean-infoview-reconnect-restarts-every-workspace-of-the-buffer ()
+  "Reconnecting restarts the buffer's language servers, and with them the proxy."
+  (let (restarted)
+    (cl-letf (((symbol-function 'lsp-workspaces) (lambda () '(first second)))
+              ((symbol-function 'lsp-workspace-restart)
+               (lambda (workspace) (push workspace restarted))))
+      (lean--iv-reconnect-server)
+      (should (equal (nreverse restarted) '(first second))))))
 
 (ert-deftest lean-sideline-size-change-reads-the-window-buffer ()
   "The buffer-local hook runs in any buffer; the window names the Lean one."

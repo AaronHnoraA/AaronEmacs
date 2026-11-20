@@ -568,6 +568,7 @@ model; the pin keeps that choice out of the remembered interactive model."
          (effort-key (pcase (map-elt copy :identifier)
                        ('codex "reasoning_effort")
                        ('claude-code "effort")
+                       ('antigravity "thought_level")
                        ('pi "thinkingLevel")))
          (pin-model (and (stringp model-id) (not (string-empty-p model-id))))
          (pin-effort (and effort-key
@@ -2692,6 +2693,7 @@ LIMIT and IDLE-SECONDS default to the shared settings.  No history is removed."
   (let ((identifier (pcase (downcase (format "%s" (or agent "codex")))
                       ((or "claude" "claude-code") 'claude-code)
                       ((or "open-code" "opencode") 'opencode)
+                      ("agy" 'antigravity)
                       (name (intern name)))))
     (ignore-errors (+agent-acp-resolve-config identifier))))
 
@@ -2734,6 +2736,7 @@ agent-shell's private configuration representation."
   (let ((candidates '(("codex" . codex)
                       ("claude" . claude-code)
                       ("opencode" . open-code)
+                      ("agy" . antigravity)
                       ("pi" . pi)))
         available)
     (dolist (candidate candidates (or (nreverse available)
@@ -3471,8 +3474,9 @@ The current buffer's session counts first; without any, \"codex\"."
   (or (seq-some (lambda (buffer)
                   (and (+agent-acp-agent-buffer-p buffer)
                        (member (buffer-local-value '+agent-acp-session-agent buffer)
-                               '("codex" "claude" "opencode"))
-                       (buffer-local-value '+agent-acp-session-agent buffer)))
+                               '("codex" "claude" "opencode" "agy" "antigravity"))
+                       (let ((agent (buffer-local-value '+agent-acp-session-agent buffer)))
+                         (if (equal agent "antigravity") "agy" agent))))
                 (cons (current-buffer) (buffer-list)))
       "codex"))
 
@@ -3482,7 +3486,7 @@ The current buffer's session counts first; without any, \"codex\"."
 This needs no live session: a new client lists the provider's own record.
 Cancelling, or finding nothing to restore, ends that client."
   (interactive
-   (list (intern (completing-read "Resume with agent: " '("codex" "claude" "opencode")
+   (list (intern (completing-read "Resume with agent: " '("codex" "claude" "opencode" "agy")
                                   nil t nil nil (+agent-acp--recent-agent)))))
   (let* ((agent (or agent (intern (+agent-acp--recent-agent))))
          (source (+agent-acp-agent-buffer-p (current-buffer)))
@@ -3498,7 +3502,7 @@ Cancelling, or finding nothing to restore, ends that client."
 (defun +agent/start (&optional agent)
   "Start a reusable agent session in the current workspace."
   (interactive
-   (list (intern (completing-read "Agent: " '("codex" "claude" "opencode" "pi" "magent") nil t nil nil "codex"))))
+   (list (intern (completing-read "Agent: " '("codex" "claude" "opencode" "agy" "pi" "magent") nil t nil nil "codex"))))
   (let* ((agent (or agent 'codex))
          (source (+agent-acp-agent-buffer-p (current-buffer)))
          (root (or (and source +agent-acp-session-root) (+agent-acp-project-root)))

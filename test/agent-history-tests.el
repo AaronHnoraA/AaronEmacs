@@ -92,6 +92,117 @@
       (should (equal (+agent-history--exchanges (car rows))
                      '(("user" . "split it") ("assistant" . "split.")))))))
 
+(defun agent-history-tests--agy-store (home)
+  "Create an Antigravity summary store under HOME and return its path."
+  (let ((db (expand-file-name ".gemini/antigravity-cli/conversation_summaries.db" home)))
+    (agent-history-tests--sqlite
+     db
+     "CREATE TABLE conversation_summaries (conversation_id TEXT PRIMARY KEY,
+ title TEXT, preview TEXT, step_count INTEGER, last_modified_time TEXT,
+ workspace_uris TEXT, parent_conversation_id TEXT DEFAULT '', nesting_depth INTEGER DEFAULT 0)"
+     "CREATE TABLE conversations_fts (conversation_id TEXT, chunk_index INTEGER,
+ archived INTEGER DEFAULT 0, user_step_byte_offsets BLOB, agent_step_byte_offsets BLOB,
+ user_body TEXT, agent_body TEXT)"
+     "INSERT INTO conversation_summaries VALUES
+ ('a','Résumé','first',14,'1970-01-01 00:00:20+00:00',
+  '[\"file:///elsewhere\",\"file:///w/proj%20space/sub\"]','',0),
+ ('other','Other','x',2,'1970-01-01 00:00:30+00:00','[\"file:///w/proj%20space-other\"]','',0),
+ ('child','Child','x',2,'1970-01-01 00:00:40+00:00','[\"file:///w/proj%20space\"]','a',1),
+ ('empty','New','',0,'1970-01-01 00:00:50+00:00','[\"file:///w/proj%20space\"]','',0),
+ ('archived','Old','x',2,'1970-01-01 00:01:00+00:00','[\"file:///w/proj%20space\"]','',0),
+ ('unindexed','Recent','hi',2,'1970-01-01 00:00:25+00:00','[\"file:///w/proj%20space\"]','',0)"
+     "INSERT INTO conversations_fts VALUES
+ ('a',-1,0,'','','',''),
+ ('a',0,0,CAST('[[2,0],[8,7]]' AS BLOB),CAST('[[3,0],[9,7]]' AS BLOB),'中文
+Next
+','答复
+Done
+'),
+ ('a',1,0,'[[12,0]]','[[13,0]]','Last
+','Final
+'),
+ ('other',0,0,'[[0,0]]','[[1,0]]','x','y'),
+ ('child',0,0,'[[0,0]]','[[1,0]]','x','y'),
+ ('archived',0,1,'[[0,0]]','[[1,0]]','x','y')")
+    (let ((conversation (expand-file-name ".gemini/antigravity-cli/conversations/a.db" home)))
+      (agent-history-tests--sqlite
+       conversation
+       "PRAGMA journal_mode=WAL"
+       "CREATE TABLE steps (idx INTEGER PRIMARY KEY, step_type INTEGER, step_payload BLOB)"
+       "INSERT INTO steps VALUES
+ (2,14,X'9A010A1A080A06E4B8ADE69687'),
+ (3,15,X'A201080A06E7AD94E5A48D'),
+ (8,14,X'9A01081A060A044E657874'),
+ (9,15,X'A201060A04446F6E65'),
+ (12,14,X'9A01081A060A044C617374'),
+ (13,15,X'A201070A0546696E616C'),
+ (14,15,X'A201081A06736563726574'),
+ (15,15,X'FF'),
+ (16,6,X'A201060A04746F6F6C')")
+      (copy-file conversation
+                 (expand-file-name ".gemini/antigravity-cli/conversations/unindexed.db" home))
+      conversation)))
+
+(ert-deftest agent-c63-agy-history-scopes-all-workspaces-and-skips-nonconversations ()
+  (skip-unless (executable-find "sqlite3"))
+  (agent-history-tests--home
+    (agent-history-tests--agy-store home)
+    (cl-letf (((symbol-function '+agent-history-scope) (lambda (&rest _) '("/w/proj space/"))))
+      (let ((rows (+agent-history-list home)))
+        (should (equal (mapcar (lambda (row) (plist-get row :id)) rows) '("unindexed" "a")))
+        (let ((row (cadr rows)))
+          (should (equal (plist-get row :agent) "agy"))
+          (should (equal (plist-get row :cwd) "/w/proj space/sub"))
+          (should (equal (plist-get row :title) "Résumé"))
+          (should (= (plist-get row :turns) 3))
+          (should (= (plist-get row :updated) 20)))
+        (should (car (+agent-history--page (car rows))))
+        (should (equal (mapcar (lambda (row) (plist-get row :id)) (+agent-history-list home t))
+                       '("other" "unindexed" "a")))
+        (should (equal (mapcar (lambda (row) (plist-get row :id)) (+agent-history--agy home '("/")))
+                       '("other" "unindexed" "a")))))))
+
+(ert-deftest agent-c63-agy-preview-reads-native-steps-without-thoughts-or-search-index ()
+  (skip-unless (executable-find "sqlite3"))
+  (agent-history-tests--home
+    (let* ((db (agent-history-tests--agy-store home))
+           (row (list :agent "agy" :id "a" :db db))
+           (+agent-history--page-messages 2)
+           (first (+agent-history--page row)))
+      (should (equal (car first) '(("assistant" . "Final") ("user" . "Last"))))
+      (let ((second (+agent-history--page row (cdr first))))
+        (should (equal (car second) '(("assistant" . "Done") ("user" . "Next"))))
+        (let ((third (+agent-history--page row (cdr second))))
+          (should (equal (car third) '(("assistant" . "答复") ("user" . "中文"))))
+          (should-not (car (+agent-history--page row (cdr third)))))))))
+
+(ert-deftest agent-c63-agy-fallback-points-to-its-read-only-database ()
+  (skip-unless (executable-find "sqlite3"))
+  (agent-history-tests--home
+    (let ((prompt (+agent-history-transcript-prompt
+                   (list :agent "agy" :id "a" :cwd "/w" :title "T"
+                         :db (agent-history-tests--agy-store home)))))
+      (should (string-match-p "sqlite3 -readonly" prompt))
+      (should (string-match-p "conversations/a.db" prompt))
+      (should-not (string-match-p "opencode" prompt))
+      (should (string-match "transcript (SQLite): `\\([^`]+\\)`" prompt))
+      (should (string-match-p "13|15|A201070A0546696E616C"
+                              (shell-command-to-string (match-string 1 prompt)))))))
+
+(ert-deftest agent-c63-agy-native-restore-recognizes-upstream-identity ()
+  (let (restored)
+    (with-temp-buffer
+      (setq-local +agent-acp-session-agent "antigravity")
+      (cl-letf (((symbol-function '+agent-history--live-buffer) (lambda (_) nil))
+                ((symbol-function '+agent-history--directory) (lambda (_ fallback) fallback))
+                ((symbol-function '+agent-acp-restart-native)
+                 (lambda (_ id) (setq restored id)))
+                ((symbol-function '+agent-history-continue)
+                 (lambda (&rest _) (ert-fail "Same provider must resume natively"))))
+        (+agent-history-open '(:agent "agy" :id "saved-agy") "antigravity" (current-buffer))
+        (should (equal restored "saved-agy"))
+        (should +agent-acp-strict-restore)))))
+
 (ert-deftest agent-c63-history-merges-agents-newest-first-without-scratch ()
   (agent-history-tests--home
     (let ((+agent-history-readers

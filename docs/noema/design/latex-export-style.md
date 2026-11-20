@@ -130,6 +130,10 @@ active template:
   `attention`) → `remark` with the kind/title as the label.
 - Unknown kinds → `\paragraph{kind}` fallback (never drop the content).
 
+A theorem, proof, or remark title can contain a closing square bracket, including
+the endpoint of a mathematical interval. Group such titles inside the LaTeX
+optional argument so the full title and its math reach the compiler.
+
 The **assignment** template additionally offers `prob`, `sol`, `ans`, `pf`.
 Prefer those there when the source clearly marks problems/solutions, but only if
 it does not change any text.

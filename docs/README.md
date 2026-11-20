@@ -71,7 +71,9 @@ channels.
 
 ## works/ — projects in progress
 
-No active workbenches. The ignored upstream clones remain under `works/doom-template/upstream/` and `works/neo-emacs/upstream/` for reference.
+- [agent-document-workspace](works/agent-document-workspace/README.md) Draft: document-driven tasks, a native Emacs sidebar, execution feedback and human review; [source study](works/agent-document-workspace/sources.md), [implementation plan](works/agent-document-workspace/implementation.md).
+
+The ignored upstream clones remain under `works/doom-template/upstream/` and `works/neo-emacs/upstream/` for reference.
 
 ## guide/ — how to use it
 
@@ -219,6 +221,7 @@ Noema is developed in its own repository (`site-lisp/noema/`); its documentation
 - [markwright-noema-audit-2026-09.md](noema/records/audits/markwright-noema-audit-2026-09.md) Source-linked comparison of MarkWright with the Noema editor: merged slash-menu, inline HTML and print details; rendering, CSS, theme and lifecycle findings; with a [per-file line inventory](noema/records/audits/markwright-line-audit-2026-09.md).
 - [mediawiki-roam-ux-audit-2026-10.md](noema/records/audits/mediawiki-roam-ux-audit-2026-10.md) Noema Wiki / Roam 创建与管理交互审计（对照 MediaWiki）
 - [mellos-thirdspace-noema-audit-2026-10.md](noema/records/audits/mellos-thirdspace-noema-audit-2026-10.md) What remains to absorb from Mellos after the 2026-09-21 pass (whole-graph reads, affected consumers, verified baselines, ready frontier) and which ThirdSpace vault ideas fit Noema (agent routing contract, inbox default, report-only meta diagnostics).
+- [noema-agenda-navigation-2026-11.md](noema/records/audits/noema-agenda-navigation-2026-11.md) Agenda 返回 Markdown 窗口、任务定位与异步取消的修复和验收边界。
 - [noema-agent-upstream-audit-2026-09.md](noema/records/audits/noema-agent-upstream-audit-2026-09.md) agent-shell / ACP audit and the move to package-managed upstreams, with the 2026-09-26 upgrade.
 - [noema-audit-2026-06.md](noema/records/audits/noema-audit-2026-06.md) Noema 审计报告 (2026-06)
 - [noema-audit-2026-07.md](noema/records/audits/noema-audit-2026-07.md) Noema 全面工程审计

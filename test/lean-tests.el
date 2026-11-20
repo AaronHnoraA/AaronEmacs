@@ -1,18 +1,16 @@
 ;;; lean-tests.el --- Lean integration tests -*- lexical-binding: t; -*-
 
+;;; Commentary:
+;; Lean's own lsp-mode notifications: incremental diagnostics, file progress,
+;; task tags and the Flymake backend (lisp/lang/lean/lsp.el).
+
 ;;; Code:
 
 (require 'ert)
 (require 'cl-lib)
 (require 'flymake)
-(require 'eglot)
-
-(load-file
- (expand-file-name "../lisp/lang/lean/init-lean-eglot.el"
-                   (file-name-directory (or load-file-name buffer-file-name))))
-(load-file
- (expand-file-name "../lisp/checkers/diagnostics-extra/config.el"
-                   (file-name-directory (or load-file-name buffer-file-name))))
+(require 'lang/lean/lsp)
+(require 'checkers/diagnostics-extra/config)
 
 (defconst lean-test--range
   '(:start (:line 0 :character 0) :end (:line 0 :character 1)))
@@ -46,8 +44,10 @@
 
 (ert-deftest lean-flymake-bitmaps-use-lean-faces ()
   (with-temp-buffer
-    (setq-local flymake-diagnostic-functions '(eglot-flymake-backend))
+    (setq-local flymake-diagnostic-functions '(lsp-diagnostics--flymake-backend))
     (lean-setup-flymake-backend)
+    ;; Lean's backend replaces lsp-mode's generic one.
+    (should (equal flymake-diagnostic-functions '(lean-flymake-backend)))
     (should (equal flymake-error-bitmap
                    '(lean-fringe-blocked-bitmap lean-fringe-error-face)))
     (should (equal flymake-warning-bitmap
@@ -58,8 +58,8 @@
 (ert-deftest lean-task-tags-create-distinct-markers ()
   (with-temp-buffer
     (insert "theorem x := by\n  trivial\n")
-    (cl-letf (((symbol-function 'eglot--lsp-position-to-point)
-               (lambda (_pos &optional _marker) (point-min))))
+    (cl-letf (((symbol-function 'lsp--position-to-point)
+               (lambda (_pos) (point-min))))
       (lean--update-task-overlays
        (list `(:range ,lean-test--range :leanTags [2] :isSilent t)
              `(:range ,lean-test--range :leanTags [1] :isSilent t)))
@@ -73,8 +73,8 @@
     (insert "a\nb\nc\n")
     (let ((item '(:range (:start (:line 0 :character 0)
                           :end (:line 2 :character 0)))))
-      (cl-letf (((symbol-function 'eglot--lsp-position-to-point)
-                 (lambda (pos &optional _marker)
+      (cl-letf (((symbol-function 'lsp--position-to-point)
+                 (lambda (pos)
                    (save-excursion
                      (goto-char (point-min))
                      (forward-line (plist-get pos :line))
@@ -98,13 +98,13 @@
         (should (equal (plist-get (cdr reported) :region)
                        (cons (point-min) (point-max))))))))
 
-(ert-deftest diagnostics-counts-recognize-eglot-categories ()
+(ert-deftest diagnostics-counts-recognize-flymake-severities ()
   (with-temp-buffer
     (insert "abc")
     (let ((diags
-           (list (flymake-make-diagnostic (current-buffer) 1 2 'eglot-error "e")
-                 (flymake-make-diagnostic (current-buffer) 1 2 'eglot-warning "w")
-                 (flymake-make-diagnostic (current-buffer) 1 2 'eglot-note "n"))))
+           (list (flymake-make-diagnostic (current-buffer) 1 2 :error "e")
+                 (flymake-make-diagnostic (current-buffer) 1 2 :warning "w")
+                 (flymake-make-diagnostic (current-buffer) 1 2 :note "n"))))
       (should (equal (+diagnostics--counts diags)
                      '(:error 1 :warning 1 :note 1))))))
 

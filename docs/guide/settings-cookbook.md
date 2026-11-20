@@ -146,7 +146,9 @@ Codex 会话走 agent-shell。
 变量（`config-defvar`，组 `+noema`，落盘 `etc/config-store.el`）：
 
 - `+noema-latex-export-engine`      — `"codex"`（先验证 Pandoc 稿，再做至多一次 gated polish；编译失败时才允许多轮 repair）或 `"mechanical"`（从不启动 agent）
-- `+noema-latex-export-agent`       — polish/repair 后端 `"codex"`（默认）/ `"claude"` / `"opencode"`；配置里选定
+- `+noema-latex-export-agent`       — polish/repair 后端，默认 `"agy"`，可选 `"codex"`、`"claude"`、`"opencode"`
+- `+noema-latex-export-agy-model` — Antigravity 的 ACP 模型 ID，默认 `"gemini-4-neon"`
+- `+noema-latex-export-agy-effort` — Antigravity 的思考强度，默认 `"high"`
 - `+noema-latex-export-max-attempts` — 有具体编译反馈时的 repair 上限（默认 3；保真 gate 失败会立即回退，不消耗重复尝试）
 - `+noema-latex-export-model`        — 传给当前后端的模型 id（空 = 默认）
 - `+noema-codex-model`               — 仅 codex 的模型 id（空 = 默认）

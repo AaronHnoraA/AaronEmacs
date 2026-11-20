@@ -199,6 +199,14 @@ and writers with the hosted Web view. Native keys include `v d/w/t` for views,
 `v k` clock report, `R` retry deferred clock writes, and `K` keep saved source
 state when resolving a pending clock request.
 
+Click a task or press `RET` to return to its Noema Markdown note. An existing
+note window is reused, with the task selected and revealed. New note pages
+finish loading before the jump. Unsaved note text and undo history are kept;
+switching windows or editing while a lookup is pending cancels the old jump.
+If a task disappeared or became ambiguous, refresh Agenda or give it a stable
+`id` instead of relying on an old line number. Comment tasks return to their
+highlighted text. The hosted Web Agenda and global attention use the same path.
+
 The default native view contains both the seven-day calendar and the open-task
 section, so unscheduled Roam tasks remain visible even when the current week has
 no dated entries. The Dashboard renders its last complete scoped Agenda snapshot

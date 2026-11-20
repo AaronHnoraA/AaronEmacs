@@ -275,6 +275,7 @@ site-lisp/noema/lisp/noema-xwidget-keys.el
 
 Noema 默认在 Portal Web 中打开。任务管理器、Wiki Home、导出、页面工具和
 AI 发送都经页面 client 的宿主命令路由，不依赖 xwidget 的脚本执行。
+任务管理器按任务 ID 更新卡片。自动轮询和手动刷新保留进度与 Agent 审阅各自的展开状态，新增日志会直接显示在已展开的列表里。
 发送选区、光标行或整篇笔记时，页面先保存并报告范围；Emacs 只在收到
 该 client 的保存回执后读取磁盘和启动 Agent。Emacs 源 buffer 保存后
 通知显示同一笔记的 Portal 与 xwidget 页面重载，页面有未保存草稿时仍保留草稿。

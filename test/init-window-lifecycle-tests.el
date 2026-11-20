@@ -318,6 +318,7 @@ MODE is set as the buffer's `major-mode' symbol only; no mode body runs."
 (ert-deftest c13-emacs-keeps-the-keyboard-until-the-pane-changes ()
   "After Emacs takes the keyboard, its next commands stay in Emacs."
   (require 'term/portal/config)
+  (require 'portal-input)
   (window-lifecycle-tests--with-buffers ((terminal " *c13-terminal*")
                                          (ordinary " *c13-ordinary*"))
     (switch-to-buffer terminal)
@@ -325,15 +326,14 @@ MODE is set as the buffer's `major-mode' symbol only; no mode body runs."
                 portal-view--target "terminal:c13"
                 +portal--explicitly-unfocused t)
     (let ((other (split-window-right))
-          (+portal--selected-pane-state nil)
-          (+portal--selected-view-state nil)
+          (+portal--frame-selections (make-hash-table :test #'eq))
           (focuses 0))
       (set-window-buffer other ordinary)
       (cl-letf (((symbol-function 'portal-input--action) #'ignore)
-                ((symbol-function 'portal-input-focus)
-                 (lambda () (cl-incf focuses))))
-        (setq +portal--selected-pane-state
-              (list (selected-frame) (selected-window) terminal))
+                ((symbol-function 'portal-view-focus)
+                 (lambda (_only-in-key-window) (cl-incf focuses))))
+        (puthash (selected-frame) (list (selected-window) terminal)
+                 +portal--frame-selections)
         ;; Returning from the minibuffer reselects the same pane, and the
         ;; frame may change layout: neither gives the view the keyboard.
         (+portal--focus-selected-window (selected-frame) t)
@@ -515,8 +515,8 @@ again (Dirvish moving a session between frames) never stops."
 
 (ert-deftest portal-focus-from-a-hook-tolerates-an-unplaced-view ()
   "A view that cannot take the keyboard yet raises nothing from window hooks."
-  (cl-letf (((symbol-function 'portal-input-focus)
-             (lambda () (user-error "No visible Portal view to focus"))))
+  (cl-letf (((symbol-function 'portal-view-focus)
+             (lambda (&optional _) (user-error "No visible Portal view to focus"))))
     (should-not (+portal--try-focus))))
 
 ;;; indent-guide's global idle timer.

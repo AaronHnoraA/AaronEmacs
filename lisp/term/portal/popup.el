@@ -346,6 +346,9 @@ CURRENT is the currently displayed popup buffer."
 (defun +portal-popup/agent-opencode ()
   "Open OpenCode in the popup using agent-shell."
   (interactive) (+portal-popup/agent 'opencode))
+(defun +portal-popup/agent-agy ()
+  "Open Antigravity in the popup using agent-shell."
+  (interactive) (+portal-popup/agent 'agy))
 
 (defvar +portal-popup-agent-keys-mode-map
   (make-sparse-keymap))
@@ -382,7 +385,7 @@ CURRENT is the currently displayed popup buffer."
 (defun +portal-popup--agent-tab-segment ()
   "Return the agent launcher; constructing it performs no IO."
   (propertize " +Agent " 'face '+portal-popup-tab 'mouse-face 'mode-line-highlight
-              'help-echo "Claude / Codex / OpenCode via agent-shell"
+              'help-echo "Claude / Codex / OpenCode / Antigravity via agent-shell"
               'local-map (let ((map (make-sparse-keymap)))
                            (dolist (key '([header-line mouse-1] [header-line mouse-3]
                                           [tab-line mouse-1] [tab-line mouse-3]))

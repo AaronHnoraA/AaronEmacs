@@ -1432,7 +1432,7 @@ machine's HOME, because agent-shell's caches expand `~' there."
       (should (eq (lookup-key term-map [header-line mouse-3]) #'+portal-popup/menu))
       (should (eq (lookup-key agent-map [tab-line mouse-1]) #'+portal-popup/agent-menu))
       (should (equal (mapcar (lambda (item) (aref item 0)) (+portal-popup--agent-menu-items))
-                     '("Claude" "Codex" "OpenCode"))))))
+                     '("Claude" "Codex" "OpenCode" "Antigravity"))))))
 
 (ert-deftest popup-agent-menu-includes-configured-apps-and-agent-submenu ()
   (let ((+project-popup-portal-apps '(("yazi" . "yazi") ("btop" . "btop"))) items)
@@ -1440,7 +1440,7 @@ machine's HOME, because agent-shell's caches expand `~' there."
               ((symbol-function 'popup-menu) #'ignore))
       (+portal-popup/menu nil))
     (should (equal (mapcar (lambda (item) (aref item 0)) (cdr (assoc "Applications" items))) '("yazi" "btop")))
-    (should (= (length (cdr (assoc "Agent" items))) 3))))
+    (should (= (length (cdr (assoc "Agent" items))) 4))))
 
 (ert-deftest popup-agent-starts-acp-not-portal-and-shares-the-real-popup ()
   (save-window-excursion

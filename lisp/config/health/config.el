@@ -309,8 +309,9 @@ templates at all.  Check them so that cannot happen quietly again.")
          ;; that backend's binary is missing (export still works via mechanical
          ;; fallback).
          (or (equal (bound-and-true-p +noema-latex-export-engine) "mechanical")
-             (let ((backend (or (bound-and-true-p +noema-latex-export-agent) "codex")))
+             (let ((backend (or (bound-and-true-p +noema-latex-export-agent) "agy")))
                (cond
+                ((equal backend "agy") (and (executable-find "agy") t))
                 ((equal backend "claude") (and (+health--claude-cli-path) t))
                 ((equal backend "opencode")
                  (and (executable-find (or (bound-and-true-p +noema-opencode-executable) "opencode")) t))
