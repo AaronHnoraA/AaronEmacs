@@ -9,6 +9,11 @@ dialog). It is gated on review, fidelity, and compilation; when it does not
 pass, the export falls back to the verified Pandoc draft with a warning rather
 than failing.
 
+Emacs Config selects Codex with `gpt-5.6-terra` for LaTeX polish and repair.
+The separate Antigravity profile selects Gemini 4 Neon at High when that
+backend is chosen. An explicit cross-backend export model takes precedence
+over the provider model.
+
 ## Absolute rules
 
 1. **Never change the prose.** Do not add, remove, reorder, translate, or reword

@@ -56,7 +56,8 @@
    (+noema-publish-root . "/Users/hc/.emacs.d/publish") (+session-auto-save)
    (+noema-web-port . 50815) (+noema-backend . portal)
    (+noema-latex-export-engine . "codex") (+noema-latex-export-agent . "codex")
-   (+noema-latex-export-max-attempts . 3) (+noema-codex-model . "")
+   (+noema-latex-export-agy-model . "gemini-4-neon") (+noema-latex-export-agy-effort . "high")
+   (+noema-latex-export-max-attempts . 3) (+noema-codex-model . "gpt-5.6-terra")
    (+noema-latex-export-model . "") (+noema-opencode-executable . "opencode")
    (+project-local-overrides) (+note-code-root . "/Users/hc/Documents/Noema/")
    (+debug-common-adapter-specs
