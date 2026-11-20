@@ -19,6 +19,8 @@
 (declare-function +macos-native-p "os/macos/system" ())
 (declare-function macos-window-set-accessory "ext:macos-window" (accessory))
 (declare-function macos-window-install-drag-handles "ext:macos-window" (height))
+(declare-function macos-window-watch-activation "ext:macos-window" (channel))
+(declare-function macos-window-app-active-p "ext:macos-window" ())
 (declare-function ns-hide-emacs "nsfns.m" (on))
 (declare-function +window-dashboard-buffer "ui/windows/config" ())
 
@@ -31,6 +33,25 @@ Nil leaves frames without an edge drag target.")
 
 (defvar +background--frames nil
   "Frames made invisible by `+background/hide', most recently used first.")
+
+(defvar +background--activation-channel nil)
+
+(defun +background--app-activated (_process _event)
+  "Restore hidden frames when macOS reopens Emacs without a file."
+  (when (and +background--frames (macos-window-app-active-p)
+             (equal (+background-status) "background"))
+    (+background--restore-frames)))
+
+(defun +background--watch-activation ()
+  (when (and (not (process-live-p +background--activation-channel))
+             (+macos-native-p) (fboundp 'macos-window-watch-activation))
+    (let ((channel (make-pipe-process :name "macos-app-activation" :noquery t
+                                      :filter #'+background--app-activated)))
+      (unwind-protect
+          (when (macos-window-watch-activation channel)
+            (setq +background--activation-channel channel))
+        (unless (eq channel +background--activation-channel)
+          (delete-process channel))))))
 
 (defun +background--editing-frames ()
   "Return top-level graphical frames managed by the macOS launcher."
@@ -59,6 +80,7 @@ big it is belong to the window manager."
 Non-nil ALL hides every top-level frame whatever it reports; a frame that was
 only just shown does not report as visible yet."
   (interactive)
+  (+background--watch-activation)
   (let ((frames (if all
                     (+background--editing-frames)
                   (seq-filter #'frame-visible-p
@@ -122,9 +144,8 @@ hidden again once startup has finished."
     (add-hook 'window-setup-hook #'+background--hide-all-h 90))
   nil)
 
-(defun +background/show ()
-  "Bring Emacs to the foreground, restoring the frames that were hidden."
-  (interactive)
+(defun +background--restore-frames ()
+  "Make the saved frames visible and return them in most-recent-first order."
   (let ((frames (or (seq-filter #'frame-live-p +background--frames)
                     (+background--editing-frames))))
     (setq +background--frames nil)
@@ -132,6 +153,12 @@ hidden again once startup has finished."
       (make-frame-visible frame))
     ;; Stated outright: visibility is not always reported yet at this point.
     (+background-apply-dock-policy (and frames t))
+    frames))
+
+(defun +background/show ()
+  "Bring Emacs to the foreground, restoring the frames that were hidden."
+  (interactive)
+  (let ((frames (+background--restore-frames)))
     ;; Activation is ignored while the policy change is still settling.
     (when frames
       (run-at-time 0.15 nil #'+background--focus (car frames))))
@@ -140,7 +167,7 @@ hidden again once startup has finished."
 (defun +background--present-h ()
   "Come forward for something macOS handed to a hidden Emacs."
   (unless (equal (+background-status) "visible")
-    (+background/show)))
+    (+background--restore-frames)))
 
 (add-hook '+macos-present-hook #'+background--present-h)
 

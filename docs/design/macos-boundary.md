@@ -91,6 +91,12 @@ aaron-notify ──→ 历史（总是）
 点击能回到 Emacs。未授权时退回 `osascript`，通知照常出现，但图标是脚本图标，
 点击也没有效果。
 
+### 隐藏后打开应用
+
+Finder、Dock 和 Raycast 菜单的 **Open Emacs** 都通过 macOS 打开应用。隐藏命令记住窗口；
+AppKit 通知 Emacs 已被激活时，如果所有编辑窗口仍然隐藏，就恢复这些窗口的可见性。
+已有可见窗口时保留当前布局。键盘焦点由系统处理。
+
 ### 顶边拖动
 
 无标题栏的顶层 frame 从顶部窄边（`+frame-drag-handle-height`）拖动：`window.m` 在该边框

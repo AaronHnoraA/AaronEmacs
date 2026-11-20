@@ -2,7 +2,7 @@
 # emacs-app --- run Emacs as a background application on macOS.
 #
 #   start [--background]   launch Emacs; with --background keep it hidden
-#   restart                quit and start again, visible or hidden as before
+#   restart [--app]        restart; --app reopens with macOS
 #   kill                   end an Emacs that no longer answers
 #   show | hide | toggle   bring Emacs forward or send it to the background
 #   state                  JSON for status, health, actions and frames at once
@@ -13,8 +13,9 @@
 #   frame ACTION [ID]      focus | hide | hide-others | close | close-others
 #                          a frame by ID, or new | show-all | hide-all
 #   terminal               a new Portal terminal in its own frame, every time
+#   new-frame | wiki-home  create a frame or open the Noema Wiki
 #   status                 visible | background | busy | stopped
-#   quit                   quit Emacs, showing it first for its questions
+#   quit [--app]           quit; --app presents questions via macOS activation
 #   build                  build the window and input-source modules
 #   install | uninstall    manage the login LaunchAgent
 
@@ -85,17 +86,17 @@ start() {
     fi
 }
 
-open_terminal() {
-    # Do not call `start' for an already running app: it schedules focus on
-    # an existing frame while this command is creating a different one.
+open_gui_action() {
+    # Create the requested surface before activating the application once.
     if ! running; then
-        start --background || return 1
+        /usr/bin/open -g -a "$APP" || return 1
     fi
     if ! wait_for_startup; then
         echo 'Emacs did not complete startup in time' >&2
         return 1
     fi
-    "$CLIENT" --timeout=4 --eval '(progn (+portal/open-new) nil)' >/dev/null
+    "$CLIENT" --timeout=4 --eval "$1" >/dev/null || return 1
+    /usr/bin/open -a "$APP"
 }
 
 wait_for_exit() {
@@ -108,7 +109,17 @@ wait_for_exit() {
 }
 
 # Emacs may be asking about unsaved work; it is shown, and the wait is bounded.
+quit_app() {
+    running || return 0
+    /usr/bin/open -a "$APP" && client "(progn (run-at-time 0 nil #'save-buffers-kill-emacs) t)" >/dev/null
+}
+
 restart() {
+    if [ "${1:-}" = --app ]; then
+        quit_app && wait_for_exit || { echo "Emacs did not quit; check for a save prompt" >&2; return 1; }
+        /usr/bin/open -a "$APP"
+        return
+    fi
     local was
     was=$(status)
     if [ "$was" != stopped ]; then
@@ -220,7 +231,7 @@ command=${1:-status}
 [ $# -gt 0 ] && shift
 case "$command" in
     start) start "$@" ;;
-    restart) restart ;;
+    restart) restart "$@" ;;
     kill) force_quit ;;
     state) state ;;
     show) client '(+background/show)' >/dev/null || /usr/bin/open -a "$APP" ;;
@@ -231,9 +242,11 @@ case "$command" in
     actions) json '(+background-actions)' ;;
     act) act "$@" ;;
     result) result "$@" ;;
-    terminal) open_terminal ;;
+    terminal) open_gui_action '(progn (+portal/open-new) nil)' ;;
+    new-frame) open_gui_action '(progn (+background-make-frame) nil)' ;;
+    wiki-home) open_gui_action '(progn (+noema/wiki-home) nil)' ;;
     status) status ;;
-    quit) client '(+background/quit)' >/dev/null ;;
+    quit) if [ "${1:-}" = --app ]; then quit_app; else client '(+background/quit)' >/dev/null; fi ;;
     build) build ;;
     install) install ;;
     uninstall) uninstall ;;

@@ -1,9 +1,8 @@
 // Find a Noema page from Raycast.  Raycast is the whole front end: each key
 // asks the backend, which answers from the Go kernel's search, and the list
 // shows that answer unfiltered.  Emacs is involved only to open the chosen page.
-import { Action, ActionPanel, Clipboard, closeMainWindow, Icon, List, PopToRootType, showToast, Toast } from "@raycast/api";
+import { Action, ActionPanel, Clipboard, Icon, List, showToast, Toast } from "@raycast/api";
 import { useEffect, useRef, useState } from "react";
-import { emacs, emacsAction, reportCommandFailure, reportPendingAction } from "./client";
 import { NoemaDown, Page, pageLink, SearchAnswer, searchPages } from "./backend";
 
 const GROUPS: Array<{ title: (answer: SearchAnswer) => string; kinds: string[] }> = [
@@ -14,21 +13,6 @@ const GROUPS: Array<{ title: (answer: SearchAnswer) => string; kinds: string[] }
   { title: () => "Part of the query", kinds: ["partial"] },
   { title: () => "Recent", kinds: ["listed", ""] },
 ];
-
-// Emacs opens files through its own whitelist; the action that takes a path
-// is looked up there instead of being named here.
-async function openInEmacs(file: string) {
-  try {
-    const actions = JSON.parse(await emacs("actions")) as Array<{ id: string; prompt: string }>;
-    const open = actions.find((action) => action.prompt === "Path");
-    if (!open) throw new Error("Emacs offers no action that opens a path");
-    const result = await emacsAction("act", open.id, file);
-    if (result === "pending") await reportPendingAction();
-    await closeMainWindow({ clearRootSearch: true, popToRootType: PopToRootType.Immediate });
-  } catch (error) {
-    await reportCommandFailure(error);
-  }
-}
 
 const excerpt = (text = "") => text.replace(/\[\[(.*?)\]\]/g, "$1").trim();
 
@@ -73,7 +57,7 @@ export default function Command() {
       ]}
       actions={
         <ActionPanel>
-          <Action title="Open in Emacs" icon={Icon.ArrowRight} onAction={() => openInEmacs(page.file)} />
+          <Action.Open title="Open in Emacs" icon={Icon.ArrowRight} target={page.file} application="/Applications/Emacs.app" />
           <Action
             title="Copy Wiki Link"
             icon={Icon.Link}

@@ -84,7 +84,7 @@ etc/                  私有配置与密钥：config-*.el、config-store.el、re
 var/                  运行时状态与缓存（eln-cache、remote/、noema/host.json …）
 templates/            auto-insert 模板；templates/noema 链到 Noema 模板目录
 bin/                  emacs-app（后台应用唯一入口）及辅助脚本
-tools/                raycast-emacs（唯一外部控制面）、macos-background 原生源码等
+tools/                raycast-emacs（应用、终端与 Noema 入口）、macos-background 原生源码等
 test/                 ERT 测试（*-tests.el）
 docs/                 两个仓库的全部文档，入口 docs/README.md：guide/ 用法、design/ 现行机制、
                       acceptance/ 验收、ops/ 运维、records/ 审计与历史（带日期，不更新）、
@@ -152,7 +152,7 @@ Noema 维护 Markdown、知识库、研究 DAG、冻结 Run、Proposal 和 Findi
 | `bin/sage-jupyter-kernel` | SageMath kernel 启动包装，日志写 `var/log/`；由 Noema 的 sagemath kernelspec 模板调用 | — |
 | `make <target>` | 编译、测试、锁文件、健康检查；`make help` 列出全部 | [maintenance.md](ops/maintenance.md) |
 
-Raycast 扩展只调用 `bin/emacs-app`；新增外部入口放进 `bin/`，并在这张表里占一行。
+Raycast 打开应用和文件走 macOS，创建 Portal 终端调用 `bin/emacs-app terminal`。新增外部入口放进 `bin/`，并在这张表里占一行。
 
 `bin/neomacs-trial` 通过 `NEOMACS_CONFIG_TRIAL=1` 启用 `os/neomacs/trial`。
 普通启动不加载这份 patch，`emacs-app` 与 `emacsopen` 继续使用原来的 GNU 入口。

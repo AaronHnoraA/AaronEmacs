@@ -73,6 +73,29 @@
       (dolist (candidate (list source peer)) (when (buffer-live-p candidate) (kill-buffer candidate)))
       (delete-directory directory t))))
 
+(ert-deftest terminal-ui-regression-late-selection-keeps-the-native-key-window ()
+  "A late selection hook for the first terminal must not raise it over the second."
+  (let ((origin (selected-frame)) buffers)
+    (unwind-protect
+        (let* ((first (progn (push (+portal/open-new) buffers) (selected-frame)))
+               (second (progn (push (+portal/open-new) buffers) (selected-frame))))
+          (select-frame-set-input-focus second)
+          (set-frame-parameter second 'title "Portal regression foreground")
+          (redisplay t)
+          (terminal-ui-regression--wait
+           (lambda () (string-match-p "Portal regression foreground" (portal-test-responder))))
+          ;; AppKit has switched, but Lisp is processing the older frame.
+          (select-frame first 'norecord)
+          (dotimes (_ 3)
+            ;; Force a real placement sync, even on repeated notifications.
+            (remhash first +portal--frame-selections)
+            (+portal--focus-after-selection-change first)
+            (should (string-match-p "Portal regression foreground" (portal-test-responder)))))
+      (dolist (buffer buffers)
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer (let ((kill-buffer-query-functions nil)) (kill-buffer buffer)))))
+      (when (frame-live-p origin) (select-frame origin)))))
+
 (ert-deftest terminal-ui-regression-command-t-keeps-each-requested-placement ()
   (skip-unless (display-graphic-p))
   (let* ((origin (selected-frame))

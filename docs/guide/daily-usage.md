@@ -1550,52 +1550,23 @@ wdired 中按 `C-c C-c` 完成文件名修改后，会退出目录列表窗；Di
 - `C-M-\``
   改变 popup 类型
 
-### 从其他应用里操作 Emacs(Raycast)
+### 从 Raycast 打开 Emacs
 
-Raycast 扩展 `tools/raycast-emacs` 只有一个入口 **Emacs**,热键在 Raycast 里录在它上面。
-它是这份 Emacs 的日常控制面,启动、重启、退出都从这里做。打开后一个列表分三组,搜索框
-同时过滤三组:
+在 Raycast 的 **Favorites** 选中 **Emacs**，按回车进入菜单。扩展的所有操作都在这个入口里。
+第一项 **Open Emacs** 和在 Finder 里双击 `/Applications/Emacs.app` 效果相同。用 **Hide Emacs** 隐藏后，
+再次选择 **Open Emacs** 会恢复原来的窗口。应用已经可见时由 macOS 决定当前窗口。
 
-- **Actions** 白名单动作,回车执行;带参数的动作(比如 Open File)会再让你输入一行。
-- **Frames** macOS 图形顶层 frame（TTY 客户端不在列表中）,隐藏的带 `hidden` 标记。回车聚焦(隐藏的会先显示出来),
-  `Cmd-H` 隐藏,`Cmd-O` 只留这一个(其余隐藏),`Ctrl-X` 关闭,`Ctrl-Shift-X` 关闭其余;
-  `Cmd-N` 新建,`Cmd-Shift-S` / `Cmd-Shift-H` 全部显示 / 全部隐藏。
-- **Emacs** 一行状态:可见 / 后台 / 没应答 / 没运行,以及运行时长、常驻内存、buffer 数、
-  子进程数。回车显示或隐藏;没运行时回车在后台启动(第二个动作是启动并显示)。任何一行上
-  `Cmd-R` 刷新,`Cmd-Shift-R` 重启;Force Quit Emacs 用于没应答的 Emacs,会先确认。
+- **New Terminal** 在新 frame 里打开一个 Portal 终端。全局快捷键 `⌥↩` 和 `⌃⌘T` 可直接打开终端。
+- **Find Note** 搜索 Noema，回车由 macOS 将选中的文件交给 Emacs。
+- **Noema Maintenance** 查看索引和仓库同步状态。
+- **New Frame**、**Open File** 和 **Wiki Home** 分别打开新窗口、文件和 Wiki 首页。
+- **Emacs Status** 显示应用状态，**Frames** 列出窗口和 buffer。按 `⌘K` 可刷新、重启或退出 Emacs。
 
-每次打开 Raycast 列表都会重新确认 Emacs 状态；确认前显示 Checking，查询失败则显示
-Could not check Emacs，不会把上次缓存的没应答状态或 frame 当作当前状态。此时仍可用
-Show or Start Emacs 叫出已有窗口或重新启动，并可继续使用独立的 Noema 入口。
-修改 `tools/raycast-emacs` 的扩展源码后，在该目录运行 `npm run dev`，等显示构建成功后
-即可停止监听；`npm run build` 只检查构建，不会刷新 Raycast 中正在使用的扩展。
-
-动作和 frame 操作先取得 Emacs 的排队编号，再在限定时间内查询最终结果。
-若 Raycast 已更新而运行中的 Emacs 仍是旧协议，排队前会报错并提示重载
-`config/background/config.el`，不会执行一个无法查询结果的动作。
-无效编号、过期 frame、已确认的执行错误或接收前没有应答时，Raycast 提示并保留列表，
-方便修正后重试。确认成功后按原交互关闭 Raycast 或刷新 frame 列表；接收后若动作
-仍在等待 Emacs 输入，Raycast 提示结果尚未确认，并沿用该入口的退出或停留方式。
-后续由 Emacs 接管，避免重复执行。
-启动和重启继续在后台进行。隐藏和关闭 frame 会留在列表里，方便连续整理。
-
-在 Emacs 里,`SPC F h`(`+background/frame-hide`)只隐藏当前 frame,不删除它,其他 frame 不受影响;
-白名单里的 Hide Frame 是同一个命令。隐藏的是最后一个可见 frame 时,Emacs 整个退到后台。
-
-白名单是 `lisp/config/background/config.el` 里的 `+background-actions`,每项是
-`(标题 命令)` 或 `(标题 命令 参数提示)`。改它不需要重新构建扩展,下次打开列表就生效;
-列表之外的命令从 Raycast 里执行不了。M-x 本身只在 Emacs 里用。
-命令行传入无效动作编号、frame 编号或操作名会直接报错，不会当成有效操作执行。
-
-动作在后台执行:只有它要读 minibuffer 或改变了主 frame 显示的内容时,Emacs 才会被叫到
-前台;自己开 frame 的动作(比如终端)只出现那一个 frame。动作执行失败时会显示 Emacs，
-并在消息区写出动作名与错误。限定时间内发生的执行错误也会回到 Raycast；
-超过查询时限或需要在 Emacs 中回答提问的动作仍以 Emacs 消息区为最终反馈。
+修改 `tools/raycast-emacs` 后运行 `npm run dev`。构建完成后按 `Ctrl+C` 结束开发模式，让首页回到 Favorites。
 
 ### Emacs 作为后台应用
 
-Emacs 常驻运行,平时没有可见 frame,需要时再叫到前台。入口是
-`bin/emacs-app`,Raycast 扩展只是调用它:
+Emacs 常驻运行,平时没有可见 frame,需要时再叫到前台。命令行入口是 `bin/emacs-app`。
 
 日常入口继续使用 GNU Emacs。Neomacs 试验只从 `bin/neomacs-trial` 启动；可用
 `--app /完整路径/neomacs.app` 指定应用。它单独启用试验 patch，不更换日常入口、
@@ -1619,7 +1590,7 @@ Raycast 或登录项。范围与限制见 [Neomacs 兼容层](../design/neomacs-
   会话中短期保留，重启后不能继续查
 - `bin/emacs-app terminal`
   新开一个 Portal 终端,每次都是新实例,单独占一个 frame;在 M-x 里是
-  `+portal/open-new`。Emacs 未运行时会先启动，待图形窗口初始化完成后再开终端。
+  `+portal/open-new`。Emacs 未运行时保留正常的启动窗口，待初始化完成后新开终端，再由 macOS 激活应用。
 - `bin/emacs-app status`
   `visible` / `background` / `busy`(在运行但没应答,比如正在启动或等你回答提问)/ `stopped`
 - `bin/emacs-app quit`
@@ -1634,13 +1605,13 @@ Raycast 或登录项。范围与限制见 [Neomacs 兼容层](../design/neomacs-
 启动器的环境,而 Raycast 给的 `LC_ALL` 不是合法的 POSIX locale,会让 `pbpaste` 这类工具
 退回 C locale,把中文粘贴成一串 `?`。
 
-Emacs 不决定 frame 的位置和大小:新 frame(包括 Raycast 的 New Terminal、New Frame)只管
-打开,排布交给 yabai。
+通过 **New Terminal** 或 **New Frame** 创建的窗口由 yabai 排布。
 
 后台是 frame 不可见,不是应用隐藏,所以新开一个 frame(比如终端)时不会把其他 frame 一起带出来。
 
 关掉最后一个可见 frame(`delete-frame`、`:q`、点关闭按钮)不会报错也不会退出 Emacs,
-而是把它送回后台。真正退出用 `bin/emacs-app quit`,或 Raycast 列表里的 Quit Emacs。
+而是把它送回后台。真正退出用 `bin/emacs-app quit` 或 Raycast 的 **Emacs → Quit Emacs**。
+在 Emacs 里按 `SPC F h` 可隐藏当前 frame。隐藏最后一个可见 frame 时，Emacs 退到后台。
 
 Emacs 在后台时不占 Dock,也不出现在 Cmd-Tab 里;叫到前台后恢复为普通应用,Dock
 图标、Cmd-Tab 和顶部主菜单都回来(macOS 把这三样绑在一起,不能只去掉 Dock 图标)。
@@ -1654,8 +1625,7 @@ Emacs 在后台时不占 Dock,也不出现在 Cmd-Tab 里;叫到前台后恢复�
 Emacs 崩溃或被强制退出后几秒内自己收尾退出,连同它的 kernel;正常退出时的 SIGHUP 也走
 同一套收尾。
 
-`+portal/open-new` 开的终端在关闭 frame（关闭按钮、`delete-frame`、
-Raycast 的 Close Frame）后仍保留 shell 和 buffer，可从 Ibuffer 或终端选择器重新打开。
+`+portal/open-new` 开的终端在关闭 frame（关闭按钮、`delete-frame`）后仍保留 shell 和 buffer，可从 Ibuffer 或终端选择器重新打开。
 shell 退出时会关闭 buffer；若该 frame 当时只显示这个终端，frame 也会关闭或退回后台。
 若 frame 还有其他分屏，或这个终端此前已被隐藏，其他内容会保留。
 主窗口里的终端不受影响。同一 Portal buffer 只显示在一个窗口；移动它时旧窗口先恢复

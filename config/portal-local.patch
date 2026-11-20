@@ -1,3 +1,50 @@
+diff --git a/native/Backend.swift b/native/Backend.swift
+index 5690256..b7ec054 100644
+--- a/native/Backend.swift
++++ b/native/Backend.swift
+@@ -460,6 +460,15 @@ public func portalViewFocus(_ view: OpaquePointer, _ error: UnsafeMutablePointer
+     return perform(error) { view.kind.input.focus() } != nil
+ }
+
++@_cdecl("portal_view_focus_local")
++public func portalViewFocusLocal(_ view: OpaquePointer, _ acquired: UnsafeMutablePointer<Bool>,
++                                 _ error: UnsafeMutablePointer<portal_text>) -> Bool {
++    let view = native(view)
++    guard let focused = perform(error, { view.kind.input.focus(activateWindow: false) }) else { return false }
++    acquired.pointee = focused
++    return true
++}
++
+ @_cdecl("portal_view_unfocus")
+ public func portalViewUnfocus(_ view: OpaquePointer, _ error: UnsafeMutablePointer<portal_text>) -> Bool {
+     let view = native(view)
+diff --git a/native/Core/include/portal.h b/native/Core/include/portal.h
+index 482797f..4ac24c9 100644
+--- a/native/Core/include/portal.h
++++ b/native/Core/include/portal.h
+@@ -365,6 +365,9 @@ enum {
+    return it to Emacs.  Either reports what changed with portal_input_focus
+    before it returns, so the core knows the result. */
+ bool portal_view_focus(portal_view *view, portal_text *error);
++/* Prepare the responder without activating its window. ACQUIRED is
++   false for a background window, even when VIEW is its first responder. */
++bool portal_view_focus_local(portal_view *view, bool *acquired, portal_text *error);
+ bool portal_view_unfocus(portal_view *view, portal_text *error);
+ /* The key events VIEW holds, from a press the core answered
+    PORTAL_KEY_HOLD (below): that press, its trigger, and the events after it.
+diff --git a/native/Core/input.c b/native/Core/input.c
+index 129421a..a2eebea 100644
+--- a/native/Core/input.c
++++ b/native/Core/input.c
+@@ -408,6 +408,8 @@ static bool act(struct portal_input *view, portal_string action, int64_t serial,
+         *result = view->handoff != PORTAL_IDLE;
+     } else if (is(action, "focused")) {
+         *result = view->focused;
++    } else if (is(action, "focus-local")) {
++        return portal_view_focus_local(view->view, result, error);
+     } else if (is(action, "focus")) {
+         if (!portal_view_focus(view->view, error))
+             return false;
 diff --git a/native/NativeHost.swift b/native/NativeHost.swift
 index 9de76e6..8f579b1 100644
 --- a/native/NativeHost.swift
@@ -87,7 +134,7 @@ index 9de76e6..8f579b1 100644
                  input.claim()
                  Core.notify("select", target: input.target)
 diff --git a/native/NativeInput.swift b/native/NativeInput.swift
-index 50d9f66..7443b2d 100644
+index 50d9f66..8a8dd9e 100644
 --- a/native/NativeInput.swift
 +++ b/native/NativeInput.swift
 @@ -137,6 +137,16 @@ final class NativeInput: NativeInputHandler {
@@ -107,6 +154,31 @@ index 50d9f66..7443b2d 100644
          switch Core.key(target, event) {
          case PORTAL_KEY_HOLD:
              if trigger == nil {
+@@ -175,16 +185,21 @@ final class NativeInput: NativeInputHandler {
+     /// Keys go to the key window's first responder: the view's window must
+     /// take the keyboard too, from another window of Emacs's, such as a child
+     /// frame's, that may hold it.
+-    func focus() {
++    @discardableResult
++    func focus(activateWindow: Bool = true) -> Bool {
+         // Away, the view has its window's keyboard; it has Emacs's once back.
+         if away {
+             if !reported { report(true) }
+-            return
++            return activateWindow || view?.window?.isKeyWindow == true
+         }
+         focusing = true
+         defer { focusing = false }
+-        if focusView(), let window = view?.window, !window.isKeyWindow { window.makeKey() }
++        let acquired = focusView()
++        if acquired, activateWindow, let window = view?.window, !window.isKeyWindow { window.makeKey() }
+         host.refreshOwnership()
++        // A new terminal can prepare its responder before macOS activates
++        // Emacs. A delayed event for another window must never activate it.
++        return acquired && (activateWindow || view?.window?.isKeyWindow == true)
+     }
+
+     func unfocus() {
 diff --git a/native/Terminal.swift b/native/Terminal.swift
 index 46ea4a7..de4fe53 100644
 --- a/native/Terminal.swift
@@ -205,7 +277,7 @@ index 9e6e9c2..5319f26 100644
          page.input = input
          input.offer = { [weak page] event in page?.offer(event) }
 diff --git a/portal-input.el b/portal-input.el
-index 088e978..d809068 100644
+index 088e978..ddf2761 100644
 --- a/portal-input.el
 +++ b/portal-input.el
 @@ -40,6 +40,32 @@
@@ -241,8 +313,32 @@ index 088e978..d809068 100644
  ;; Keep the wrapper controls available in Evil states as well.
  (with-eval-after-load 'evil
    (evil-make-overriding-map portal-input-mode-map))
+@@ -386,9 +412,9 @@ Its escape record sets it; a view has one handoff at a time.")
+ The click already gave the view the keyboard; this makes Emacs agree."
+   (interactive "e")
+   (let ((target (car (cadr event))))
+-    (when-let* ((window (portal-input--window target)))
+-      (select-window window)
+-      (portal-input--action "focus" target))))
++    (when-let* ((window (portal-input--window target))
++                ((portal-input--action "focus-local" target)))
++      (select-window window))))
+
+ (setf (alist-get "select" portal-view-record-handlers nil nil #'equal)
+       (lambda (target)
+@@ -523,7 +549,9 @@ for a chord the view did not use, read with the current buffer's keymaps."
+
+ (define-key global-map [portal-input-key] #'portal-input--dispatch)
+ (define-key global-map [portal-input-binding] #'portal-input--dispatch)
+-(define-key global-map [portal-input-escape] #'portal-input-unfocus)
++;; Outside a prefix reader this is a receipt for an already-ended handoff.
++;; Its target can be a different window from the one the user is typing in.
++(define-key global-map [portal-input-escape] #'ignore)
+ (define-key global-map [portal-input-select] #'portal-input--select)
+ (provide 'portal-input)
+ ;;; portal-input.el ends here
 diff --git a/portal-terminal.el b/portal-terminal.el
-index a0e7481..6f865be 100644
+index a0e7481..7173cc8 100644
 --- a/portal-terminal.el
 +++ b/portal-terminal.el
 @@ -64,8 +64,8 @@ the plist `portal--inspect' returned.")
@@ -315,6 +411,66 @@ index a0e7481..6f865be 100644
            (if quick-root
                (portal-terminal-quick--display buffer)
              (if elsewhere
+@@ -389,7 +406,8 @@ QUICK-ROOT, or to the project of `default-directory', where it starts."
+                                                :points portal-terminal--points
+                                                :quick (and quick-root t))))
+             (add-hook 'window-state-change-functions #'portal-terminal--resize-shown 90)
+-            (portal-terminal-focus))
++            ;; A different frame may already be key by the time the PTY opens.
++            (portal-view-focus t))
+           (setq ready t))
+       (unless ready
+         (let ((portal-terminal-confirm-kill nil)) (kill-buffer buffer))))
+diff --git a/portal-view.el b/portal-view.el
+index 17d8cb6..5dd5cef 100644
+--- a/portal-view.el
++++ b/portal-view.el
+@@ -341,10 +341,11 @@ the hooks do not run, such as in batch Emacs."
+   (setq portal-view--live-windows
+         (and portal-view--buffers (window-list-1 nil 'nomini t))))
+
+-(defun portal-view-focus ()
++(defun portal-view-focus (&optional within-window)
+   "Bring the current buffer's Portal view here and give it keyboard focus.
+ When the selected pane shows the buffer without its view, as a placard,
+-the view moves there first, from wherever it is."
++the view moves there first, from wherever it is.  With WITHIN-WINDOW,
++never activate a window and return nil when it does not have the keyboard."
+   (unless portal-view--target (user-error "No Portal view in this buffer"))
+   (redisplay t)
+   (let ((pane (portal-view--selected-pane))
+@@ -355,8 +356,10 @@ the view moves there first, from wherever it is."
+             moved t))
+     (portal-view--sync-buffer (current-buffer))
+     (when moved (run-hooks 'portal-view-moved-hook)))
+-  (unless (portal--input portal-view--target "focus")
+-    (user-error "No visible Portal view to focus")))
++  (if within-window
++      (portal--input portal-view--target "focus-local")
++    (unless (portal--input portal-view--target "focus")
++      (user-error "No visible Portal view to focus"))))
+
+ (defun portal-view--frame-deleted (frame)
+   "Hide the views in FRAME, which is being deleted, keeping their sessions.
+diff --git a/test/portal-fake-backend.c b/test/portal-fake-backend.c
+index 8f3bc6d..f1575bf 100644
+--- a/test/portal-fake-backend.c
++++ b/test/portal-fake-backend.c
+@@ -793,6 +793,14 @@ bool portal_view_focus(portal_view *view, portal_text *error)
+     return true;
+ }
+
++bool portal_view_focus_local(portal_view *view, bool *acquired, portal_text *error)
++{
++    if (!portal_view_focus(view, error))
++        return false;
++    *acquired = view->focused;
++    return true;
++}
++
+ bool portal_view_unfocus(portal_view *view, portal_text *error)
+ {
+     if (!usable(view, -1, error) || refused(error))
 diff --git a/test/portal-terminal-metadata-tests.el b/test/portal-terminal-metadata-tests.el
 index 7bffa94..40dfadc 100644
 --- a/test/portal-terminal-metadata-tests.el

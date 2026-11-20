@@ -29,7 +29,7 @@
 (declare-function portal--inspect "portal-view" (target))
 (declare-function portal-terminal-bind-key "portal-terminal-bindings" (map key command))
 (declare-function portal-terminal-refresh-bindings "portal-terminal-bindings" ())
-(declare-function portal-input-focus "portal-input" ())
+(declare-function portal-view-focus "portal-view" (&optional within-window))
 (declare-function portal-input--action "portal-input" (action &optional target serial))
 (declare-function portal-view--target-buffer "portal-view" (target))
 (defvar portal-input--resume)
@@ -87,9 +87,6 @@
    "set -- \"$@\" \"ZDOTDIR=$GHOSTTY_RESOURCES_DIR/shell-integration/zsh\"; fi")
   "Client-native Ghostty facts unavailable in Emacs's environment snapshot.
 These remain client process defaults; the backend owns target projection.")
-
-(defvar +portal--last-raycast-frame nil
-  "Newest terminal frame launched by Raycast.")
 
 (defvar +portal-wheel-scroll-lines 5
   "Lines scrolled per wheel event in a Portal terminal.")
@@ -152,10 +149,8 @@ These remain client process defaults; the backend owns target projection.")
 
 (defvar +portal--focusing-selected-window nil
   "Non-nil while synchronizing keyboard focus after a window event.")
-(defvar +portal--selected-pane-state nil
-  "Last selected frame, window, and buffer seen by focus synchronization.")
-(defvar +portal--selected-view-state nil
-  "Last selected Portal view, window, and native placement.")
+(defvar +portal--frame-selections (make-hash-table :test #'eq :weakness 'key)
+  "Last window, buffer, native target and geometry for each frame.")
 (defvar +portal-focus-gained-hook nil
   "Hook run in a Portal buffer after its native view gains keyboard focus.")
 (defvar-local +portal--explicitly-unfocused nil
@@ -203,12 +198,12 @@ Emacs, so the view does not take the keyboard back when it finishes."
 This runs from window hooks with no command to report to.  A view that
 cannot take focus now is focused when its placement changes."
   (condition-case nil
-      (portal-input-focus)
+      (portal-view-focus t)
     (user-error nil)))
 
 (defun +portal--focus-selected-window (frame &optional selection-changed)
   "Match native keyboard focus to FRAME's selected Emacs window.
-SELECTION-CHANGED also handles a frame activation.  Leave a view's escape
+SELECTION-CHANGED requests focus explicitly for this pane.  Leave a view's escape
 alone until selection, buffer, or native placement actually changes; once
 Emacs holds the keyboard explicitly, only moving to another pane or buffer
 and back gives it to the view again."
@@ -217,51 +212,45 @@ and back gives it to the view again."
              (not (active-minibuffer-window)))
     (let* ((window (frame-selected-window frame))
            (buffer (window-buffer window))
-           (pane (list frame window buffer))
-           (pane-changed (not (equal pane +portal--selected-pane-state)))
-           (previous-target (nth 2 +portal--selected-view-state)))
-      (setq +portal--selected-pane-state pane)
+           (previous (gethash frame +portal--frame-selections))
+           (pane-changed (not (and (eq window (nth 0 previous))
+                                   (eq buffer (nth 1 previous)))))
+           (previous-target (nth 2 previous)))
       (with-current-buffer buffer
         (let* ((target (and (featurep 'portal-input)
                             (bound-and-true-p portal-input-mode)
                             (bound-and-true-p portal-view--target)))
-               (view (and target
-                          (list frame window target portal-view--geometry)))
-               (view-changed (not (equal view +portal--selected-view-state))))
-          (when (and (or selection-changed pane-changed view-changed)
+               (state (list window buffer target (and target portal-view--geometry))))
+          (puthash frame state +portal--frame-selections)
+          (when (and (or selection-changed (not (equal state previous)))
                      ;; Leaving the minibuffer reselects the same pane.
                      (not (and target +portal--explicitly-unfocused
                                (not pane-changed))))
-            (setq +portal--selected-view-state view)
             (let ((+portal--focusing-selected-window t))
               (when (and previous-target
                          (not (equal previous-target target))
                          (portal-input--action "focused" previous-target))
-                (portal-input--action "unfocus" previous-target)
-                (when (null target)
-                  (select-frame-set-input-focus frame)))
+                (portal-input--action "unfocus" previous-target))
               ;; Native `focused' only means first responder within its own
               ;; NSWindow.  A different frame can be key while it is true.
               (when (and target
                          (or selection-changed pane-changed
                              (not (portal-input--action "focused" target))))
-                (+portal--try-focus)
-                (when (portal-input--action "focused" target)
+                (when (+portal--try-focus)
                   (setq-local +portal--explicitly-unfocused nil)
                   (run-hooks '+portal-focus-gained-hook))))))))))
 
 (defun +portal--focus-after-selection-change (frame)
   "Synchronize Portal focus after FRAME selects a different pane."
-  (+portal--focus-selected-window frame t))
+  (+portal--focus-selected-window frame))
 
 (defun +portal--focus-after-command ()
   "Catch selection and buffer changes made together by one Emacs command."
   (let* ((frame (selected-frame))
          (window (frame-selected-window frame))
-         (pane +portal--selected-pane-state))
-    (unless (and (eq frame (nth 0 pane))
-                 (eq window (nth 1 pane))
-                 (eq (window-buffer window) (nth 2 pane)))
+         (pane (gethash frame +portal--frame-selections)))
+    (unless (and (eq window (nth 0 pane))
+                 (eq (window-buffer window) (nth 1 pane)))
       (+portal--focus-selected-window frame))))
 
 (add-hook 'window-selection-change-functions
@@ -752,7 +741,7 @@ in a visible window are omitted from the choices."
           buffer)
       (unless completed
         (when (frame-live-p frame) (delete-frame frame t))
-        (when (frame-live-p origin) (select-frame-set-input-focus origin))))))
+        (when (frame-live-p origin) (select-frame origin))))))
 
 (defun +portal-terminal-kill-h ()
   "Close the owning frame or vacate windows before this terminal exits."
@@ -812,21 +801,7 @@ FRAME is what the global `window-buffer-change-functions' passes."
   "Open a fresh Portal terminal in its own frame.
 The window manager places the frame; this only opens it."
   (interactive)
-  (let* ((buffer (+portal-open-external))
-         (frame (selected-frame)))
-    ;; Raycast closes its window after Emacs has returned.  Claim the new
-    ;; frame once then, never an older frame from a rapid earlier invocation.
-    (setq +portal--last-raycast-frame frame)
-    (run-at-time
-     0.4 nil
-     (lambda (target expected-buffer)
-       (when (and (frame-live-p target)
-                  (eq target +portal--last-raycast-frame)
-                  (eq expected-buffer
-                      (window-buffer (frame-selected-window target))))
-         (select-frame-set-input-focus target)))
-     frame buffer)
-    buffer))
+  (+portal-open-external))
 
 (defun +portal--terminal-target ()
   "Return the current native terminal target or signal a user error."

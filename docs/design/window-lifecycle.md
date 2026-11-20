@@ -245,7 +245,9 @@ Portal 终端与 agent-shell 使用同一行 popup 标签，放在 Emacs 的 tab
   `c12-a-handed-off-prompt-leaves-emacs-the-keyboard`。
 - **C13** Emacs 明确持有键盘时，离开 minibuffer、frame 重新激活或视图布局变化都不把
   键盘还给视图；只有进入视图（`RET`、点击、显式聚焦请求）或窗口 / buffer 真正变化后
-  再选回它才会。测试：`c13-emacs-keeps-the-keyboard-until-the-pane-changes`。
+  再选回它才会。自动同步只调整视图所在窗口内部的 responder，键盘窗口由 macOS 决定。新终端创建完成后，
+  即使旧 frame 的选择或点击事件迟到，也沿用用户当前的键盘窗口。测试：
+  `terminal-ui-regression-late-selection-keeps-the-native-key-window`、`c13-emacs-keeps-the-keyboard-until-the-pane-changes`。
 - **C14** `Cmd-W` 在侧窗格或有多个主窗格时删当前窗格，唯一主窗格时只关视图并保留 frame；
   side window 不会让唯一主窗格变成可删除窗格；
   当前 buffer 在两条路径中都保持存活。`Cmd-Shift-W` 保持 Perspective 的交互式

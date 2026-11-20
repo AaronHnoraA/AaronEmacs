@@ -376,18 +376,12 @@ This config already has maintenance and workflow entry points. Reuse them:
   running Emacs as a long-lived background app on macOS (start, restart,
   kill, show, hide, status, state, quit, whitelisted actions, frame list and
   actions, login agent).
-  The Raycast extension (`tools/raycast-emacs`) is the only control surface
-  and only calls it; nothing else speaks `emacsclient`, and every call is
-  bounded by a timeout.  Its main command names no Emacs action itself: it
-  shows `+background-actions`, the whitelist in `lisp/config/background/config.el`.
-  The separate `New Terminal` command calls `bin/emacs-app terminal` so it can
-  have a global hotkey and launch Emacs when needed.  M-x stays
-  inside Emacs; do not bring back an external M-x or an Emacs popup frame.
-  `act` and `frame` return a short-lived receipt; `result` queries completion
-  without resending the action.  The launcher checks the protocol version in
-  the same Emacs eval before queueing, so a newer Raycast cannot enqueue an
-  unqueryable action in an older Emacs.  Raycast waits only a bounded time, then
-  leaves Emacs responsible for prompts and later errors.
+  Raycast exposes one command, the existing Emacs favorite. Its first menu
+  item opens `/Applications/Emacs.app` through macOS, as Finder does.
+  A native app activation restores frames saved by Hide when all are invisible.
+  New Terminal and the global skhd shortcuts call `bin/emacs-app terminal`.
+  Let the window manager activate and place the frame.
+  CLI callers of `act` and `frame` can poll their bounded receipts via `result`.
   `lisp/config/background/config.el` owns visibility, the Dock policy, frame drag
   strips and the action result table; native sources live in
   `tools/macos-background/` and build into `var/macos-background/`.
@@ -398,7 +392,7 @@ This config already has maintenance and workflow entry points. Reuse them:
   `after-make-frame-functions`.  Closing the only visible frame hides Emacs
   instead of erroring or quitting (narrow advice on `delete-frame` and
   `handle-delete-frame`).  This Emacs is expected to run for weeks and to be
-  started, restarted and quit from Raycast.  The server answers before the
+  started, restarted and quit through the launcher.  The server answers before the
   initial frame exists, so anything a launcher asks for at startup must wait
   for `window-setup-hook` (`+background-start-hidden`).  Closing a view,
   a window or a frame never ends a buffer; only ending actions do
@@ -406,20 +400,10 @@ This config already has maintenance and workflow entry points. Reuse them:
   survive a crashed Emacs must watch its owner's pid, as the Noema web host
   does through `NOEMA_HOST_OWNER_PID`; exit hooks alone do not run then.  yabai manages Emacs frames, so a frame never
   sizes or places itself: `New Terminal` and `New Frame` only open one.
-- Noema from outside Emacs: the Raycast entry has a Noema section, `Find Note`
-  and `Noema Maintenance` (also installed as commands of their own, for a
-  hotkey), and they do not go through Emacs at all.  Finding a page is
-  therefore not in `+background-actions`: an entry there would bring Emacs
-  forward to do what Raycast already shows.  They read
-  `var/noema/host.json`, written by the running Noema host, and call its
-  loopback `/api` (`tools/raycast-emacs/src/backend.ts`): search is answered
-  by the Go kernel, maintenance (index refresh and rebuild, repository
-  checkpoint and sync) by the host's own services.  Raycast is then the whole
-  front end and no Emacs frame opens; only opening the chosen page goes
-  through `bin/emacs-app act`, looked up in the whitelist by the action that
-  takes a path.  Keep it that way round: Emacs control goes through
-  `bin/emacs-app`, Noema data and maintenance go to the Noema backend, and
-  neither is reimplemented in the extension.
+- Noema from outside Emacs: the Raycast Emacs menu items Find Note and
+  Noema Maintenance read `var/noema/host.json` and use the host's loopback
+  API for search, indexing and repository sync. Opening a chosen note passes
+  its file to Emacs through macOS's normal Open With operation.
 - MarginNote from an agent: the App's own Bridge first, the Noema addon only for
   what it lacks (raw PKDrawing, arbitrary JS).  Devices are named (`mac`, `ipad`
   under `~/.config/mn-bridge/`) and never read as each other; the `marginnote-agent`

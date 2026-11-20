@@ -2,7 +2,7 @@
   "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "emacs",
   "title": "Emacs",
-  "description": "One entry to a background Emacs, and direct access to Noema: its whitelisted actions and frames, page search, and Noema maintenance.",
+  "description": "Open Emacs, create a Portal terminal, and search or maintain Noema.",
   "icon": "icon.png",
   "author": "aaron",
   "license": "MIT",
@@ -10,37 +10,11 @@
     {
       "name": "emacs",
       "title": "Emacs",
-      "description": "Run a whitelisted Emacs action or manage its frames.",
-      "mode": "view"
-    },
-    {
-      "name": "terminal",
-      "title": "New Terminal",
-      "description": "Open a new Portal terminal in its own Emacs frame.",
-      "mode": "no-view"
-    },
-    {
-      "name": "find-note",
-      "title": "Find Note",
-      "description": "Search Noema pages by title, text, namespace or tag. Answered by Noema's backend; Emacs opens only the page you choose.",
-      "mode": "view"
-    },
-    {
-      "name": "noema",
-      "title": "Noema",
-      "description": "Noema maintenance: the Wiki index and each repository's Git sync, called on the backend directly.",
+      "description": "Open or restore Emacs and access Emacs and Noema actions.",
       "mode": "view"
     }
   ],
   "preferences": [
-    {
-      "name": "emacsApp",
-      "title": "emacs-app",
-      "description": "Path to the emacs-app script that talks to Emacs.",
-      "type": "textfield",
-      "default": "~/.config/emacs/bin/emacs-app",
-      "required": false
-    },
     {
       "name": "noemaState",
       "title": "Noema state directory",

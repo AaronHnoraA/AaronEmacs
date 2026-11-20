@@ -11,6 +11,8 @@
 
 #import <AppKit/AppKit.h>
 #include <emacs-module.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 int plugin_is_GPL_compatible;
 
@@ -18,6 +20,32 @@ void macos_system_init (emacs_env *env);
 
 static CGFloat drag_edge_height = 0;
 static id drag_edge_monitor = nil;
+static int activation_fd = -1;
+static id activation_observer = nil;
+
+static emacs_value
+watch_activation (emacs_env *env, ptrdiff_t nargs, emacs_value *args, void *data)
+{
+  int fd = env->open_channel (env, args[0]);
+  if (fd < 0) return env->intern (env, "nil");
+  fcntl (fd, F_SETFL, fcntl (fd, F_GETFL) | O_NONBLOCK);
+  fcntl (fd, F_SETNOSIGPIPE, 1);
+  if (activation_fd >= 0) close (activation_fd);
+  activation_fd = fd;
+  if (!activation_observer)
+    activation_observer = [[NSNotificationCenter defaultCenter]
+      addObserverForName:NSApplicationDidBecomeActiveNotification object:NSApp
+      queue:nil usingBlock:^(NSNotification *note) {
+        (void) write (activation_fd, "1", 1);
+      }];
+  return env->intern (env, "t");
+}
+
+static emacs_value
+app_active_p (emacs_env *env, ptrdiff_t nargs, emacs_value *args, void *data)
+{
+  return env->intern (env, [NSApp isActive] ? "t" : "nil");
+}
 
 static BOOL
 top_level_emacs_window (NSWindow *window)
@@ -109,6 +137,10 @@ int
 emacs_module_init (struct emacs_runtime *runtime)
 {
   emacs_env *env = runtime->get_environment (runtime);
+  macos_define (env, "macos-window-watch-activation", 1, watch_activation,
+          "Notify pipe process CHANNEL when macOS activates Emacs.");
+  macos_define (env, "macos-window-app-active-p", 0, app_active_p,
+          "Return non-nil when macOS considers Emacs the active application.");
   macos_define (env, "macos-window-set-accessory", 1, set_accessory,
           "Hide the Dock icon when ACCESSORY is non-nil, else show it.");
   macos_define (env, "macos-window-install-drag-handles", 1, install_drag_handles,
