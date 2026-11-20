@@ -168,8 +168,9 @@ The [visual reference library](aesthetic-reference-library.md) names the
 upstream examples and the intended use of each motif. Figure captions use a
 compact small-cap label when the optional caption package is available;
 statement and definition heads occupy their own line. Names and numbers use
-11.5 pt bold upright type. Parenthesized titles use regular upright body-sized
-text. Strong text within definitions uses body-sized semibold when the font
+12.25 pt bold upright type and stay together. A half-em space separates the
+label from a parenthesized title in regular body-sized type.
+Strong text within definitions uses body-sized semibold when the font
 provides it, so field labels sit below the definition name. Statements keep
 italic bodies and definitions keep upright bodies. Paragraphs within a
 definition start at the left edge of its heading. A small vertical gap
