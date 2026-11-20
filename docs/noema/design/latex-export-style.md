@@ -57,7 +57,7 @@ than failing.
 | `@@comment [text]` | `\\aaroncomment{text}` — inline, pink, prefixed `COMMENT:` |
 | `@@scomment [text]` | `\\sidecomment{text}` — a short orange mark in the text with the comment in the right margin; long notes can continue on the next page |
 | `@@project` / `@@milestone` / `@@clock` | **dropped** (planning bookkeeping, never exported) |
-| `#+begin meta ... #+end meta` | consumed for title/date/`annotations`; not emitted |
+| `#+begin meta ... #+end meta` | supplies title, author, date, summary and annotation settings to the host |
 | `#+begin tikz [id] ... #+end tikz` | native `tikzpicture` in the LaTeX body |
 
 ### Review annotations
@@ -146,22 +146,42 @@ environment the template does not define.
 The default `noema-article.tex` keeps a white A4 page for printed and
 distributed research notes. It uses Libertinus for English, the Noema Markdown
 Chinese face (FZ Liu Gong Quan Kai Shu) when installed with Fandol as a
-portable fallback, and the original Computer Modern/AMS mathematics. A centered
-title, small-cap section heads, fine printer's rules, one Latin opening initial,
-running title and page number shape the page. Lists, tables, long URLs and code
-lines are spaced and wrapped for reading. The template borrows layout ideas
-from the local COMP9444 whitepaper and the period-inspired typography of
-[vintage-latex](https://github.com/Foadsf/vintage-latex); it contains original
-LaTeX code and no paper-color background.
+portable fallback, and the original Computer Modern/AMS mathematics. The
+title keeps its original case and is centered. The small-cap byline and date
+share a centered line beneath it. The byline defaults to Aaron He and a note's
+`author` field overrides it.
+
+A nested metadata `summary` block, or a scalar `summary` field, supplies a
+centered, slightly narrower measure for the abstract. Its semibold upright
+heading sits on a separate centered line. Prose begins at the left inset
+and the right edge is ragged. An empty summary
+occupies no space. The abstract uses the document's Markdown and math
+conversion. One short printer's rule closes the title group. Small-cap section
+headings are centered with their numbers at 14.4 pt and reserve room for the
+following text. Second-level headings use 12 pt upright semibold; third-level
+headings use body-sized italic. The opening Latin paragraph has a two-line initial. These choices draw
+on the COMP9444 whitepaper and the early-modern page and incipit studies in
+the reference library. Lists, tables, long URLs and code
+lines are spaced and wrapped for reading. The text and code faces come from
+the Libertinus family when available.
 The [visual reference library](aesthetic-reference-library.md) names the
 upstream examples and the intended use of each motif. Figure captions use a
 compact small-cap label when the optional caption package is available;
-statement and definition heads use small capitals with distinct italic and
-upright bodies. The body remains one column so long equations and figures fit.
+statement and definition heads occupy their own line. Names and numbers use
+11.5 pt bold upright type. Parenthesized titles use regular upright body-sized
+text. Strong text within definitions uses body-sized semibold when the font
+provides it, so field labels sit below the definition name. Statements keep
+italic bodies and definitions keep upright bodies. Paragraphs within a
+definition start at the left edge of its heading. A small vertical gap
+separates successive paragraphs, so fields such as Input, Question and
+Output line up even when a display equation intervenes. The body remains one column
+so long equations and figures fit.
 
-For Overleaf, select XeLaTeX and upload the generated `.tex` together with
-`noema-macros.sty` and any exported figure files. If the local Markdown CJK
-font is unavailable, the template chooses Fandol. Missing optional packages
+Upload the generated `.tex`, `noema-macros.sty` and exported figures
+together on Overleaf. An English article compiles from the same files with
+pdfLaTeX (T1 fonts) or XeLaTeX (OpenType). The template branches on the
+compiler. XeLaTeX also supports Chinese and uses Fandol when the local CJK
+font is unavailable. Missing optional packages
 for initials, line-breaking code, URLs, and header truncation degrade to plain
 typesetting rather than preventing compilation.
 
@@ -264,7 +284,17 @@ files are committed only after two compiler passes and log linting succeed.
 The PDF is always committed; "Keep .tex" in the scope dialog (request field
 `keepTex`) decides whether the `.tex` and its shared files are committed beside
 it.  The last explicit choice is remembered globally in the export state and
-returned by the export defaults; a request that omits the field keeps the `.tex`. See
+returned by the export defaults; a request that omits the field keeps the `.tex`.
+The same dialog remembers **Include abstract** and **Table of contents** across
+notes after a successful export. Initially the abstract is enabled and the
+contents are disabled. An empty abstract takes no space. The contents list the
+exported headings. Templates can use `{{summary}}` for the abstract text,
+`{{hasSummary}}` to guard its surrounding environment, and `{{includeToc}}` to
+place their native contents list. Both flags expand to 0 or 1. The Article
+contents use an inset column, semibold section names, hanging subsection
+titles, light dot leaders on subordinate entries, and right-aligned linked
+page numbers. The list can cross a page boundary. Direct calls that omit
+`includeToc` retain the originally enabled contents in Report and Assignment. See
 `agents/latex-export/AGENTS.md` for the repair contract and the (rare) tool
 maintenance workflow.
 
