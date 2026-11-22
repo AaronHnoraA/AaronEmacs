@@ -56,6 +56,7 @@ over the provider model.
 | `[t](url)` / `![t](url)` | `\href{url}{t}` |
 | tables / footnotes / definitions / task lists / strikeout | Pandoc-native academic LaTeX |
 | `@@latexmk(name)` | typed, placement-validated LaTeX mark |
+| `@@latexmk(prompt) [instruction]` | an instruction for the polish Agent (`\noemaprompt{…}` in the draft, typeset as nothing); it may override preservation for what it names, and is stripped from the final `.tex` |
 | `@@cite(namespace) [key; ...] {locator: ...}` | resolved `\\cite` plus matching bibliography entries; unresolved/partial groups are export errors |
 | `@@revision(kind) [original] {advice: "..."; reason: "..."}` | `\\aaronrevision[kind]{original}{advice}{reason}` — the original stays underlined inline, the suggestion goes to the margin |
 | `@@todo(...) [title] {...}` / `@@itodo` | `\\aarontodo{title}` — an orange margin note. The planning attribute block is **never** exported |

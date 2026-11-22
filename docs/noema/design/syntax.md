@@ -347,6 +347,7 @@ Editor rendering: `src/cm6/extensions/visual/widgets/inline-commands.ts`.
 | `@@scomment [text]` | side comment, shown beside the text in the editor and LaTeX export; inside a footnote or box the LaTeX form stays inline, and long margin notes can continue across pages |
 | `@@part [title]`, `@@section(level) [title] {id: …}` | semantic headings; `level` is empty/`sec`/`section`, `sub`, `subsub`, `subsubsub` (`src/semantic-outline.ts`) |
 | `@@latexmk(mark)` | LaTeX layout mark: `newline`, `nbsp`, `allowbreak`, `noindent`, `newpage`, `clearpage`, `nopagebreak`, `keepnext`, `appendix` (`shared/latex-marks.mjs`) |
+| `@@latexmk(prompt) [instruction]` | instruction for the LaTeX export's typesetting Agent, about this spot or the whole document (layout, page setup, wording); shown as a chip, never typeset. The draft carries `\noemaprompt{…}` (expands to nothing); the Agent carries it out and removes it, the host strips any left and warns that it was not carried out |
 | `@@slides(reveal) []`, `@@slides(vertical) []` | slide deck markers (below) |
 | `@@cell(language, session) [cell-id]` | executable cell backed by the `.cell/` sidecar |
 | `@@note-code(path) [TAG]` | embed the source region marked `@noema TAG` (`shared/note-code.mjs`) |
