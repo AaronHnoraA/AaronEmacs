@@ -53,7 +53,7 @@ implementation, `kernel/noema/wikisearch`.
 | Run lifecycle: directives → RunSpec → stream → result | `server/lib/research-*.mjs` (`directives`, `runtime`, `run-stream`, `notebook`, `session-routing`); `kernel/noema/research` |
 | Proposals and synthesis | `docs/noema/design/research-synthesis.md` |
 | ACP agents and sessions in Emacs | `docs/noema/design/codex-session-lifecycle.md`; `lisp/noema-agent-*.el`, `noema-sessions.el` |
-| Magent runtime | `docs/noema/design/magent-runtime.md`; `lisp/noema-interaction-magent*.el` |
+| Magent runtime | `docs/noema/design/magent-runtime.md`; `lisp/tools/agent/interaction-magent*.el` in the Emacs config |
 | Composition and agent entry points | `docs/noema/design/interaction-plan.md`; Emacs `lisp/tools/agent/{compose,context,acp}.el`; Noema `lisp/noema-context.el` |
 | Agent context selection, budget, memory and receipts | `docs/noema/design/agent-context.md`; `lisp/noema-context.el`, `server/lib/research-runtime.mjs` |
 | Project memory | `docs/noema/design/hy-memory.md`; `server/lib/research-memory.mjs` |

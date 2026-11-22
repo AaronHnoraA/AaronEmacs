@@ -1530,28 +1530,28 @@ is `+config-ask-model', registered with native Config Customize."
   :type 'integer
   :group 'ai)
 
-(config-defvar noema-interaction-magent-cli-max-json-line-bytes (* 1024 1024)
+(config-defvar +agent-interaction-magent-cli-max-json-line-bytes (* 1024 1024)
   "Maximum buffered bytes for one coding-agent JSON event."
   :type 'integer
   :group 'ai)
 
-(config-defvar noema-interaction-magent-cli-max-answer-bytes (* 8 1024 1024)
+(config-defvar +agent-interaction-magent-cli-max-answer-bytes (* 8 1024 1024)
   "Maximum assistant bytes retained from one coding-agent turn."
   :type 'integer
   :group 'ai)
 
-(config-defvar noema-interaction-magent-cli-max-diagnostic-bytes (* 256 1024)
+(config-defvar +agent-interaction-magent-cli-max-diagnostic-bytes (* 256 1024)
   "Maximum diagnostic bytes retained from one coding-agent turn."
   :type 'integer
   :group 'ai)
 
-(config-defvar noema-interaction-magent-cli-max-prompt-bytes (* 4 1024 1024)
+(config-defvar +agent-interaction-magent-cli-max-prompt-bytes (* 4 1024 1024)
   "Maximum combined Magent context and user prompt sent to a CLI."
   :type 'integer
   :group 'ai)
 
-(declare-function noema-interaction-engine-cli-register
-                  "noema-interaction-engine-cli" ())
+(declare-function +agent-interaction-engine-cli-register
+                  "tools/agent/interaction-engine-cli" ())
 
 (require 'tools/agent/actions)
 
@@ -1668,8 +1668,8 @@ is `+config-ask-model', registered with native Config Customize."
 ;; The normal agent path is ACP/agent-shell.  Keep the migrated one-shot CLI
 ;; sampler as a fallback backend without retaining the old gptel fork.
 (with-eval-after-load 'gptel
-  (require 'noema-interaction-engine-cli)
-  (noema-interaction-engine-cli-register))
+  (require 'tools/agent/interaction-engine-cli)
+  (+agent-interaction-engine-cli-register))
 
 (require 'noema/bridge/agent-bridge)
 

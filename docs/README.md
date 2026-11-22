@@ -249,7 +249,7 @@ Noema is developed in its own repository (`site-lisp/noema/`); its documentation
 
 ## Working files
 
-- [agent.md](agent.md) Prompt for the docs Q&A agent (`noema-interaction-docs`); it reads this directory to answer questions about the config.
+- [agent.md](agent.md) Prompt for the docs Q&A agent (`+agent-interaction-docs`, `lisp/tools/agent/interaction-docs.el`); it reads this directory to answer questions about the config.
 - [TODO.md](TODO.md) Collected feature ideas and bugs waiting to be handled together.
 
 ## Shortest Path

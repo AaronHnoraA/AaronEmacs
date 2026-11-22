@@ -647,7 +647,7 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   筛选显示命中数与总数；空结果可直接清除筛选。筛选、展开和打开聊天不写任务状态，
   不发送 prompt。`?` 显示操作帮助。只在面板显示时随事件重绘。测试：`agent-panel-c81-*`。
 - **C76 发送即任务。** 指向文档某处的发送（`C-c A c` 的区域/整篇/光标处、页面选区、旧的
-  `noema-interaction-send-*`）经 `+agent-collab-task-delivery` 变成该处的批注线程、指派给选中会话
+  `+agent-interaction-send-*`）经 `+agent-collab-task-delivery` 变成该处的批注线程、指派给选中会话
   并立即交出，不夺键盘；聊天与草稿、剪贴板路径不变。测试：`agent-collab-c76-*`。
 
 ## 实现位置
@@ -668,6 +668,7 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
 | 所有动作的唯一列表，生成前缀、菜单和斜杠命令 | `lisp/tools/agent/actions.el` |
 | 渲染、用量、活动和工作树 | `lisp/tools/agent/{render,top,activity,worktree,worktree-board}.el` |
 | 原生引用式上下文与 Markdown prompt 文档入口 | `lisp/tools/agent/{compose,context}.el` |
+| CLI Agent 工作台：CLI 会话与适配（Claude/Codex/OpenCode）、gptel/Magent 引擎、档案、文档问答（`+agent-interaction-*`） | `lisp/tools/agent/interaction*.el` |
 | 完整 gptel/Magent 源码与来源 | `site-lisp/{gptel,magent}/`、`site-lisp/AGENT-UPSTREAMS.md` |
 | 通用通知策略与原生 ACP 事件订阅 | `lisp/tools/agent/notifications.el` |
 | Noema 事件到通用通知的适配 | `lisp/noema/bridge/agent-notifications.el` |

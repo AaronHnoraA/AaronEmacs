@@ -126,12 +126,10 @@ string），换编辑器打开仍可读。这与 Noema 现有 `syntax.md` 的方
    按 AGENT.md 应在 `lisp/tools/agent/`；Research 只保留自己的 Run/DAG 适配。需逐文件列出调用方后
    分批迁移，每批跑 `make state-check`。
 
-   初步归类（按文件首行说明，尚未逐一核对调用方）：
-
-   | 去 `lisp/tools/agent/` | 留在 Noema（Research／项目） | 待核对 |
-   | --- | --- | --- |
-   | `noema-sessions`（1023）、`noema-agent-takeover`（192）、`noema-agent-promote`（169）、`noema-agent-text`（43）、`noema-interaction-*`（约 4300，CLI 适配、gptel/Magent 引擎） | `noema-agent-acp`（Research 关联适配，AGENT.md 已指定）、`noema-orchestration`、`noema-research*`、`noema-exploration`、`noema-findings` | `noema-agent-worker`（2190，文档执行 worker）、`noema-pi-router`/`noema-pi-sessions`（Pi 是 Emacs 全局管家，但会话记录在 Noema）、`noema-agent-inbox`、`noema-hy-memory`、`noema-agent-entry` |
-
-   迁移改名要同步所有调用方（含 `etc/config-store.el`、Raycast、Noema 服务端），不留兼容别名；
-   每批先在 `docs/design/agent-management.md` 写明归属，再按 `make state-baseline` → `make state-check` 验证。
-
+   归类结论（核对 `docs/design/agent-management.md` “实现位置”与依赖后）：只有 `noema-interaction-*`
+   不依赖 Noema host，已迁到 `lisp/tools/agent/interaction*.el`、改名 `+agent-interaction-*`
+   （emacs 与 noema 两侧提交）。`noema-sessions`、`noema-agent-worker`、`takeover`、`promote`
+   依赖 Research 的会话记录与干预 API，设计文档本来就定为 Research 所有，留在 Noema。
+   `noema-pi-*`、`noema-agent-inbox`、`noema-hy-memory` 依赖项目与 host，暂留。
+   迁移中发现并修正：Noema 服务端到不存在的 `var/noema-interaction/magent/sessions` 找 Magent 历史，
+   Emacs 实际写在 `var/noema/magent/sessions/`。

@@ -517,8 +517,9 @@ research-test:
 	$(BATCH) -l test/popup-agent-tests.el -L site-lisp/noema/tests/elisp -l test/agent-acp-tests.el -l test/agent-api-tests.el -l test/agent-binding-tests.el -l test/agent-collab-tests.el -l test/agent-edit-tests.el -l test/agent-panel-tests.el -l test/agent-board-tests.el -l test/agent-topology-tests.el -l test/agent-render-tests.el -l noema-context-tests.el -l test/init-pi-workflow-tests.el -l test/pi-idle-tests.el -l test/pi-project-tabs-tests.el -l test/pi-owned-tests.el -l test/agent-worktree-tests.el -l test/agent-worktree-board-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -L site-lisp/noema/tests/elisp -l noema-capability-workspace-tests.el -l noema-marginnote-tests.el -l test/noema-manager-layout-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/noema-research-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/agent-interaction-tests.el -l test/agent-interaction-magent-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -L site-lisp/noema/lisp -L site-lisp/noema/tests/elisp \
-	  -l noema-interaction-tests.el -l noema-interaction-magent-tests.el -l noema-api-tests.el -l noema-completion-tests.el \
+	  -l noema-api-tests.el -l noema-completion-tests.el \
 	  -l noema-project-overview-tests.el -l noema-project-graph-tests.el -l noema-agent-inbox-tests.el -l noema-agent-attention-tests.el -l noema-history-search-tests.el -l noema-findings-tests.el -l noema-pi-sessions-tests.el \
 	  -f ert-run-tests-batch-and-exit
 
