@@ -600,7 +600,11 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   的修改时只改 buffer、不替人保存，干净的 buffer 存盘，没有 buffer 时直接写文件；版本（文本哈希）和
   每处原文守护应用，变了就是冲突、由 host 重试。改写大半篇（`LARGE_CHANGE`）或反复冲突时拒绝并返回
   `needsPerson`，host 发 `agent-needs-person`，Emacs 把该会话标为等你并系统通知（点击打开聊天）；
-  Agent 只在人于聊天里同意后才可带 `allowLarge`。测试：`C74 *`、`agent-edit-c74-*`。
+  Agent 只在人于聊天里同意后才可带 `allowLarge`。打开的页面有人未保存的输入时，另一写入者的保存
+  （Agent、Emacs）按行求出相对上次保存文本的改动，像 `@codemirror/collab` 那样变基到人的未保存改动
+  之上，作为一次不进撤销历史的 transaction 原地应用，人的输入与光标保留，随后照常保存
+  （`pages/merge-external.ts`）。只有两边改到同一段文字（或在同一点插入）才不合并，页面保留草稿并提示
+  审阅；差异过大同样不合并。测试：`C74 *`、`agent-edit-c74-*`、`tests/merge-external.test.ts`。
 - **C75 协作面板。** `H-t`（`agent-panel`，`tools/agent/panel.el`）在右侧开固定侧窗，`H-t` 或 `q`
   收起，点击别处不关。标签：任务（默认；批注即任务，范围本文件→本目录→目录及子目录→项目，
   `s` 切换；`a` 交给 Agent、`c` 标为完成或重开、`R` 显示已完成）、Pi、拓扑。面板说的是最近聚焦的
