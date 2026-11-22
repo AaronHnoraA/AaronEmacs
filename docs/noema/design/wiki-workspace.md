@@ -148,10 +148,14 @@ stages, each behind the same contract:
      rows that differ and ends exactly where a full build of the same index
      ends; re-applying changes nothing. Node's parse cache (`note_cache`)
      stays Node's: the kernel's cache is its own.
-   - *Switch (next).* The kernel scans the vault and parses with `Parse`,
-     builds with `WriteDatabase` / `ApplyIndex`, and takes over the real
-     file; Node only forwards a refresh. Done with the person present, since
-     it replaces the index in use.
+   - *Scan (done).* `wikiindex.Scan` builds the index from the vault's files;
+     on a copy of the real vault `noema-wikiindex -scan` wrote a database
+     equal to Node's in every table, FTS tables and generation hash.
+   - *Switch (next).* A kernel endpoint refreshes the real file with
+     `Scan` + `ApplyIndex` (full `WriteDatabase` into a temporary file and a
+     rename when the schema differs), Node only forwards, and the Node
+     builder is deleted. Done with the person present, since it replaces the
+     index in use.
    - *Inventory and switch.* Repository discovery and file inventory move to
      the kernel; Node asks it to refresh and only forwards. The Node builder
      is then removed, not kept as a fallback.
