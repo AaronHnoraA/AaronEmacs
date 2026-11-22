@@ -260,7 +260,12 @@ interrupting its work is a separate, explicit decision."
 (defun +agent-queue-send-selected ()
   "Send the selected prompt now."
   (interactive)
-  (+agent-queue-send-now (+agent-queue--session-live) +agent-queue--selected)
+  (let ((buffer (+agent-queue--session-live)))
+    ;; An agent that cannot steer keeps the prompt queued for the next turn;
+    ;; that is the expected outcome, not an error to report.
+    (if (and (+agent-acp-busy-p buffer) (not (+agent-acp-can-steer-p buffer)))
+        (message "This agent cannot take input mid-turn; the prompt stays queued for the next turn (stop the turn to send it now)")
+      (+agent-queue-send-now buffer +agent-queue--selected)))
   (+agent-queue-refresh))
 
 (defun +agent-queue-hold-all ()
