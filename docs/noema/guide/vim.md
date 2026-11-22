@@ -117,6 +117,8 @@ Insert 之外，输入法接管的按键既不是命令也不是文字，直接�
 - `o`/`O`/`cc` 沿用 Markdown 的续行前缀和缩进，相当于开着 `autoindent`。
 - `{`/`}` 和 `ip`/`ap` 把只含空白的行也当作段落分隔；Vim 只认空行。
 - 括号对象（`di(` 等）只在光标位于括号内时生效，不向后搜索。
+- Insert 中已有选区（鼠标、Shift+方向键、Cmd+A）时，`Esc` 保留选区进入 Visual，再按 `Esc`
+  才取消；没有选区时照常回到 Normal。
 
 参考：[Vim motion.txt](https://vimhelp.org/motion.txt.html)、
 [Vim visual.txt](https://vimhelp.org/visual.txt.html)，以及 AaronEmacs 所安装
