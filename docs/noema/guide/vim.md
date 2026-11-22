@@ -102,7 +102,15 @@ Insert 之外，`Ctrl` 组合键要么是 Vim 的命令，要么什么都不做�
 
 ## 输入法
 
-Insert 之外，输入法接管的按键既不是命令也不是文字，直接丢弃：拼音开着时按
+**自动切换。** 和 VSCodeVim 的 `autoSwitchInputMethod`、Emacs 的 `sis` 一样：编辑器在 Normal 或
+Visual 中获得焦点时，键盘切到拉丁布局（ABC，否则 U.S.），记住原来的输入法；进入 Insert、离开
+编辑器（回到 Emacs、页面输入框、其他应用）时恢复原来的输入法。于是开着中文输入法也能直接按
+`Esc` 回 Normal，再按 `hjkl`、`V`、`g` 等命令。切换由 host 的常驻小程序
+`build/apple/noema-input-source`（`apple/InputSource.swift`，`make build` 在 macOS 上构建）执行，
+只选择用户已启用的输入法，不改系统设置、不需要权限；页面只在状态变化时通知
+（`server/lib/input-source.mjs`，测试 `tests/input-source.test.ts`）。服务器阅读器与非 macOS 不切换。
+
+**兜底。** 没有该小程序，或输入法仍接管了按键时：Insert 之外，输入法接管的按键既不是命令也不是文字，直接丢弃：拼音开着时按
 `j`，光标不动，输入法也不会往笔记里写字。判断依据是按键本身（正在组字、
 `keyCode` 229、或直接打出的非 ASCII 字符，见 `inputMethodKey`），所以切回
 英文布局后同一个键立刻恢复为命令。`Esc` 始终有效。Emacs 宿主路径
