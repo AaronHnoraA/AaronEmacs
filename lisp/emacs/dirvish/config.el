@@ -699,7 +699,11 @@ nothing or `stem' to keep only the extension."
      ("'" . "快速访问")
      ("~" . "Dirvish 总菜单")
      ("?" . "这张表")
-     ("q" . "退出")))
+     ("q" . "退出"))
+    ("鼠标"
+     ("单击 / 双击" . "选中 / 打开或展开")
+     ("中键" . "在另一个窗口打开")
+     ("右键" . "菜单：复制、剪切、粘贴…")))
   "What `+dirvish/key-help' shows: groups of (KEYS . MEANING).")
 
 (defun +dirvish--hint-columns (width)
@@ -795,6 +799,78 @@ nothing or `stem' to keep only the extension."
   "Show the Dirvish key reference in a temporary window.")
 (defalias 'dirvish-go-directory #'+dirvish/go-interactive
   "Read a directory from the current row and open it in Dired.")
+
+;;; Mouse
+
+(declare-function dirvish-subtree-toggle "dirvish-subtree" ())
+(declare-function dirvish--find-entry "dirvish" (find-fn entry))
+
+(defun +dirvish--mouse-goto (event)
+  "Select EVENT's window and put point on the file name of the clicked row.
+Return non-nil when that row names a file."
+  (let* ((end (event-end event))
+         (window (posn-window end))
+         (pos (posn-point end)))
+    (when (and (windowp window) (window-live-p window) (integer-or-marker-p pos))
+      (select-window window)
+      (goto-char pos)
+      (dired-move-to-filename)
+      (dired-get-filename nil t))))
+
+(defun +dirvish/mouse-select (event)
+  "Put point on the file clicked in EVENT without opening it."
+  (interactive (list last-command-event))
+  (+dirvish--mouse-goto event))
+
+(defun +dirvish/mouse-open (event)
+  "Open the file double-clicked in EVENT, or toggle the clicked folder's subtree."
+  (interactive (list last-command-event))
+  (when-let* ((entry (+dirvish--mouse-goto event)))
+    (if (and (file-directory-p entry) (fboundp 'dirvish-subtree-toggle))
+        (dirvish-subtree-toggle)
+      (dirvish--find-entry 'find-file entry))))
+
+(defun +dirvish--mouse-menu-items ()
+  "The context menu for the row at point, as an `easy-menu' list."
+  (let ((pending (and +dirvish--paste-sources t))
+        (method (if (eq +dirvish--paste-method 'cut) "Move" "Copy")))
+    `(["Open" dired-find-file]
+      ["Open Externally" +dirvish/open-externally]
+      ["Open in New Frame" +dirvish/open-new-frame]
+      "--"
+      ["Copy" +dirvish/yank]
+      ["Cut" +dirvish/cut]
+      [,(format "Paste (%s %d)" method (length +dirvish--paste-sources))
+       +dirvish/paste :active ,pending]
+      ["Cancel Copy or Cut" +dirvish/unyank :active ,pending]
+      "--"
+      ["Rename" +dirvish/rename-before-extension]
+      ["New File or Folder" +dirvish/create]
+      ["Move to Trash" +dirvish/trash]
+      "--"
+      ["Copy Path" +dirvish/copy-path]
+      ["Copy Name" +dirvish/copy-filename])))
+
+(defun +dirvish/mouse-menu (event)
+  "Select the row right-clicked in EVENT and show its file menu.
+Marked files stay marked, so Copy, Cut and Trash act on them."
+  (interactive (list last-command-event))
+  (when (+dirvish--mouse-goto event)
+    (popup-menu (easy-menu-create-menu "File" (+dirvish--mouse-menu-items))
+                event)))
+
+(defconst +dirvish-mouse-keys
+  '(;; Dired marks file names with `follow-link', which turns a quick
+    ;; `mouse-1' into `mouse-2' and opens the file in another window.  A
+    ;; click here only selects, so no row is a link.
+    ("<follow-link>" . ignore)
+    ("<mouse-1>" . +dirvish/mouse-select)
+    ("<double-mouse-1>" . +dirvish/mouse-open)
+    ("<mouse-2>" . dired-mouse-find-file-other-window)
+    ("<down-mouse-3>" . ignore)
+    ("<mouse-3>" . +dirvish/mouse-menu))
+  "Mouse bindings in `dirvish-mode-map': click selects, double-click opens,
+right click shows the file menu.")
 
 ;;; Keys
 
@@ -897,7 +973,7 @@ nothing or `stem' to keep only the extension."
   (dolist (prefix '("g" "o" "p" "r" "c" "m" ","))
     (unless (keymapp (lookup-key dirvish-mode-map (kbd prefix)))
       (define-key dirvish-mode-map (kbd prefix) nil)))
-  (dolist (binding +dirvish-yazi-keys)
+  (dolist (binding (append +dirvish-yazi-keys +dirvish-mouse-keys))
     (define-key dirvish-mode-map (kbd (car binding)) (cdr binding))))
 
 (with-eval-after-load 'dirvish

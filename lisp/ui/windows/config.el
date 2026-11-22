@@ -869,12 +869,8 @@ its own editable pane because its xwidget cannot be shared between frames."
          ("M-b" . dirvish-history-go-backward)
          ("M-f" . dirvish-history-go-forward)
          ("M-n" . dirvish-narrow)
-         ("M-m" . dirvish-mark-menu)
-         ;("P" . dirvish-peek-mode) ; 如果没有该函数，下面 config 会兜底处理
-         ;; 鼠标（可选）
-         ("<mouse-1>" . dirvish-subtree-toggle-or-open)
-         ("<mouse-2>" . dired-mouse-find-file-other-window)
-         ("<mouse-3>" . dired-mouse-find-file))
+         ("M-m" . dirvish-mark-menu))
+  ;; Mouse bindings live with the single keys in emacs/dirvish/config.el.
   :custom
   (dirvish-side-width 36)
   (dirvish-header-line-height '(26 . 36))

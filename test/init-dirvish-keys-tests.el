@@ -540,5 +540,68 @@
                            (cadr (window-edges source))))))))
       (delete-directory root t))))
 
+;; Mouse: a click selects the row it hits, a right click offers Cut.
+
+(defun init-dirvish-test--click (window pos &optional kind)
+  "A mouse event of KIND (default `mouse-1') at POS in WINDOW."
+  ;; Batch Emacs has no display to ask `posn-at-point'; build the position.
+  (list (or kind 'mouse-1) (list window pos '(0 . 0) 0)))
+
+(ert-deftest dirvish-mouse-click-selects-without-opening ()
+  (let* ((root (file-truename (make-temp-file "dirvish-mouse-test-" t)))
+         (a (expand-file-name "a.md" root))
+         (b (expand-file-name "b.md" root))
+         (buffer nil)
+         opened)
+    (unwind-protect
+        (progn
+          (with-temp-file a (insert "A\n"))
+          (with-temp-file b (insert "B\n"))
+          (setq buffer (dired-noselect root))
+          (switch-to-buffer buffer)
+          (with-current-buffer buffer
+            (should (dired-goto-file b))
+            ;; Click in the middle of the row's name, not at its start.
+            (let ((pos (+ (point) 1)))
+              (dired-goto-file a)
+              (cl-letf (((symbol-function 'dirvish--find-entry)
+                         (lambda (&rest args) (setq opened args)))
+                        ((symbol-function 'find-file)
+                         (lambda (&rest args) (setq opened args))))
+                (+dirvish/mouse-select
+                 (init-dirvish-test--click (selected-window) pos))))
+            (should (equal (dired-get-filename) b))
+            (should (= (point) (save-excursion (dired-move-to-filename) (point))))
+            (should-not opened)))
+      (when (buffer-live-p buffer) (kill-buffer buffer))
+      (delete-directory root t))))
+
+(ert-deftest dirvish-mouse-bindings-select-open-and-menu ()
+  (let ((map (make-sparse-keymap)))
+    (dolist (binding +dirvish-mouse-keys)
+      (define-key map (kbd (car binding)) (cdr binding)))
+    (should (eq (lookup-key map [mouse-1]) #'+dirvish/mouse-select))
+    (should (eq (lookup-key map [double-mouse-1]) #'+dirvish/mouse-open))
+    (should (eq (lookup-key map [mouse-3]) #'+dirvish/mouse-menu))
+    ;; No row may be a link, or a quick click becomes mouse-2 and opens.
+    (should (eq (lookup-key map [follow-link]) #'ignore))))
+
+(ert-deftest dirvish-mouse-menu-offers-cut-and-paste-state ()
+  (let ((+dirvish--paste-sources nil)
+        (+dirvish--paste-method nil))
+    (let ((items (+dirvish--mouse-menu-items)))
+      (should (seq-find (lambda (item) (and (vectorp item) (equal (aref item 0) "Cut")
+                                            (eq (aref item 1) '+dirvish/cut)))
+                        items))
+      (let ((paste (seq-find (lambda (item) (and (vectorp item) (eq (aref item 1) '+dirvish/paste)))
+                             items)))
+        (should (equal (plist-get (append (substring paste 2) nil) :active) nil)))))
+  (let ((+dirvish--paste-sources '("/fs:local:/tmp/x"))
+        (+dirvish--paste-method 'cut))
+    (let ((paste (seq-find (lambda (item) (and (vectorp item) (eq (aref item 1) '+dirvish/paste)))
+                           (+dirvish--mouse-menu-items))))
+      (should (equal (aref paste 0) "Paste (Move 1)"))
+      (should (plist-get (append (substring paste 2) nil) :active)))))
+
 (provide 'init-dirvish-keys-tests)
 ;;; init-dirvish-keys-tests.el ends here
