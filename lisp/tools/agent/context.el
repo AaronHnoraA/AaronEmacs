@@ -25,6 +25,7 @@
 
 (require 'tools/agent/selection)
 (declare-function which-function "which-func" ())
+(declare-function +agent-requests-submit "tools/agent/requests" (buffer content &optional notify on-finish prepare))
 
 (defun +agent-context-state (&optional window)
   "Query WINDOW's editor source as references, without saving or copying text.
@@ -336,10 +337,38 @@ is always last and does not replace the remembered session."
           (concat (cdr instructions) "\n\n" (map-elt (car copy) 'text)))
     copy))
 
-(defun +agent-context--deliver (buffer blocks &optional instructions no-focus on-failure)
+(defun +agent-context--remember-instructions (key)
+  "Remember that the native session identified by KEY received its guide."
+  (when (>= (hash-table-count +agent-context--session-instructions) 256)
+    (remhash (car (hash-table-keys +agent-context--session-instructions))
+             +agent-context--session-instructions))
+  (puthash key t +agent-context--session-instructions))
+
+(defun +agent-context--deliver (buffer blocks &optional instructions no-focus on-failure on-finish)
   "Send BLOCKS when BUFFER can take a turn; NO-FOCUS preserves the editor.
-ON-FAILURE, a function of no arguments, runs when the agent refuses the prompt."
+ON-FAILURE runs when the agent refuses the prompt. ON-FINISH tracks the exact
+task through the native queue and receives its terminal status and reason."
   (cond
+   (on-finish
+    (require 'tools/agent/requests)
+    (let (claimed-key)
+      (+agent-requests-submit
+       buffer blocks nil
+       (lambda (status reason)
+         (when (and (eq status 'failed) claimed-key)
+           (remhash claimed-key +agent-context--session-instructions))
+         (unwind-protect (funcall on-finish status reason)
+           (when (and (eq status 'failed) on-failure (buffer-live-p buffer))
+             (funcall on-failure))))
+       (when instructions
+         (lambda (content)
+           (if-let* ((key (+agent-context--instruction-key buffer instructions))
+                     ((not (gethash key +agent-context--session-instructions))))
+               (progn
+                 (setq claimed-key key)
+                 (+agent-context--remember-instructions key)
+                 (+agent-context--with-instructions content instructions))
+             content))))))
    ;; A session started for this send is still shaking hands with its agent.
    ((not (+agent-acp-state-value buffer '(:session :id)))
     (let (subscription)
@@ -363,8 +392,7 @@ ON-FAILURE, a function of no arguments, runs when the agent refuses the prompt."
            (content (if first (+agent-context--with-instructions blocks instructions)
                       blocks))
            (accepted t))
-      (if (or (+agent-acp-busy-p buffer)
-              (> (+agent-acp-pending-prompt-count buffer) 0))
+      (if (or (+agent-acp-busy-p buffer) (> (+agent-acp-pending-prompt-count buffer) 0))
           (progn
             (+agent-acp-enqueue buffer (map-elt (car content) 'text))
             (message "Agent: the session is busy; your context is queued"))
@@ -375,10 +403,7 @@ ON-FAILURE, a function of no arguments, runs when the agent refuses the prompt."
                        (when first (remhash key +agent-context--session-instructions))
                        (when on-failure (funcall on-failure)))))
       (when (and first accepted)
-        (when (>= (hash-table-count +agent-context--session-instructions) 256)
-          (remhash (car (hash-table-keys +agent-context--session-instructions))
-                   +agent-context--session-instructions))
-        (puthash key t +agent-context--session-instructions)))))
+        (+agent-context--remember-instructions key)))))
   (unless no-focus (+agent-acp-show-buffer buffer)))
 
 (defun +agent-context--report-skipped (skipped)

@@ -20,6 +20,7 @@
 
 (declare-function +agent-collab-suggestions "tools/agent/collab" (file &optional all))
 (declare-function +agent-collab-threads "tools/agent/collab" (file))
+(declare-function +agent-collab-task-p "tools/agent/collab" (thread))
 (declare-function +agent-collab--client-file "tools/agent/collab" (file))
 (defvar +agent-collab-changed-functions)
 
@@ -55,7 +56,8 @@ counts those not resolved."
                         count))
                   0)))
     (list :pending (+ cards (length (ignore-errors (+agent-collab-suggestions client))))
-          :threads (seq-count (lambda (thread) (not (equal (alist-get 'status thread) "resolved")))
+          :threads (seq-count (lambda (thread) (and (+agent-collab-task-p thread)
+                                                    (not (equal (alist-get 'status thread) "resolved"))))
                               (ignore-errors (+agent-collab-threads client))))))
 
 (defun +agent-topology--file-label (file counts)

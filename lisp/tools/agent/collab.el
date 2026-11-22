@@ -30,7 +30,8 @@
 (require 'tools/agent/binding)
 
 (declare-function +agent-context--session "tools/agent/context" (&optional pick))
-(declare-function +agent-context--deliver "tools/agent/context" (buffer blocks &optional instructions no-focus))
+(declare-function +agent-context--deliver "tools/agent/context"
+                  (buffer blocks &optional instructions no-focus on-failure on-finish))
 (declare-function +agent-context-content-blocks "tools/agent/context" (prompt references))
 (declare-function +noema-api-call "noema/bridge/config" (channel args callback &optional timeout))
 
@@ -169,6 +170,7 @@
                                  (quote . ,(or (alist-get 'quote event) ""))
                                  (line . ,(alist-get 'line event))
                                  (status . "open") (assignee . ,(alist-get 'assignee event))
+                                 (attempt . ,(alist-get 'attempt event)) (failure . nil) (archived . nil)
                                  (createdAt . ,(alist-get 'at event))
                                  (messages . (((mid . "m0") (author . ,(+agent-collab--author (alist-get 'author event)))
                                                (text . ,(or (alist-get 'text event) "")) (at . ,(alist-get 'at event)))))))
@@ -182,7 +184,26 @@
                                          (text . ,(or (alist-get 'text event) "")) (at . ,(alist-get 'at event))))))
                    (puthash id thread threads)))
                 ("resolve" (when thread (setf (alist-get 'status thread) "resolved") (puthash id thread threads)))
-                ("reopen" (when thread (setf (alist-get 'status thread) "open") (puthash id thread threads)))
+                ("reopen"
+                 (when thread
+                   (when (or (alist-get 'archived thread) (equal (alist-get 'status thread) "resolved"))
+                     (when (alist-get 'archived thread) (setf (alist-get 'assignee thread) nil))
+                     (setf (alist-get 'archived thread) nil (alist-get 'failure thread) nil
+                           (alist-get 'attempt thread) nil))
+                   (setf (alist-get 'status thread) "open")))
+                ("fail"
+                 (when (and thread (equal (alist-get 'status thread) "open")
+                            (not (alist-get 'archived thread))
+                            (stringp (alist-get 'attempt event))
+                            (stringp (alist-get 'reason event))
+                            (equal (alist-get 'attempt event) (alist-get 'attempt thread)))
+                   (setf (alist-get 'failure thread) (alist-get 'reason event))))
+                ("archive"
+                 (when (and (+agent-collab-task-p thread)
+                            (equal (alist-get 'state event) (+agent-collab-task-finished-state thread))
+                            (member (alist-get 'state event) '("resolved" "failed"))
+                            (equal (alist-get 'attempt event) (alist-get 'attempt thread)))
+                   (setf (alist-get 'archived thread) t)))
                 ("edit"
                  (when-let* ((message (seq-find (lambda (m) (equal (alist-get 'mid m) (or (alist-get 'mid event) "m0")))
                                                 (alist-get 'messages thread))))
@@ -195,8 +216,11 @@
                            (seq-remove (lambda (m) (equal (alist-get 'mid m) (alist-get 'mid event)))
                                        (alist-get 'messages thread)))
                      (puthash id thread threads))))
-                ("assign" (when thread (setf (alist-get 'assignee thread) (alist-get 'assignee event))
-                                (puthash id thread threads)))
+                ("assign"
+                 (when thread
+                   (setf (alist-get 'assignee thread) (alist-get 'assignee event)
+                         (alist-get 'attempt thread) (alist-get 'attempt event)
+                         (alist-get 'failure thread) nil)))
                 ("move" (when thread (setf (alist-get 'note thread) (alist-get 'note event))
                               (puthash id thread threads)))))))))
     threads))
@@ -227,6 +251,27 @@
              (+agent-collab--fold file))
     (sort threads (lambda (a b) (string> (or (alist-get 'createdAt a) "") (or (alist-get 'createdAt b) ""))))))
 
+(defun +agent-collab-task-p (thread)
+  "Whether THREAD is a visible collaboration task."
+  (and thread
+       (not (alist-get 'archived thread))
+       (not (equal (alist-get 'kind (alist-get 'author (car (alist-get 'messages thread)))) "agent"))))
+
+(defun +agent-collab-task-finished-state (thread)
+  "Return THREAD's cleanup state, or nil while it is still actionable."
+  (cond ((equal (alist-get 'status thread) "resolved") "resolved")
+        ((alist-get 'failure thread) "failed")))
+
+(defun +agent-collab-archive-task (file id)
+  "Archive FILE's finished task ID, preserving its text and source anchor."
+  (when-let* ((thread (+agent-collab-thread file id))
+              ((+agent-collab-task-p thread))
+              (state (+agent-collab-task-finished-state thread)))
+    (+agent-collab--append
+     file `((op . "archive") (id . ,id) (state . ,state)
+            ,@(when-let* ((attempt (alist-get 'attempt thread))) `((attempt . ,attempt)))))
+    t))
+
 (defun +agent-collab--collaborator (buffer)
   "Describe session BUFFER as a thread's assignee."
   `((name . ,(or (buffer-local-value '+agent-acp-session-name buffer) (buffer-name buffer)))
@@ -236,19 +281,21 @@
   "Return a fresh comment id, of the page's form."
   (format "c-%s-%06x" (format-time-string "%Y%m%d%H%M%S" nil t) (random #xffffff)))
 
-(cl-defun +agent-collab-thread-create (&key file line anchor session text id)
+(cl-defun +agent-collab-thread-create (&key file line anchor session text id attempt)
   "Store a new thread on FILE at LINE about ANCHOR, asked of SESSION with TEXT."
   (let ((id (or id (+agent-collab--comment-id))))
     (+agent-collab--append
      file `((op . "thread") (id . ,id) (note . ,(file-name-nondirectory (+agent-collab--client-file file)))
             (quote . ,(or anchor "")) (line . ,line)
             (author . ((name . "You") (kind . "person"))) (text . ,text)
+            ,@(when attempt `((attempt . ,attempt)))
             ,@(when session `((assignee . ,(+agent-collab--collaborator session))))))
     (+agent-collab-thread file id)))
 
-(defun +agent-collab--assign (file id session)
+(defun +agent-collab--assign (file id session attempt)
   "Make SESSION the assignee of FILE's thread ID."
-  (+agent-collab--append file `((op . "assign") (id . ,id) (assignee . ,(+agent-collab--collaborator session)))))
+  (+agent-collab--append file `((op . "assign") (id . ,id)
+                               (attempt . ,attempt) (assignee . ,(+agent-collab--collaborator session)))))
 
 (defun +agent-collab-unassign (file id)
   "Take FILE's comment ID back from its agent: it waits to be handed over again."
@@ -296,7 +343,17 @@ native session, so it knows how to comment and propose (C71).  Noema sets it.")
       (concat (substring quote 0 +agent-collab-inline-quote-limit)
               "… [excerpt; use agent:document:read for exact oldText]"))))
 
-(defun +agent-collab--deliver (buffer prompt)
+(defun +agent-collab--task-finished (file id attempt status reason)
+  "Record an ACP failure for this exact attempt of FILE's task ID."
+  (when (eq status 'failed)
+    (when-let* ((thread (+agent-collab-thread file id))
+                ((+agent-collab-task-p thread))
+                ((equal attempt (alist-get 'attempt thread)))
+                ((equal (alist-get 'status thread) "open")))
+      (+agent-collab--append file `((op . "fail") (id . ,id) (attempt . ,attempt)
+                                    (reason . ,(or reason "ACP task failed")))))))
+
+(defun +agent-collab--deliver (buffer prompt &optional on-finish)
   "Send PROMPT to session BUFFER without taking the keyboard.
 The first task of a native session carries the tools guide."
   (require 'tools/agent/context)
@@ -307,7 +364,8 @@ The first task of a native session carries the tools guide."
                            (lambda ()
                              (message "%s refused the task: %s"
                                       (buffer-local-value '+agent-acp-session-name buffer)
-                                      (or (buffer-local-value '+agent-acp-last-error buffer) "see its chat")))))
+                                      (or (buffer-local-value '+agent-acp-last-error buffer) "see its chat")))
+                           on-finish))
 
 (defun +agent-collab--task-prompt (thread)
   "Return the prompt handing THREAD to an agent."
@@ -320,11 +378,14 @@ The first task of a native session carries the tools guide."
 (defun +agent-collab-dispatch (file id session)
   "Hand FILE's thread ID to SESSION as a task: assign it and send the request."
   (when-let* ((thread (+agent-collab-thread file id)))
-    (unless (equal (alist-get 'session (alist-get 'assignee thread))
-                   (+agent-acp-session-token session))
-      (+agent-collab--assign file id session))
-    (+agent-collab--deliver session (+agent-collab--task-prompt thread))
-    (message "Handed to %s" (buffer-local-value '+agent-acp-session-name session))))
+    (unless (+agent-collab-task-p thread) (user-error "This annotation is not an active task"))
+    (let ((attempt (+agent-collab--comment-id)))
+      (when (equal (alist-get 'status thread) "resolved")
+        (+agent-collab--set-resolved file id nil))
+      (+agent-collab--assign file id session attempt)
+      (+agent-collab--deliver session (+agent-collab--task-prompt thread)
+                             (apply-partially #'+agent-collab--task-finished file id attempt))
+      (message "Handed to %s" (buffer-local-value '+agent-acp-session-name session)))))
 
 (defun +agent-collab-task-delivery (file line anchor)
   "Return a `+agent-context--send' delivery that makes the send a task (C76).
@@ -333,8 +394,9 @@ the session; the turn carries the references, the request and the thread, and
 the keyboard stays in the document."
   (lambda (session blocks session-instructions question)
     (let* ((text (if (string-empty-p (string-trim (or question ""))) "Look at this place" question))
+           (attempt (+agent-collab--comment-id))
            (thread (+agent-collab-thread-create :file file :line line :anchor (or anchor "")
-                                                :session session :text text))
+                                                :session session :text text :attempt attempt))
            (note (string-trim (format +agent-collab-task-prompt "" (alist-get 'id thread)
                                       (alist-get 'file thread) (or line 0)
                                       (+agent-collab--task-quote anchor))))
@@ -347,7 +409,8 @@ the keyboard stays in the document."
                 (ignore-errors (funcall +agent-collab-session-instructions-function))))
        t
        (lambda () (message "%s refused the task: %s" (buffer-local-value '+agent-acp-session-name session)
-                           (or (buffer-local-value '+agent-acp-last-error session) "see its chat"))))
+                           (or (buffer-local-value '+agent-acp-last-error session) "see its chat")))
+       (apply-partially #'+agent-collab--task-finished file (alist-get 'id thread) attempt))
       (message "Handed to %s as a task on %s" (buffer-local-value '+agent-acp-session-name session)
                (file-name-nondirectory (+agent-collab--client-file file)))
       thread)))

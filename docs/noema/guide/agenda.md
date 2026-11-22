@@ -52,7 +52,7 @@ added metadata uses canonical keys.
 
 ## Comments
 
-An open comment thread of a note (`docs/noema/design/comments.md`) is a task
+An open, unarchived selection comment (`docs/noema/design/comments.md`) is a task
 of the same scope, tagged `comment`. Its first line is the title and may end in
 attributes written as above (`Tighten the intro {ddl: fri, prio: B}`). Done
 resolves the thread, todo reopens it; the text is edited in the note's comments.

@@ -30,7 +30,14 @@ createInterface({input:process.stdin}).on('line', line => {
     switch(msg.method) {
       case 'initialize':reply(msg.id,{protocolVersion:1,agentInfo:{name:'agent-flow-fixture',version:'1'},authMethods:[],agentCapabilities:{loadSession:true,promptCapabilities:{embeddedContext:true}},sessionCapabilities:{list:{},resume:{},fork:{}},...(process.env.AGENT_FLOW_STEERING?{_meta:{steering:{supported:true}}}:{})});break;
       case 'authenticate':reply(msg.id);break;
-      case 'session/new': {const id=`fixture-${Object.keys(sessions).length+1}`;sessions[id]={cwd:p.cwd,turns:[]};persist();reply(msg.id,session(id));break;}
+      case 'session/new': {
+        if(process.env.AGENT_FLOW_FAIL_INIT){
+          setTimeout(()=>send({id:msg.id,error:{code:-32000,message:'Fixture could not start session'}}),100);
+          break;
+        }
+        const id=`fixture-${Object.keys(sessions).length+1}`;
+        sessions[id]={cwd:p.cwd,turns:[]};persist();reply(msg.id,session(id));break;
+      }
       case 'session/load':case 'session/resume':
         if(!sessions[sid])throw new Error('Unknown session');
         for(const turn of sessions[sid].turns) {update(sid,{sessionUpdate:'user_message_chunk',content:{type:'text',text:turn}});text(sid,`Restored: ${turn}\n`);}
@@ -105,7 +112,9 @@ createInterface({input:process.stdin}).on('line', line => {
         if(prompt==='crash'){process.exit(23);break;}
         if(prompt==='rpc-fail'){active.delete(sid);send({id:msg.id,error:{code:-32000,message:'Fixture task failed'}});break;}
         if(prompt==='hold'){text(sid,'Working; waiting for cancellation.\n');break;}
-        if(prompt==='refuse'){text(sid,'Refusing.\n');finish(sid,'refusal');break;}
+        if(prompt==='refuse'||prompt.startsWith('refuse\n\n(Task from comment ')){
+          text(sid,'Refusing.\n');finish(sid,'refusal');break;
+        }
         if(prompt==='crash-later'){text(sid,'Working; the process will exit.\n');setTimeout(()=>process.exit(24),150);break;}
         if(prompt==='titled'){sessions[sid].title='Fixture title';persist();update(sid,{sessionUpdate:'session_info_update',title:'Fixture title'});text(sid,'Titled.\n');finish(sid);break;}
         if(prompt==='edit'){

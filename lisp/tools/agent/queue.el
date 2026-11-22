@@ -131,12 +131,17 @@ interrupting its work is a separate, explicit decision."
     ;; held by the transport callback (C37).
     (unwind-protect
         (let ((prompt (nth index items)))
-          (+agent-queue-remove buffer index)
           (with-current-buffer buffer
             (if busy
-                (+agent-acp-steer prompt)
-              (map-put! agent-shell--state :pending-prompts
-                        (cons prompt (map-elt agent-shell--state :pending-prompts)))
+                (progn
+                  (+agent-queue-remove buffer index)
+                  (+agent-acp-steer prompt))
+              ;; This is a move to the queue head. Let the tracked request
+              ;; observe the move after it has acquired its new position.
+              (let ((+agent-acp-changed-functions nil))
+                (+agent-queue-remove buffer index)
+                (map-put! agent-shell--state :pending-prompts
+                          (cons prompt (map-elt agent-shell--state :pending-prompts))))
               (let ((agent-shell-prompt-queue-merge nil))
                 (agent-shell--prompt-queue-process-next))))
           (setq sent t))

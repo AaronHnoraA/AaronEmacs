@@ -20,6 +20,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'button)
 (require 'seq)
 (require 'subr-x)
 (require 'text-property-search)
@@ -78,11 +79,12 @@
 (defvar-local +agent-panel--query "" "Literal, case-insensitive task search.")
 (defvar-local +agent-panel--filter 'all "Task state shown by this view.")
 (defvar-local +agent-panel--expanded nil "Expanded task identities (FILE . ID).")
+(defvar-local +agent-panel--rendered-document nil "Document of the currently drawn task board.")
 
 (defconst +agent-panel-filters
   '((all . "All tasks") (open . "Open tasks") (todo . "Unassigned")
     (doing . "In progress") (waiting . "Waiting for you")
-    (paused . "Paused") (done . "Done")))
+    (paused . "Paused") (failed . "Failed") (done . "Done")))
 
 (defvar +agent-panel--journal-cache (make-hash-table :test #'equal)
   "Folder tree -> the comment journals found under it.")
@@ -127,7 +129,8 @@
                (mapcan (lambda (journal) (+agent-panel--folder-threads (file-name-directory journal)))
                        (+agent-panel--journals-under root)))))))
     (let (groups)
-      (dolist (thread (sort threads (lambda (a b) (string< (or (alist-get 'createdAt a) "")
+      (dolist (thread (sort (seq-filter #'+agent-collab-task-p threads)
+                            (lambda (a b) (string< (or (alist-get 'createdAt a) "")
                                                             (or (alist-get 'createdAt b) "")))))
         (let ((cell (assoc (alist-get 'file thread) groups)))
           (if cell (setcdr cell (append (cdr cell) (list thread)))
@@ -190,6 +193,7 @@
     (doing "In progress" "an agent works on it")
     (waiting "Waiting for you" "its agent needs your answer or permission")
     (paused "Paused" "its agent's session is gone")
+    (failed "Failed" "this task's request failed")
     (done "Done" "marked done"))
   "The board's lanes, in order: symbol, title, meaning.")
 
@@ -197,6 +201,7 @@
 (defface +agent-panel-lane-doing '((t :inherit font-lock-function-name-face :weight bold)) "In progress." :group '+agent-panel)
 (defface +agent-panel-lane-waiting '((t :inherit error :weight bold)) "Waiting for you." :group '+agent-panel)
 (defface +agent-panel-lane-paused '((t :inherit warning :weight bold)) "Paused." :group '+agent-panel)
+(defface +agent-panel-lane-failed '((t :inherit error :weight bold)) "Failed." :group '+agent-panel)
 (defface +agent-panel-lane-done '((t :inherit success :weight bold)) "Done." :group '+agent-panel)
 
 (defvar-local +agent-panel--folded '(done) "Lanes shown folded, as a count.")
@@ -219,6 +224,7 @@
          (buffer (and token (+agent-acp-session-buffer-for-token token)))
          (snapshot (and (buffer-live-p buffer) (+agent-session-snapshot buffer))))
     (cons (cond ((equal (alist-get 'status thread) "resolved") 'done)
+                ((alist-get 'failure thread) 'failed)
                 ((null token) 'todo)
                 ((or (null snapshot) (memq (plist-get snapshot :process-state) '(dead disconnected))) 'paused)
                 ((plist-get snapshot :attention-kind) 'waiting)
@@ -260,6 +266,13 @@
                            width nil nil "…")
                           'face '+agent-panel-meta 'help-echo request)
               "\n"))
+    (when (eq lane 'failed)
+      (let ((reason (alist-get 'failure thread)))
+        (insert " " bar " "
+                (propertize (truncate-string-to-width (string-join (split-string reason) " ")
+                                                     width nil nil "…")
+                            'face '+agent-panel-meta 'help-echo reason)
+                "\n")))
     (when (member (cons (alist-get 'file thread) (alist-get 'id thread)) +agent-panel--expanded)
       (insert (propertize (concat "\n   " (alist-get 'file thread) "\n") 'face '+agent-panel-meta))
       (when (alist-get 'quote thread)
@@ -314,14 +327,19 @@
           (put-text-property start (point) '+agent-panel-agent (plist-get session :buffer)))))
     (insert "\n")))
 
+(defun +agent-panel--cards (file)
+  "Return FILE's scoped tasks and their display lanes."
+  (mapcar (lambda (thread) (cons thread (+agent-panel--card-lane thread)))
+          (apply #'append (mapcar #'cdr (+agent-panel-tasks file +agent-panel--scope)))))
+
 (defun +agent-panel--draw-tasks ()
   "Draw the board."
   ;; A Noema page names its document `/fs:local:...'; threads name client paths.
   (let* ((file (and +agent-panel--document (+agent-collab--client-file +agent-panel--document))))
+    (setq +agent-panel--rendered-document file)
     (if (not file)
         (insert "\n  Open a document (a note or a file) to see its tasks.\n")
-      (let* ((all (mapcar (lambda (thread) (cons thread (+agent-panel--card-lane thread)))
-                          (apply #'append (mapcar #'cdr (+agent-panel-tasks file +agent-panel--scope)))))
+      (let* ((all (+agent-panel--cards file))
              (cards (seq-filter #'+agent-panel--matches-p all))
              (filtered (or (not (eq +agent-panel--filter 'all)) (not (string-empty-p +agent-panel--query)))))
         (insert "\n")
@@ -329,8 +347,14 @@
         (insert (propertize (format "  Tasks of %s · %d open"
                                     (alist-get +agent-panel--scope +agent-panel-scopes)
                                     (seq-count (lambda (card) (not (eq (cadr card) 'done))) all))
-                            'face '+agent-panel-meta)
-                "\n")
+                            'face '+agent-panel-meta))
+        (when (seq-some (lambda (card) (memq (cadr card) '(done failed))) cards)
+          (insert "  ")
+          (insert-text-button "Clear finished"
+                              'help-echo "Archive matching Done and Failed tasks (C)"
+                              'follow-link t
+                              'action (lambda (_) (+agent-panel-clear-finished))))
+        (insert "\n")
         (when filtered
           (insert (propertize (format "  %s · %d/%d shown%s\n"
                                       (alist-get +agent-panel--filter +agent-panel-filters) (length cards) (length all)
@@ -684,7 +708,7 @@ panel and never in the ordinary agent views."
     (princ "o, S-RET  selected chat    i  full quote and comment history\n")
     (princ "/  literal search    f  state filter    \\  clear filters    s  scope\n")
     (princ "a  hand over    >/<  move card    d/c  done or reopen    u  take back\n")
-    (princ "TAB  fold lane    R  show/fold Done    g  refresh    q  hide panel\n\n")
+    (princ "TAB  fold lane    R  show/fold Done    C  clear finished    g  refresh    q  hide panel\n\n")
     (princ "Search includes all replies and the file and assignee names.\nOpening a chat does not start or send a task.\n")))
 
 (defun +agent-panel--choose-agent (file)
@@ -721,6 +745,21 @@ panel and never in the ordinary agent views."
     (+agent-collab--set-resolved (alist-get 'file thread) (alist-get 'id thread)
                                  (not (equal (alist-get 'status thread) "resolved")))
     (+agent-panel-redraw)))
+
+(defun +agent-panel-clear-finished ()
+  "Archive the matching Done and Failed tasks in the current scope."
+  (interactive)
+  (unless +agent-panel--rendered-document (user-error "Open a document to see its tasks"))
+  (let ((cleared 0))
+    (unwind-protect
+        (dolist (card (+agent-panel--cards +agent-panel--rendered-document))
+          (when (and (memq (cadr card) '(done failed))
+                     (+agent-panel--matches-p card)
+                     (+agent-collab-archive-task (alist-get 'file (car card))
+                                                (alist-get 'id (car card))))
+            (cl-incf cleared)))
+      (+agent-panel-redraw))
+    (message "Cleared %d finished task%s" cleared (if (= cleared 1) "" "s"))))
 
 (defun +agent-panel--thread-lane (thread)
   "Return THREAD's lane."
@@ -775,7 +814,8 @@ panel and never in the ordinary agent views."
 (defun +agent-panel-ret ()
   "Open the card, the agent's chat, or fold the lane at point."
   (interactive)
-  (cond ((get-text-property (point) '+agent-panel-agent)
+  (cond ((button-at (point)) (button-activate (button-at (point))))
+        ((get-text-property (point) '+agent-panel-agent)
          (let ((buffer (get-text-property (point) '+agent-panel-agent)))
            (select-window (+agent-panel--editing-window))
            (+agent-acp-show-buffer buffer)))
@@ -863,6 +903,7 @@ panel and never in the ordinary agent views."
   "k" #'+agent-panel-previous
   "a" #'+agent-panel-dispatch
   "c" #'+agent-panel-resolve
+  "C" #'+agent-panel-clear-finished
   "s" #'+agent-panel-cycle-scope
   "E" #'+agent-panel-open-global-pi
   "g" #'+agent-panel-refresh

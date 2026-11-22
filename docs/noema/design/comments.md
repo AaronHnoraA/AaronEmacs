@@ -1,15 +1,17 @@
 # Comments (C70, C80)
 
-Select text in a note and comment on it. The text is highlighted and the
-comment is a task: Emacs's collaboration panel (`H-t`) hands it to an agent,
-which changes the file through Noema's API and marks the comment done. The page
+Select text in a note and use the toolbar's Comment action. The text is
+highlighted and the comment appears in Emacs's collaboration panel (`H-t`).
+Hand it to an agent there to have it change the file through Noema's API and
+mark the comment done. The page
 has no comment rail: a comment's card pops up above its text. Code:
 `shared/comment-anchors.mjs`, `server/lib/note-comments.mjs`,
 `server/Features/Comments/api.mjs`, `pages/comments.ts`, and on the Emacs side
 `lisp/tools/agent/collab.el` and `lisp/tools/agent/panel.el`.
 
-Side comments (`@@scomment`) are a different thing: notes for the reader,
-shown beside the text. They are not tasks.
+Side comments (`@@scomment`) appear beside the text. Private comments
+(`@@comment`) appear in the editor. Both live in Markdown source without
+a collaboration record. Questions an agent leaves on text stay on the page.
 
 ## Source and storage
 
@@ -22,8 +24,9 @@ shown beside the text. They are not tasks.
   itself. HTML rendering and the Wiki index keep only the text.
 - **Task data beside the note.** Each folder has one hidden
   `.noema-comments.jsonl`, an append-only journal of the comments of the notes
-  in that folder: `thread` (quote, author, text), `assign` (the agent it was
-  handed to), `resolve`, `reopen`, `edit`, `delete`, `move`. A comment is
+  in that folder: `thread` (quote, author, text), `assign` (the agent and
+  dispatch attempt), `fail`, `archive`, `resolve`, `reopen`, `edit`, `delete`,
+  `move`. A comment is
   folded from its events on read. The Noema host and Emacs both only append.
   There are no replies: the work is the change to the file.
 - **Identity.** A lookup or mutation requires the owning note as well as its
@@ -50,6 +53,10 @@ shown beside the text. They are not tasks.
   reopens), ⋮ edits or deletes it. Leaving the highlight closes the card.
 - A done comment keeps a faint dashed underline; the shown one is highlighted
   more strongly.
+- **Clear finished** in Tasks (`C`) archives Done and Failed tasks in the
+  current scope and filter. The journal and source anchors remain available.
+  Cleared comments show **Cleared** on the page. **Reopen** returns a cleared
+  selection comment to To do.
 
 ## Agents
 
@@ -60,6 +67,7 @@ session also carries Noema's tools guide. The agent changes the document with
 the comment done with `agent:document:comment {file, id}`; `resolve: false`
 reopens it. It may also comment on text it names (`{file, from, to, oldText,
 text}`) to ask the person something. Emacs collects nothing from the chat.
+The terminal ACP receipt records a task failure for its own dispatch attempt.
 
 Quotes of up to 1200 characters travel complete, including whitespace and CJK
 text. Longer quotes are explicitly labelled excerpts requiring
@@ -71,7 +79,7 @@ use proposals.
 
 ## Agenda (C77)
 
-Open comments are tasks of the note's Agenda scope, tagged `comment`, at their
+Open, unarchived selection comments are tasks of the note's Agenda scope, tagged `comment`, at their
 anchor's line. A comment may end in DSL attributes (`Prove it {ddl: fri; prio:
 A}`). Done resolves it, todo reopens it.
 

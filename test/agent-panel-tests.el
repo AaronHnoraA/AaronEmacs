@@ -124,6 +124,44 @@
         (+agent-panel--move-to (+agent-collab-thread file "c-a1") 'todo)
         (should (equal (alist-get 'status (+agent-collab-thread file "c-a1")) "open"))))))
 
+(ert-deftest agent-panel-c81-clear-finished-archives-only-the-scoped-terminal-tasks ()
+  (agent-panel-tests--tree root
+    (let* ((file (expand-file-name "notes/a.md" root))
+           (sibling (expand-file-name "notes/b.md" root))
+           (source "{==anchor==}{>>#c-a2<<}\n@@scomment [margin note]\n@@comment [private note]\n")
+           (+agent-panel--document file))
+      (with-temp-file file (insert source))
+      (+agent-collab-thread-create :file file :id "c-fail" :text "failed task")
+      (+agent-collab--append
+       file '((op . "assign") (id . "c-fail") (attempt . "try-1")
+              (assignee . ((name . "agy") (session . "tok")))))
+      (+agent-collab--append file '((op . "fail") (id . "c-fail") (attempt . "try-1") (reason . "refusal")))
+      (+agent-collab--append
+       file '((op . "thread") (id . "c-question") (note . "a.md")
+              (author . ((name . "Agent") (kind . "agent"))) (text . "A question for the author")))
+      (+agent-collab--set-resolved sibling "c-b1" t)
+      (with-temp-buffer
+        (+agent-panel-mode)
+        (let ((inhibit-read-only t))
+          (+agent-panel--draw-tasks)
+          (should (string-match-p "Failed" (buffer-string)))
+          (should-not (string-match-p "margin note\\|private note\\|A question for the author" (buffer-string)))
+          (goto-char (point-min))
+          (search-forward "Clear finished")
+          ;; Focus may have moved before the idle redraw replaced this board.
+          (let ((+agent-panel--document sibling))
+            (button-activate (button-at (1- (point)))))))
+      (should (equal (mapcar (lambda (thread) (alist-get 'id thread))
+                             (cdar (+agent-panel-tasks file 'file)))
+                     '("c-a1")))
+      (dolist (id '("c-a2" "c-fail"))
+        (should (alist-get 'archived (+agent-collab-thread file id))))
+      (should-not (alist-get 'archived (+agent-collab-thread sibling "c-b1")))
+      (should (equal source (with-temp-buffer (insert-file-contents file) (buffer-string))))
+      (+agent-collab--set-resolved file "c-a2" nil)
+      (should (member "c-a2" (mapcar (lambda (thread) (alist-get 'id thread))
+                                    (cdar (+agent-panel-tasks file 'file))))))))
+
 (ert-deftest agent-panel-c81-taking-back-unassigns ()
   (agent-panel-tests--tree root
     (let ((file (expand-file-name "notes/a.md" root)))

@@ -413,9 +413,10 @@ This config already has maintenance and workflow entry points. Reuse them:
   `{==text==}{>>#c-ID<<}` sits in the note, highlighted, and the comment lives
   in the folder's hidden `.noema-comments.jsonl` (`docs/noema/design/comments.md`,
   C70, C80). There is no rail: the card pops up above the text on caret or
-  hover. A comment is a task: the collaboration panel (`H-t`) hands it to an
-  agent, which changes the file through the API and marks it done; there are
-  no replies. `@@scomment` is the reader's side comment, not a task. Do not add
+  hover. The person's selection comment appears in the collaboration panel
+  (`H-t`), where it can be handed to an agent to change the file and mark it
+  done through the API. `@@comment` and `@@scomment` stay in Markdown source as
+  annotations. Do not add
   another comment store or review surface. Agent facts (tool diffs) come from
   `acp.el` events, never from the rendered chat.
 - Page search and references: one implementation, the Noema kernel's

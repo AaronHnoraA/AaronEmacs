@@ -9,6 +9,8 @@
 
 (defvar +agent-requests--serial 0)
 (defvar +agent-requests--records nil)
+(defvar +agent-requests--awaiting-finish nil
+  "Pending lifecycle-only callbacks kept outside the public receipt list.")
 (defconst +agent-requests--capacity 128)
 (defconst +agent-requests--text-limit 100000)
 (defconst +agent-requests--message-file
@@ -23,7 +25,8 @@
 (defun +agent-requests--own (buffer)
   "Return pending receipts belonging to physical BUFFER."
   (seq-filter (lambda (r) (and (eq buffer (plist-get r :buffer))
-                              (not (+agent-requests--terminal-p r)))) +agent-requests--records))
+                              (not (+agent-requests--terminal-p r))))
+              (append +agent-requests--records +agent-requests--awaiting-finish)))
 
 (defun +agent-requests--queued-p (buffer prompt)
   "Does PROMPT identify a tracked queue item in BUFFER?"
@@ -65,10 +68,14 @@
     (setf (plist-get record :status) status (plist-get record :reason) reason
           (plist-get record :finished-at) (float-time)
           (plist-get record :state) nil (plist-get record :content) nil
-          (plist-get record :prompt) nil)
+          (plist-get record :prompt) nil (plist-get record :prepare) nil)
     (when (buffer-live-p (plist-get record :buffer))
       (with-current-buffer (plist-get record :buffer)
         (when (eq record +agent-requests--current) (setq +agent-requests--current nil))))
+    (when-let* ((callback (plist-get record :on-finish)))
+      (setq +agent-requests--awaiting-finish (delq record +agent-requests--awaiting-finish))
+      (setf (plist-get record :on-finish) nil)
+      (run-at-time 0 nil callback status reason))
     (when (plist-get record :notify)
       (setf (plist-get record :notification) "pending"
             (plist-get record :timer) (run-at-time 0 nil #'+agent-requests--notify record)))))
@@ -116,6 +123,11 @@
   "Submit RECORD once initialization has finished, using the native queue."
   (let ((buffer (plist-get record :buffer)))
     (with-current-buffer buffer
+      (when-let* ((prepare (plist-get record :prepare))
+                  (content (funcall prepare (plist-get record :content))))
+        (setf (plist-get record :content) content
+              (plist-get record :prompt) (copy-sequence (map-elt (car content) 'text))
+              (plist-get record :prepare) nil))
       (if (or (+agent-acp-busy-p buffer) (> (+agent-acp-pending-prompt-count buffer) 0))
           (progn
             (setf (plist-get record :status) 'queued)
@@ -126,12 +138,14 @@
   "Observe only the current physical ACP state's EVENT."
   (pcase (map-elt event :event)
     ('init-finished
-     (dolist (r (reverse (+agent-requests--own (current-buffer))))
+     (dolist (r (seq-sort-by (lambda (r) (or (plist-get r :sequence) 0)) #'<
+                            (+agent-requests--own (current-buffer))))
        (when (eq (plist-get r :status) 'starting)
          (condition-case err (+agent-requests--dispatch r)
            (error (+agent-requests--finish r 'failed (error-message-string err)))))))
     ('agent-message-chunk
      (when-let* ((record +agent-requests--current)
+                 ((or (plist-get record :notify) (not (plist-get record :on-finish))))
                  (chunk (map-nested-elt event '(:data :text-chunk))))
        (let* ((text (plist-get record :text))
               (room (- +agent-requests--text-limit (length text))))
@@ -155,7 +169,7 @@
   "Reconcile withdrawn native queue items without requiring caller polling."
   (dolist (r (+agent-requests--own buffer))
     (when (memq (plist-get r :status) '(queued held))
-      (+agent-requests-get (plist-get r :id)))))
+      (+agent-requests--reconcile r))))
 
 (defun +agent-requests--killed-h ()
   "Settle outstanding work when its physical buffer is killed."
@@ -179,23 +193,30 @@
       (unless oldest (user-error "Too many unfinished Agent requests"))
       (setq +agent-requests--records (delq oldest +agent-requests--records)))))
 
-(defun +agent-requests-submit (buffer content &optional notify)
-  "Track CONTENT in BUFFER, optionally notifying an exact parent identity."
-  (+agent-requests-check-capacity)
+(defun +agent-requests-submit (buffer content &optional notify on-finish prepare)
+  "Track CONTENT in BUFFER, optionally notifying an exact parent identity.
+ON-FINISH receives the terminal status and reason asynchronously.
+With ON-FINISH and no NOTIFY, track only the pending lifecycle.
+PREPARE transforms CONTENT once the native session is initialized."
+  (unless (and on-finish (not notify)) (+agent-requests-check-capacity))
   (let* ((prompt (copy-sequence (map-elt (car content) 'text)))
          (snapshot (+agent-session-snapshot buffer))
          (scope (cl-loop for key in '(:buffer :name :agent :origin :root :target :workspace)
                          append (list key (plist-get snapshot key))))
-         (record (list :id (format "agent-%s-%d" (emacs-pid) (cl-incf +agent-requests--serial))
+         (sequence (cl-incf +agent-requests--serial))
+         (record (list :id (format "agent-%s-%d" (emacs-pid) sequence) :sequence sequence
                        :buffer buffer :state (+agent-acp-state-value buffer nil)
                        :scope scope :buffer-name (buffer-name buffer)
                        :created-at (float-time) :finished-at nil
                        :status 'starting :text "" :prompt prompt :content content :notify notify
                        :native (plist-get snapshot :native-session-id)
-                       :reason nil :timer nil :notification nil :notification-error nil
+                       :reason nil :on-finish on-finish :prepare prepare :timer nil
+                       :notification nil :notification-error nil
                        :truncated nil)))
     (+agent-requests--watch buffer)
-    (push record +agent-requests--records)
+    (if (and on-finish (not notify))
+        (push record +agent-requests--awaiting-finish)
+      (push record +agent-requests--records))
     (condition-case err
         (when (eq (+agent-acp-state-value buffer '(:init-finished)) t)
           (+agent-requests--dispatch record))
@@ -204,9 +225,13 @@
 
 (defun +agent-requests-get (id)
   "Find ID and reconcile queue withdrawal or a replaced physical state."
-  (let* ((r (or (seq-find (lambda (r) (equal id (plist-get r :id))) +agent-requests--records)
-                (user-error "Unknown or expired Agent request: %s" id)))
-         (buffer (plist-get r :buffer)))
+  (+agent-requests--reconcile
+   (or (seq-find (lambda (r) (equal id (plist-get r :id))) +agent-requests--records)
+       (user-error "Unknown or expired Agent request: %s" id))))
+
+(defun +agent-requests--reconcile (r)
+  "Reconcile the current transport location of request R."
+  (let ((buffer (plist-get r :buffer)))
     (unless (+agent-requests--terminal-p r)
       (cond
        ((or (not (buffer-live-p buffer))
