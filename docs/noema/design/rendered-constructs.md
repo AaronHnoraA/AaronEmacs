@@ -162,6 +162,16 @@ object 是一个东西，不会被删掉半个。插入模式下，在 object �
 合成一步），有的标成 `input`（被当成连续打字，重绘被推迟）。公式编辑会话（`math.ts`）自行管理
 历史分组，是唯一的具名例外。
 
+## 块组件旁的输入
+
+WebKit 可能把打字或输入法组字的文字放进块组件（`#+begin proof` 的标签、标题、图）旁边的错误 DOM
+节点：把组件后一行压平进前一行，CM6 读成“用文字替换换行”。`src/cm6/input-line-break-guard.ts`
+规定：光标为空时，浏览器输入的不含换行的文字永不删除换行——文字落到光标处（浏览器放错位置时）或
+保留的换行之后（光标在被替换范围内时）；纯删除（行首退格）与跨行选区替换不受影响。停放的编辑器被
+按键唤醒时经 `view.focus()` 同步写入 DOM 光标（`focus-quiescence.ts`），否则输入法会在
+CodeMirror 10 ms 后的聚焦处理之前，从 WebKit 默认的行首开始组字。测试：
+`tests/input-line-break-guard.test.ts`、`tests/focus-quiescence.test.ts`“waking a parked editor”。
+
 ## 何时重建：一个生命周期
 
 由 ViewPlugin 绘制的家族（行内组件工厂、图片、`@@` 命令、wiki 标题、代码块）都用
