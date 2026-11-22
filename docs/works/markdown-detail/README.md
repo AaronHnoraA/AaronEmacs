@@ -115,11 +115,9 @@ string），换编辑器打开仍可读。这与 Noema 现有 `syntax.md` 的方
 
 ## 6. 待办与需要决定的事
 
-1. **服务器阅读器的引用 `[?]`**：阅读模式 API 白名单（`server/lib/server-policy.mjs`）缺少
-   `noema:api:bibliography:document`；块引用、embed 查询、attribute view 同样缺失。这些处理函数都把
-   解析限制在笔记根目录内。放宽白名单需要用户同意。
-2. **Pele 替换 Mermaid**：沙箱连不上 npm 源；需要用户本机执行 `npm install pele@1.13.0 --save-exact`，
-   之后在 Noema 自己的图例集上对照。
+1. **服务器阅读器的引用 `[?]`**：已放行 `noema:api:bibliography:document`（noema `d228f00`，用户授权）。
+   块引用、embed 查询、attribute view 仍未放行，需要时另行授权。
+2. **Pele 替换 Mermaid**：用户决定不做。
 3. **移入 Go kernel 的候选**（按收益排序）：Wiki 索引构建（`server/lib/wiki-workspace.mjs`
    的扫描、解析、关系计算与写入 `wiki.db`；kernel 已经读这个库做搜索）、Agenda 索引、参考文献解析。
    原则：kernel 拥有派生数据，Node 只做传输。
