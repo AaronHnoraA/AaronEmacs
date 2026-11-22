@@ -151,14 +151,17 @@ stages, each behind the same contract:
    - *Scan (done).* `wikiindex.Scan` builds the index from the vault's files;
      on a copy of the real vault `noema-wikiindex -scan` wrote a database
      equal to Node's in every table, FTS tables and generation hash.
-   - *Switch (next).* A kernel endpoint refreshes the real file with
-     `Scan` + `ApplyIndex` (full `WriteDatabase` into a temporary file and a
-     rename when the schema differs), Node only forwards, and the Node
-     builder is deleted. Done with the person present, since it replaces the
-     index in use.
-   - *Inventory and switch.* Repository discovery and file inventory move to
-     the kernel; Node asks it to refresh and only forwards. The Node builder
-     is then removed, not kept as a fallback.
+   - *Switch (done for the editor host).* Every host that runs a kernel
+     (all but the Server reader) builds the index through
+     `/api/noema/wiki/refresh` (`server/lib/kernel-wiki-index.mjs`): the
+     kernel scans, writes `wiki.db` (`Scan` + `ApplyIndex`, or a full build
+     into a temporary file renamed over it) and returns the index; the host
+     adds only its in-memory relationships. The kernel lives and dies with
+     the host: a refresh while it restarts fails and says so. A kernel
+     binary older than the endpoint is reported with the fix
+     (`make kernel-build`).
+   - *Remaining.* The Server reader and the Node tests still use the host
+     builder; it is removed once they run a kernel.
 
 A change to what the index derives from a note changes the fixtures first.
 

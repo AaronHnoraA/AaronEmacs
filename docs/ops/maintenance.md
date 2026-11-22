@@ -528,6 +528,13 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 
 - [var/backup-snapshots](../var/backup-snapshots)
 
+### Noema Go kernel 与 Wiki 索引
+
+Wiki 索引 `wiki.db` 由 Go kernel 构建（`docs/noema/design/wiki-workspace.md` “Index
+ownership”），kernel 与 Noema host 同生同灭。更新 Noema 源码后在 `site-lisp/noema` 里运行
+`make kernel-build` 再重启 Noema；kernel 二进制早于刷新接口时，刷新会报错并给出这条提示，
+不会退回旧的构建方式。编译到临时文件再替换安装位置的文件，不影响正在运行的 kernel。
+
 ### Agent 运行时与项目缓存
 
 托管 Pi 的运行时由 `make pi-setup` 按 `config/pi/runtime/` 的 lock 安装到
