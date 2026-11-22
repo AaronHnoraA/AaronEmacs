@@ -126,8 +126,10 @@ stages, each behind the same contract:
    file system, repository or other notes. `shared/wiki-note-parse-fixtures.json`
    pins its answers; `tests/wiki-note-parse-contract.test.ts` holds Node to
    them, and the kernel's parser is written against the same file.
-2. **Kernel parser.** `kernel/noema/wikisearch` parses notes and passes the
-   fixtures; Node still builds.
+2. **Kernel parser (done).** `kernel/noema/wikiindex.Parse` passes every
+   fixture, offsets counted in UTF-16 units as JavaScript counts them; Node
+   still builds. Known oddity kept by both: a `{#id}` on a non-semantic
+   environment's title (`tikz`) is indexed as a plain anchor.
 3. **Kernel builder.** Inventory, relationships (`resolveWikiRelationships`)
    and persistence move to the kernel; Node asks it to refresh and only
    forwards. The Node builder is then removed, not kept as a fallback.
