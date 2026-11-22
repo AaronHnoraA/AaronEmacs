@@ -97,3 +97,33 @@ string），换编辑器打开仍可读。这与 Noema 现有 `syntax.md` 的方
 2. 代码块 `title=` / `{行范围}` / `max-lines=` 是否加入 `syntax.md`。
 3. “很多细节有问题”具体指哪些：上面只覆盖了图表与代码块，读码看不到的视觉问题
    （间距、字号、光标进出渲染块等）需要用户指出或给截图，再逐条登记成缺口。
+
+## 5. 已落地（2026-11-22）
+
+| 问题 | 结论与改动 | 提交 |
+| --- | --- | --- |
+| 补全弹窗上下选择抖动 | 当前项 `::after` 自动排到第三行使行高变化；弹窗按当前高度判断上下方，在窗口底部附近打字时来回翻。固定 `::after` 的位置；上下方按最大高度判断，且一旦选定就保持 | noema `920d903` |
+| Dirvish 单击即打开、右键无菜单 | Dired 的 `follow-link` 把快速的 `mouse-1` 变成 `mouse-2`。单击只选中，双击打开，右键菜单包含剪切 | emacs `2f8e5aab` |
+| Wiki 数据库“坏” | 文件完好；转写草稿复制了页面 id（QMM 有 6 个文件），https 链接被记为失效的 wiki 链接。诊断列出全部文件；外部链接不再算引用；转写脚本拒绝 vault 内的工作目录 | noema `68fddab`、README `ce717e3` |
+| Agent 改动迫使人停笔 | 页面把另一写入者的保存变基到未保存输入之上，在原处应用（C74） | noema `48275ae` |
+| Insert 中 Esc | 有选区时进入 Visual，再按一次 Esc 才取消 | noema `4d4614a` |
+| Mermaid | 深色主题用 mermaid 的 dark 配色；实时预览保留上一张图并单行显示错误 | noema `cf51376` |
+| TikZ | 光标外的源码修改也会触发渲染；颜色名和 `rgb()` 也做深色增亮；只读页面里没有 id 的块也能渲染 | noema `e51ad88`、`2ef094a` |
+| 刷新按钮 | 清空公式、图表、TikZ、高亮缓存，重载宏、索引、补全和 snippet，并重画所有渲染块 | noema `bfa7fed` |
+| 代码块 | info 字符串支持 `title="…"`、`{2-3}`；修复语言识别 | noema `b433512` |
+| 服务器阅读器 | 加载和点击都不再露出标题、强调等源码 | noema `2ef094a` |
+
+## 6. 待办与需要决定的事
+
+1. **服务器阅读器的引用 `[?]`**：阅读模式 API 白名单（`server/lib/server-policy.mjs`）缺少
+   `noema:api:bibliography:document`；块引用、embed 查询、attribute view 同样缺失。这些处理函数都把
+   解析限制在笔记根目录内。放宽白名单需要用户同意。
+2. **Pele 替换 Mermaid**：沙箱连不上 npm 源；需要用户本机执行 `npm install pele@1.13.0 --save-exact`，
+   之后在 Noema 自己的图例集上对照。
+3. **移入 Go kernel 的候选**（按收益排序）：Wiki 索引构建（`server/lib/wiki-workspace.mjs`
+   的扫描、解析、关系计算与写入 `wiki.db`；kernel 已经读这个库做搜索）、Agenda 索引、参考文献解析。
+   原则：kernel 拥有派生数据，Node 只做传输。
+4. **Agent 代码归位**：`site-lisp/noema/lisp/` 中约 2.1 万行 Elisp 有一半属于通用 agent 层
+   （`noema-agent-worker`、`noema-sessions`、`noema-pi-router`、`noema-interaction-*`），
+   按 AGENT.md 应在 `lisp/tools/agent/`；Research 只保留自己的 Run/DAG 适配。需逐文件列出调用方后
+   分批迁移，每批跑 `make state-check`。
