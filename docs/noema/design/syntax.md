@@ -179,6 +179,7 @@ autolinks.  Noema adds, in `src/render-html.ts` and the editor's Lezer rules:
 | `## Heading <!-- omit from toc -->` | heading left out of the TOC and the slide list |
 | `1)` and `(a)` list markers | ordered lists with matching labels in export |
 | `\` at line end | hard line break |
+| ` ```python title="ridge.py" {2-3,5} ` | code fence attributes (`src/code-info.ts`): the language is the first word; `title` is shown before the language badge and as the exported `<figcaption>`; `{…}` marks body lines (from 1) with a band. Other editors read only the language |
 | safe inline HTML (`<kbd>`) | sanitized by `src/sanitize-html.ts`; scripts, iframes and objects are removed |
 
 Heading numbers are display-only (`src/heading-number.ts`) and never enter
