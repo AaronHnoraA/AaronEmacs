@@ -144,9 +144,14 @@ stages, each behind the same contract:
      `kernel/cmd/noema-wikiindex` wrote, from the index Node built there, a
      database equal to Node's in every table, both FTS tables and ranked
      `MATCH` results.
-   - *Incremental build (next).* Node's incremental rules (row diffs, parse
-     cache, per-repository head state); then the kernel builds from files
-     itself and takes over the real file.
+   - *Incremental build (done).* `wikiindex.ApplyIndex` changes only the
+     rows that differ and ends exactly where a full build of the same index
+     ends; re-applying changes nothing. Node's parse cache (`note_cache`)
+     stays Node's: the kernel's cache is its own.
+   - *Switch (next).* The kernel scans the vault and parses with `Parse`,
+     builds with `WriteDatabase` / `ApplyIndex`, and takes over the real
+     file; Node only forwards a refresh. Done with the person present, since
+     it replaces the index in use.
    - *Inventory and switch.* Repository discovery and file inventory move to
      the kernel; Node asks it to refresh and only forwards. The Node builder
      is then removed, not kept as a fallback.
