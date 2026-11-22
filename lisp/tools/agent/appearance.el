@@ -12,11 +12,10 @@
 (require 'subr-x)
 
 (defvar +agent-acp-changed-functions)
-(defvar +agent-acp-run-owned-functions)
 (defvar +agent-acp--held-prompts)
 (declare-function +agent-acp-busy-p "tools/agent/acp" (buffer))
-(declare-function +agent-acp-structured-turn-p "tools/agent/acp" (buffer))
-(declare-function +agent-shell-structured-steer-p "tools/agent/config" (buffer))
+(declare-function +agent-acp-input-frozen-p "tools/agent/acp" (buffer))
+(declare-function +agent-acp-can-steer-p "tools/agent/acp" (&optional buffer))
 (declare-function +agent-acp-client-exited-p "tools/agent/acp" (buffer))
 (declare-function +agent-acp-held-prompt-count "tools/agent/acp" (buffer))
 (declare-function +agent-acp-pending-prompt-count "tools/agent/acp" (buffer))
@@ -52,12 +51,11 @@
 (defun +agent-input--submission (function)
   "Describe the actual busy submission FUNCTION without invoking it."
   (cond
-   ((run-hook-with-args-until-success '+agent-acp-run-owned-functions (current-buffer))
-    "queue")
    ((eq function #'+agent-shell-busy-submit-steer-or-queue)
-    (if (agent-shell-steering-supported-p) "steer" "queue"))
+    (if (+agent-acp-can-steer-p) "steer" "queue"))
    ((memq function '(agent-shell-busy-submit-queue agent-shell-prompt-queue)) "queue")
-   ((eq function 'agent-shell-busy-submit-steer) "steer")
+   ((eq function 'agent-shell-busy-submit-steer)
+    (if (agent-shell-steering-supported-p) "steer" "queue"))
    (t "send")))
 
 (defun +agent-input--hint ()
@@ -71,10 +69,7 @@
          (hint (cond
                 ((+agent-acp-client-exited-p buffer) " Client exited · /restart to reconnect")
                 ((not (map-elt agent-shell--state :init-finished)) " Connecting · draft stays editable")
-                ;; Say what Cmd-RET will really do: a structured turn follows
-                ;; `+agent-shell--submit-a', not the busy-submit functions.
-                ((and busy (+agent-acp-structured-turn-p buffer)
-                      (not (+agent-shell-structured-steer-p buffer)))
+                ((and busy (+agent-acp-input-frozen-p buffer))
                  " Cmd-RET queue (this turn's input is frozen) · C-c C-c stop")
                 (busy
                  (format " Cmd-RET %s · Cmd-S-RET %s · C-c C-c stop"
@@ -114,6 +109,13 @@
                 (overlay-put +agent-input--overlay 'before-string hint)))
           (when (overlayp +agent-input--overlay)
             (delete-overlay +agent-input--overlay)))))))
+
+(defun +agent-input--prompt-sent-a (&rest args)
+  "Refresh the input cue after a prompt is registered with the ACP client."
+  (when (equal (map-elt (plist-get args :request) :method) "session/prompt")
+    (when-let* ((buffer (or (plist-get args :buffer)
+                            (map-elt (plist-get args :state) :buffer))))
+      (+agent-input--refresh buffer))))
 
 (defun +agent-input-beginning-of-line (arg)
   "Move ARG lines as usual, stopping at the editable input's boundary."
@@ -170,6 +172,7 @@
 (add-hook 'enable-theme-functions #'+agent-appearance-apply-faces-h)
 (add-hook 'agent-shell-mode-hook #'+agent-input-enable-h)
 (add-hook '+agent-acp-changed-functions #'+agent-input--refresh)
+(advice-add 'agent-shell--send-request :after #'+agent-input--prompt-sent-a)
 (dolist (buffer (buffer-list))
   (with-current-buffer buffer
     (when (derived-mode-p 'agent-shell-mode) (+agent-input-enable-h))))

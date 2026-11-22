@@ -59,8 +59,24 @@ createInterface({input:process.stdin}).on('line', line => {
       }
       case 'session/cancel':text(sid,'Turn cancelled.\n');finish(sid,'cancelled');break;
       case 'session/prompt': {
-        active.set(sid,msg.id);
         const prompt=p.prompt.map(x=>x.text||'').join('');
+        if(process.env.AGENT_FLOW_AGY && active.has(sid)){
+          if(prompt==='reject steer'){
+            send({id:msg.id,error:{code:-32000,message:'Steer rejected'}});break;
+          }
+          reply(active.get(sid),{stopReason:'end_turn'});
+          active.set(sid,msg.id);
+          if(prompt==='drop steer'){
+            setTimeout(()=>process.exit(24),80);break;
+          }
+          text(sid,'Applying steering.\n');
+          setTimeout(()=>{
+            if(active.get(sid)!==msg.id)return;
+            text(sid,`Steered: ${prompt}\n`);finish(sid);
+          },300);
+          break;
+        }
+        active.set(sid,msg.id);
         sessions[sid].turns.push(prompt);persist();
         if(prompt==='runtime'){
           text(sid,JSON.stringify({cwd:process.cwd(),hostname:hostname(),executable:process.execPath,marker:process.env.AGENT_REMOTE_MARKER??null})+'\n');

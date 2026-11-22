@@ -1259,6 +1259,127 @@ agent-shell's reading of each agent's outcomes."
 (advice-add 'agent-shell--send-request :around #'+agent-acp--keep-declined-steer-a)
 (advice-add 'agent-shell-interrupt :before #'+agent-acp--note-steer-interrupt-a)
 
+;;;; Antigravity steers with another session/prompt
+
+(cl-defstruct (+agent-acp--agy-turn (:constructor +agent-acp--agy-turn-create))
+  (pending 0) (sequence 0) (response-sequence -1) response failure on-success on-failure)
+
+(defvar-local +agent-acp--agy-turn nil
+  "Completion state shared by a prompt and its in-flight Antigravity steers.")
+
+(defun +agent-acp--agy-steering-p (state)
+  "Whether STATE uses the configured Antigravity CLI's native prompt steering."
+  (and (eq (map-nested-elt state '(:agent-config :identifier)) 'antigravity)
+       (not (map-elt state :supports-steering))))
+
+(defun +agent-acp--agy-settle-request (turn)
+  "Release one pending request and notify TURN's owner once the last settles."
+  (when (and (eq turn +agent-acp--agy-turn)
+             (zerop (cl-decf (+agent-acp--agy-turn-pending turn))))
+    (setq +agent-acp--agy-turn nil)
+    (if-let* ((failure (+agent-acp--agy-turn-failure turn)))
+        (when-let* ((callback (+agent-acp--agy-turn-on-failure turn)))
+          (apply callback failure))
+      (when-let* ((callback (+agent-acp--agy-turn-on-success turn)))
+        (funcall callback (+agent-acp--agy-turn-response turn))))))
+
+(defun +agent-acp--agy-prompt-finished (turn sequence text response failure)
+  "Record a reply in TURN, keeping the result of its latest accepted prompt."
+  (when (eq turn +agent-acp--agy-turn)
+    (unwind-protect
+        (cond
+         ((and failure text)
+          (when (or remote-buffer-disconnected-p (+agent-acp-client-exited-p (current-buffer)))
+            (setf (+agent-acp--agy-turn-failure turn) failure))
+          (+agent-acp--hold-queue)
+          (+agent-acp--hold-declined-steer (current-buffer) text))
+         (failure (setf (+agent-acp--agy-turn-failure turn) failure))
+         ((> sequence (+agent-acp--agy-turn-response-sequence turn))
+          (setf (+agent-acp--agy-turn-response-sequence turn) sequence
+                (+agent-acp--agy-turn-response turn) response)))
+      (+agent-acp--agy-settle-request turn))))
+
+(cl-defun +agent-acp--agy-track-prompt-a
+    (original &rest args &key state request buffer on-success on-failure sync &allow-other-keys)
+  "Keep ORIGINAL's Antigravity prompt open through any steering requests."
+  (let ((buffer (or buffer (map-elt state :buffer))))
+    (if (and (equal (map-elt request :method) "session/prompt")
+             (+agent-acp--agy-steering-p state) (not sync) (buffer-live-p buffer))
+        (with-current-buffer buffer
+          (let* ((text (map-elt request :agy-steer-text))
+                 (turn (if text +agent-acp--agy-turn
+                         (+agent-acp--agy-turn-create :on-success on-success :on-failure on-failure)))
+                 (sequence (cl-incf (+agent-acp--agy-turn-sequence turn)))
+                 settled)
+            (setq +agent-acp--agy-turn turn)
+            (cl-incf (+agent-acp--agy-turn-pending turn))
+            ;; agent-shell removes requests by equality. Distinguish two
+            ;; identical prompts locally; acp.el sends only method and params.
+            (push (cons :agy-prompt-sequence sequence) request)
+            (setf (plist-get args :request) request
+                  (plist-get args :buffer) buffer
+                  (plist-get args :on-success)
+                  (lambda (response)
+                    (unless settled
+                      (setq settled t)
+                      (+agent-acp--agy-prompt-finished turn sequence text response nil)))
+                  (plist-get args :on-failure)
+                  (lambda (error raw)
+                    (unless settled
+                      (setq settled t)
+                      (+agent-acp--agy-prompt-finished turn sequence text nil (list error raw)))))
+            (condition-case err
+                (apply original args)
+              (error
+               (unless settled
+                 (setq settled t)
+                 (map-put! state :active-requests (delq request (map-elt state :active-requests)))
+                 ;; The original response can arrive while Emacs writes the
+                 ;; steer. Settle it even if this write fails. The caller
+                 ;; still owns the unsubmitted draft.
+                 (if text
+                     (+agent-acp--agy-settle-request turn)
+                   (setq +agent-acp--agy-turn nil)))
+               (signal (car err) (cdr err))))))
+      (apply original args))))
+
+(advice-add 'agent-shell--send-request :around #'+agent-acp--agy-track-prompt-a)
+
+(defun +agent-acp-can-steer-p (&optional buffer)
+  "Whether BUFFER's running turn accepts steering now."
+  (with-current-buffer (or buffer (current-buffer))
+    (and (not remote-buffer-disconnected-p)
+         (not (+agent-acp-client-exited-p (current-buffer)))
+         (not (+agent-acp-input-frozen-p (current-buffer)))
+         (or (agent-shell-steering-supported-p)
+             (and +agent-acp--agy-turn
+                  (not (or (bound-and-true-p +agent-acp--stop-token)
+                           (bound-and-true-p +agent-acp--stop-unconfirmed))))))))
+
+(defun +agent-acp-steer (prompt)
+  "Send PROMPT into the current buffer's active turn."
+  (unless (+agent-acp-can-steer-p)
+    (user-error "This turn cannot take steering"))
+  (if (agent-shell-steering-supported-p)
+      (agent-shell-busy-submit-steer prompt)
+    (let* ((text (agent-shell--expand-truncated-regions prompt))
+           (content (agent-shell--prompt-content-blocks text))
+           (request (acp-make-session-prompt-request
+                     :session-id (map-nested-elt agent-shell--state '(:session :id))
+                     :prompt content)))
+      (agent-shell--send-request
+       :state agent-shell--state :client (map-elt agent-shell--state :client)
+       :request (cons (cons :agy-steer-text text) request)
+       :buffer (current-buffer))
+      (condition-case err
+          (progn
+            ;; The native renderer inserts a prompt delimiter directly.
+            ;; Keep that delimiter with its text even in a hidden buffer.
+            (+agent-render-flush)
+            (let ((+agent-render--replaying t))
+              (agent-shell-experimental--render-steered-prompt :state agent-shell--state :prompt text)))
+        (error (message "Antigravity steer display: %s" (error-message-string err)))))))
+
 (declare-function agent-shell-get-model-name "agent-shell" (state))
 
 (defvar-local +agent-acp--context-last 0
@@ -2522,7 +2643,8 @@ This queries one registry."
                                   :load (map-elt state :supports-session-load)
                                   :resume (map-elt state :supports-session-resume)
                                   :fork (map-elt state :supports-session-fork)
-                                  :steer (map-elt state :supports-steering))
+                                  :steer (or (map-elt state :supports-steering)
+                                             (+agent-acp--agy-steering-p state)))
               :last-used +agent-acp-last-used-at)))))
 
 (defun +agent-session-capability-p (buffer capability)
@@ -3009,7 +3131,8 @@ visible-only render policy.  Neither setting affects ACP transport or events."
   "Mark ORIGINAL's process exit as deliberate.
 `delete-process' can run the sentinel before upstream forgets the client."
   (let ((+agent-acp--shutting-down t) (buffer (current-buffer)))
-    (setq +agent-acp--title-query nil)
+    (setq +agent-acp--title-query nil
+          +agent-acp--agy-turn nil)
     (unwind-protect (apply original args)
       (when (buffer-live-p buffer)
         (run-hook-with-args '+agent-acp-client-ended-functions buffer)
@@ -3278,6 +3401,11 @@ second, concurrent prompt into the same session."
   (eq (plist-get (buffer-local-value '+agent-acp--prompt-receipt buffer) :status)
       'pending))
 
+(defun +agent-acp-input-frozen-p (buffer)
+  "Whether the pending structured prompt in BUFFER owns frozen input."
+  (and (+agent-acp-structured-turn-p buffer)
+       (plist-get (buffer-local-value '+agent-acp--prompt-receipt buffer) :freeze-input)))
+
 (defun +agent-acp--finish-prompt (buffer receipt &optional process-queue)
   "Restore native input for RECEIPT, unless BUFFER has begun another turn."
   (when (and (+agent-acp-agent-buffer-p buffer)
@@ -3303,10 +3431,10 @@ second, concurrent prompt into the same session."
         (unless process-queue (+agent-acp--hold-queue))
         (+agent-acp--changed)))))
 
-(cl-defun +agent-acp-prompt (&key buffer content run-id on-success on-failure process-queue)
+(cl-defun +agent-acp-prompt (&key buffer content run-id on-success on-failure process-queue freeze-input)
   "Send CONTENT through BUFFER's initialized ACP session.
 PROCESS-QUEUE continues native pending prompts after a normal completed turn.
-Research callers retain their explicit queue policy by leaving it nil."
+FREEZE-INPUT makes the running prompt accept only queued follow-ups."
   (with-current-buffer buffer
     (when remote-buffer-disconnected-p
       (user-error "Remote target is disconnected; reconnect this agent session before sending"))
@@ -3316,7 +3444,7 @@ Research callers retain their explicit queue policy by leaving it nil."
     ;; A new turn is running; do not write a prompt into its output.
     (setq-local +agent-acp--prompt-owed nil)
     (let ((state agent-shell--state)
-          (receipt (list :run-id run-id :status 'pending :response nil :error nil
+          (receipt (list :run-id run-id :status 'pending :freeze-input freeze-input :response nil :error nil
                          :fail nil))
           fail)
       (setq-local +agent-acp--prompt-receipt receipt)

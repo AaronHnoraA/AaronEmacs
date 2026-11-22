@@ -881,13 +881,6 @@ Emacs owns which frontend shows a conversation."
                              (map-elt agent-shell--state :available-commands))))
       (cadr entry))))
 
-(defun +agent-shell-structured-steer-p (buffer)
-  "Whether input typed during BUFFER's structured turn may steer it.
-It may when the agent reports steering and no Research Run owns the turn,
-whose input is frozen at RunSpec time; the busy-submit functions decide."
-  (and (agent-shell-steering-supported-p :shell-buffer buffer)
-       (not (eq (buffer-local-value '+agent-acp-session-origin buffer) 'run))))
-
 (defun +agent-shell--submit-a (original &rest args)
   "Run local slash commands, or reconnect an exited client, before submission.
 Local commands come first: they never reach the agent, so /resume, /restart or
@@ -908,12 +901,10 @@ Local commands come first: they never reach the agent, so /resume, /restart or
         ((and (derived-mode-p 'agent-shell-mode)
               (+agent-acp-structured-turn-p (current-buffer)))
          (when-let* ((prompt (agent-shell--prompt-input)))
-           (agent-shell--clear-prompt-input)
-           (if (+agent-shell-structured-steer-p (current-buffer))
-               (funcall (if (car args) agent-shell-busy-submit-override-function
-                          agent-shell-busy-submit-default-function)
-                        prompt)
-             (agent-shell--prompt-queue-enqueue :prompt prompt))))
+           (if (+agent-acp-input-frozen-p (current-buffer))
+               (agent-shell-busy-submit-queue prompt)
+             (agent-shell--busy-submit :prompt prompt :override (car args)))
+           (agent-shell--clear-prompt-input)))
         (t (apply original args))))
 
 (defun +agent-shell/here (agent &optional file)
@@ -1124,8 +1115,8 @@ double prefix ARG picks among the pool, new and saved conversations."
 
 (defun +agent-shell-busy-submit-steer-or-queue (prompt)
   "Steer PROMPT when the adapter supports it, otherwise queue it."
-  (if (agent-shell-steering-supported-p)
-      (agent-shell-busy-submit-steer prompt)
+  (if (+agent-acp-can-steer-p)
+      (+agent-acp-steer prompt)
     (agent-shell-busy-submit-queue prompt)))
 
 (declare-function agent-shell--prompt-input-start "agent-shell-prompt" ())

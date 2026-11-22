@@ -113,15 +113,12 @@
                (:respond . ,(lambda (id) (setq selected id))))))
     (should (equal selected "deny"))))
 
-(ert-deftest agent-appearance-c53-busy-hints-follow-provider-and-owner ()
+(ert-deftest agent-appearance-c53-busy-hints-follow-provider ()
   (with-temp-buffer
-    (let ((+agent-acp-run-owned-functions nil))
-      (cl-letf (((symbol-function 'agent-shell-steering-supported-p) (lambda () t)))
-        (should (equal (+agent-input--submission #'+agent-shell-busy-submit-steer-or-queue) "steer")))
-      (cl-letf (((symbol-function 'agent-shell-steering-supported-p) (lambda () nil)))
-        (should (equal (+agent-input--submission #'+agent-shell-busy-submit-steer-or-queue) "queue")))
-      (let ((+agent-acp-run-owned-functions (list (lambda (_) t))))
-        (should (equal (+agent-input--submission #'agent-shell-busy-submit-steer) "queue"))))))
+    (cl-letf (((symbol-function 'agent-shell-steering-supported-p) (lambda () t)))
+      (should (equal (+agent-input--submission #'+agent-shell-busy-submit-steer-or-queue) "steer")))
+    (cl-letf (((symbol-function 'agent-shell-steering-supported-p) (lambda () nil)))
+      (should (equal (+agent-input--submission #'+agent-shell-busy-submit-steer-or-queue) "queue")))))
 
 (ert-deftest agent-c56-return-writes-cmd-return-steers-cmd-shift-queues ()
   (dolist (key '("RET" "<return>"))

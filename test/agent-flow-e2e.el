@@ -13,7 +13,8 @@
 (defun agent-flow-e2e--config (store)
   (let ((fixture (expand-file-name "test/fixtures/agent-flow-acp.mjs" user-emacs-directory)))
     (agent-shell-make-agent-config
-     :identifier 'flow-fixture :mode-line-name "Fixture"
+     :identifier (if (getenv "AGENT_FLOW_AGY") 'antigravity 'flow-fixture)
+     :mode-line-name "Fixture"
      :buffer-name "Agent Flow" :shell-prompt "Fixture> "
      :shell-prompt-regexp "Fixture> "
      :client-maker (lambda (buffer)

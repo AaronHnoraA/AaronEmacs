@@ -420,7 +420,9 @@
 (ert-deftest agent-input-c64-cmd-ret-steers-a-structured-turn ()
   "A page's or an API's request runs outside shell-maker; Cmd-RET still steers it."
   (agent-lifecycle-e2e--with-steering-session (buffer store directory)
-    (+agent-acp-prompt :buffer buffer :run-id "agent-task-1"
+    ;; This conversation was originally created by a Run.
+    (with-current-buffer buffer (setq-local +agent-acp-session-origin 'run))
+    (+agent-acp-prompt :buffer buffer :run-id "agent-task-1" :process-queue t
                        :content (list '((type . "text") (text . "hold"))))
     (agent-flow-e2e--wait (lambda () (+agent-acp-structured-turn-p buffer)))
     (with-current-buffer buffer
@@ -439,17 +441,85 @@
 (ert-deftest agent-input-c64-a-run-keeps-its-input-frozen-and-says-so ()
   "A Research Run's input is frozen: typed text waits, and the hint says it will."
   (agent-lifecycle-e2e--with-steering-session (buffer store directory)
-    (with-current-buffer buffer (setq-local +agent-acp-session-origin 'run))
-    (+agent-acp-prompt :buffer buffer :run-id "run-1"
+    (+agent-acp-prompt :buffer buffer :run-id "run-1" :freeze-input t
                        :content (list '((type . "text") (text . "hold"))))
     (agent-flow-e2e--wait (lambda () (+agent-acp-structured-turn-p buffer)))
     (should (string-match-p "Cmd-RET queue (this turn's input is frozen)"
-                            (with-current-buffer buffer (+agent-input--hint))))
+                            (with-current-buffer buffer (overlay-get +agent-input--overlay 'before-string))))
     (agent-flow-e2e--send buffer "waits")
     (should (member "waits" (+agent-queue-items buffer)))
     (should-not (string-match-p "Steered: waits" (agent-flow-e2e--text buffer)))
     (+agent-acp-interrupt buffer t)
     (agent-flow-e2e--idle buffer)))
+
+(ert-deftest agent-input-c64-unsupported-adapter-queues-without-freezing-input ()
+  (agent-lifecycle-e2e--with-session (buffer store directory)
+    (+agent-acp-prompt :buffer buffer :process-queue t
+                       :content '(((type . "text") (text . "hold"))))
+    (with-current-buffer buffer
+      (setq-local agent-shell-busy-submit-default-function #'+agent-shell-busy-submit-steer-or-queue)
+      (should (string-match-p "Cmd-RET queue · Cmd-S-RET queue" (+agent-input--hint))))
+    (agent-flow-e2e--send buffer "waits")
+    (should (equal (+agent-queue-items buffer) '("waits")))
+    (+agent-acp-interrupt buffer t)
+    (agent-flow-e2e--idle buffer)))
+
+(ert-deftest agent-input-c64-agy-keeps-native-and-document-turns-open-through-steering ()
+  (let ((process-environment (cons "AGENT_FLOW_AGY=1" process-environment)))
+    (dolist (structured '(nil t))
+      (agent-lifecycle-e2e--with-session (buffer store directory)
+        (with-current-buffer buffer
+          (setq-local agent-shell-busy-submit-default-function #'+agent-shell-busy-submit-steer-or-queue))
+        (if structured
+            (+agent-acp-prompt :buffer buffer :run-id "document-task" :process-queue t
+                               :content '(((type . "text") (text . "hold"))))
+          (agent-flow-e2e--send buffer "hold"))
+        (should (string-match-p "Cmd-RET steer"
+                                (with-current-buffer buffer (overlay-get +agent-input--overlay 'before-string))))
+        (with-current-buffer buffer
+          (goto-char (point-max))
+          (insert "queued follow-up")
+          (agent-shell-submit-override)
+          (when structured (setq-local +agent-render-policy 'never)))
+        (agent-flow-e2e--send buffer "change course")
+        (agent-flow-e2e--wait (lambda () (string-match-p "Applying steering" (agent-flow-e2e--text buffer))))
+        (should (+agent-acp-busy-p buffer))
+        (when structured
+          (should (eq 'pending (plist-get (+agent-acp-prompt-receipt buffer "document-task") :status))))
+        (should (equal (+agent-queue-items buffer) '("queued follow-up")))
+        (agent-flow-e2e--idle buffer)
+        (let ((transcript (agent-flow-e2e--text buffer)))
+          (should (string-match-p (regexp-quote "[steer] change course<shell-maker-end-of-prompt>")
+                                  transcript))
+          (should (< (string-match "Steered: change course" transcript)
+                     (string-match "Reply: queued follow-up" transcript))))
+        (should-not (+agent-queue-items buffer))
+        (should-not (seq-some (lambda (line) (string-match-p "_session/steering" line))
+                              (agent-lifecycle-e2e--events store)))))))
+
+(ert-deftest agent-input-c64-agy-holds-a-rejected-steer ()
+  (let ((process-environment (cons "AGENT_FLOW_AGY=1" process-environment)))
+    (agent-lifecycle-e2e--with-session (buffer store directory)
+      (with-current-buffer buffer
+        (setq-local agent-shell-busy-submit-default-function #'+agent-shell-busy-submit-steer-or-queue))
+      (agent-flow-e2e--send buffer "hold")
+      (agent-flow-e2e--send buffer "reject steer")
+      (agent-flow-e2e--wait (lambda () (= (+agent-acp-held-prompt-count buffer) 1)))
+      (should (equal (+agent-queue-items buffer) '("reject steer")))
+      (+agent-acp-interrupt buffer t)
+      (agent-flow-e2e--idle buffer))))
+
+(ert-deftest agent-input-c64-agy-does-not-complete-a-task-when-steering-loses-transport ()
+  (let ((process-environment (cons "AGENT_FLOW_AGY=1" process-environment)))
+    (agent-lifecycle-e2e--with-session (buffer store directory)
+      (with-current-buffer buffer
+        (setq-local agent-shell-busy-submit-default-function #'+agent-shell-busy-submit-steer-or-queue))
+      (+agent-acp-prompt :buffer buffer :run-id "document-task" :process-queue t
+                         :content '(((type . "text") (text . "hold"))))
+      (agent-flow-e2e--send buffer "drop steer")
+      (agent-flow-e2e--wait (lambda () (+agent-acp-client-exited-p buffer)))
+      (should (eq 'failed (plist-get (+agent-acp-prompt-receipt buffer "document-task") :status)))
+      (should (equal (+agent-queue-items buffer) '("drop steer"))))))
 
 (ert-deftest agent-queue-c39-send-now-keeps-the-prompt-when-steering-is-called-off ()
   "Send now removes a prompt only once it has gone; a refused steer leaves it in place."
@@ -461,6 +531,21 @@
     ;; The upstream "Steer anyway?" question is answered no by the harness.
     (should-error (+agent-queue-send-now buffer 1) :type 'user-error)
     (should (equal (+agent-queue-items buffer) '("first" "second")))))
+
+(ert-deftest agent-queue-c39-confirmation-does-not-restore-a-prompt-that-finished ()
+  (agent-lifecycle-e2e--with-steering-session (buffer store directory)
+    (agent-flow-e2e--send buffer "permission")
+    (agent-flow-e2e--wait (lambda () (eq (with-current-buffer buffer (agent-shell-status)) 'blocked)))
+    (agent-flow-e2e--send buffer "follow-up during confirmation")
+    (cl-letf (((symbol-function 'y-or-n-p)
+               (lambda (&rest _)
+                 (agent-flow-e2e--control buffer 'agent-shell-permission-button #'identity)
+                 (agent-flow-e2e--idle buffer)
+                 t)))
+      (should-error (+agent-queue-send-now buffer 0) :type 'user-error))
+    (should-not (+agent-queue-items buffer))
+    (should (= 1 (cl-count-if (lambda (line) (string-match-p "follow-up during confirmation" line))
+                              (agent-lifecycle-e2e--events store))))))
 
 (ert-deftest agent-side-c59-a-side-question-forks-the-conversation ()
   "/side forks the session it stands beside and leaves that session's turn alone."

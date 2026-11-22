@@ -16,8 +16,6 @@
 (declare-function aaron-ui-float-show "aaron-ui-float" (buffer &rest options))
 (declare-function aaron-ui-float-panel-for-buffer "aaron-ui-float" (buffer))
 (declare-function aaron-ui-float-hide "aaron-ui-float" (&optional panel))
-(declare-function agent-shell-prompt-steer "agent-shell-prompt-queue" (&optional prompt))
-(declare-function agent-shell-steering-supported-p "agent-shell" (&rest args))
 (declare-function agent-shell--prompt-queue-process-next "agent-shell-prompt-queue" ())
 (declare-function agent-shell--prompt-queue-read "agent-shell-prompt-queue" (&rest args))
 (defvar agent-shell-prompt-queue-merge)
@@ -109,21 +107,34 @@ A running turn receives it by steering.  An agent that cannot steer refuses:
 interrupting its work is a separate, explicit decision."
   (+agent-queue--require-index buffer index)
   (+agent-queue--ready buffer)
+  (when (+agent-acp-busy-p buffer)
+    (unless (+agent-acp-can-steer-p buffer)
+      (user-error "This agent cannot take input during a turn; stop it first"))
+    (when (with-current-buffer buffer
+            (or (agent-shell--permission-pending-p)
+                (agent-shell-elicitation--pending-p)))
+      (let ((prompt (nth index (+agent-queue-items buffer)))
+            (turn (+agent-acp-state-value buffer '(:request-count))))
+        (unless (y-or-n-p "Shell is pending user action (Steering may cancel work).  Steer anyway?")
+          (user-error "Steering cancelled"))
+        ;; ACP can drain the queue or begin another turn during confirmation.
+        (unless (and (buffer-live-p buffer)
+                     (eq prompt (nth index (+agent-queue-items buffer)))
+                     (equal turn (+agent-acp-state-value buffer '(:request-count))))
+          (user-error "The queue or active turn changed during confirmation"))
+        (+agent-queue--ready buffer))))
   (let ((busy (+agent-acp-busy-p buffer))
         (items (+agent-queue-items buffer))
         (held (+agent-acp-held-prompt-count buffer))
-        (sent nil))
-    (when (and busy (not (with-current-buffer buffer (agent-shell-steering-supported-p))))
-      (user-error "This agent cannot take input during a turn; stop it first"))
-    ;; The prompt leaves the queue only once it has gone: agent-shell may ask
-    ;; first ("Steer anyway?" while a request waits on you), and a no there
-    ;; must leave it where it was.  A steer declined later is held (C37).
+        sent)
+    ;; A synchronous failure restores the row.  A steer declined later is
+    ;; held by the transport callback (C37).
     (unwind-protect
         (let ((prompt (nth index items)))
           (+agent-queue-remove buffer index)
           (with-current-buffer buffer
             (if busy
-                (agent-shell-prompt-steer prompt)
+                (+agent-acp-steer prompt)
               (map-put! agent-shell--state :pending-prompts
                         (cons prompt (map-elt agent-shell--state :pending-prompts)))
               (let ((agent-shell-prompt-queue-merge nil))

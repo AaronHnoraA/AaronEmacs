@@ -192,7 +192,7 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
   通用层不把会话树当 WorkNode DAG，不把会话完成当研究任务完成。Run 的完成
   通知等待 host 确认终态；ACP 回合结束不替代该确认。
 - **C3 按能力暴露操作。** list/load/fork、usage、steer、权限回调等以 adapter
-  的真实报告为准。未报告为 unavailable；不能用 buffer 存在推断进程存活，
+  的真实报告或已验证的 provider 协议为准。无已知协议支持的操作为 unavailable；不能用 buffer 存在推断进程存活，
   不能把静默当故障，不能把历史恢复当附着到另一客户端的活动执行。
 - **C4 保留原生执行权威。** 已有 agent-shell/acp/shell-maker 依赖继续按组锁定。
   ECA 的工具循环、模型请求与子代理调度用于研究，不复制成与 CLI 竞争的第二套
@@ -531,9 +531,12 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
 - **C64 结构化回合里输入照常 steer。** Noema 页面发起的请求、带回执的 API 任务和 Research Run
   都以结构化 ACP 请求发出，不经过 agent-shell 的输入层，所以普通提交会与它并发出第二个回合。
   它仍是忙碌的回合：`Cmd-RET`、`Cmd-S-RET` 和其他回合一样按 `agent-shell-busy-submit-*`
-  的配置 steer 或排队；只有 Research Run（会话来源 `run`）的输入在 RunSpec 冻结，一律排队。
-  输入提示说出真实路径：冻结时显示 `Cmd-RET queue (this turn's input is frozen)`，不会写 steer
-  却排队。被拒的 steer 仍按 C37 放回挂起队列首位。测试：`agent-input-c64-*`。
+  的配置 steer 或排队。Research worker 在当前请求上标记 RunSpec 输入已冻结，后续提交排队；
+  同一会话的其他回合独立判断。冻结时提示 `Cmd-RET queue (this turn's input is frozen)`，
+  适配器缺乏 steering 时显示普通排队提示。
+  配置使用的 `agy acp` 通过第二个 `session/prompt` 接收中途指令。Emacs 保留原生回合和
+  结构化任务的完成回调，等它们的请求都收到响应后才结清并处理队列。被拒的 steer 按 C37
+  放回挂起队列首位。测试：`agent-input-c64-*`。
 - **C65 文档协作者绑定。** 协作者就是池里的会话，不另起注册表。会话多一项永久 buffer-local
   事实 `+agent-acp-session-file`：一个主文件（框架身份 `/fs:TARGET:/path`），nil 表示绑定在项目层；
   快照的 `:file` 读出它。Agent 实际运行时仍可读写任何文件，主文件之外改过的文件取自 C44 的
