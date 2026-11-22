@@ -113,6 +113,27 @@ atomic rebuild instead, providing probabilistic self-healing for missed
 external changes; set `NOEMA_WIKI_FULL_REFRESH_PROBABILITY` to a value from `0`
 to `1` to tune that diagnostic policy.
 
+### Index ownership
+
+`wiki.db` is derived data, and its builder is moving from Node
+(`server/lib/wiki-workspace.mjs`) into the Go kernel, which already reads the
+database for search. One builder at a time owns it; the move happens in
+stages, each behind the same contract:
+
+1. **Per-note parse contract (done).** `parseWikiNoteContent` is everything
+   the index derives from one note's text alone (title, id and identity
+   status, aliases, tags, namespace aliases, block ids, wiki links), with no
+   file system, repository or other notes. `shared/wiki-note-parse-fixtures.json`
+   pins its answers; `tests/wiki-note-parse-contract.test.ts` holds Node to
+   them, and the kernel's parser is written against the same file.
+2. **Kernel parser.** `kernel/noema/wikisearch` parses notes and passes the
+   fixtures; Node still builds.
+3. **Kernel builder.** Inventory, relationships (`resolveWikiRelationships`)
+   and persistence move to the kernel; Node asks it to refresh and only
+   forwards. The Node builder is then removed, not kept as a fallback.
+
+A change to what the index derives from a note changes the fixtures first.
+
 ## Links and identity
 
 Wiki pages support `[[Page]]` and `[[Page|Label]]`. Completion rewrites a known
