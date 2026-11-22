@@ -322,7 +322,9 @@ Noema 默认由 Portal Web 承载，与 Portal 终端共用 `portal-input`：按
 都在 Emacs 里执行，直到 `RET` / 点击回到视图，或移到别的窗口再回来；不打开
 minibuffer 的快捷键执行完仍回到视图。`Cmd-.` 同样把键盘留给 Emacs。
 Noema 只补充编辑器命令映射。顶栏的返回、前进、刷新、编辑器聚焦和菜单按钮
-属于 Emacs。`xwidget` 仍可显式选择；以下专门说明它的旧键盘桥接行为。
+属于 Emacs。刷新（顶栏按钮、`r`、命令面板 Refresh from disk）先保存草稿、从磁盘重载，
+再重算由笔记画出的全部内容：公式、Mermaid、TikZ（包括渲染失败的块）、代码高亮、
+KaTeX 宏、笔记索引、链接与标签补全和 snippet；保存后的自动重载不清这些缓存。`xwidget` 仍可显式选择；以下专门说明它的旧键盘桥接行为。
 Portal 与 xwidget 的 Noema 菜单都能打开 Task Manager、Wiki Home、页面工具和导出；
 未显示的 Noema 页面可从顶栏页面列表切回。
 
