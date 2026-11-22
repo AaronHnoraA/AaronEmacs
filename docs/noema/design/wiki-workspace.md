@@ -130,9 +130,19 @@ stages, each behind the same contract:
    fixture, offsets counted in UTF-16 units as JavaScript counts them; Node
    still builds. Known oddity kept by both: a `{#id}` on a non-semantic
    environment's title (`tikz`) is indexed as a plain anchor.
-3. **Kernel builder.** Inventory, relationships (`resolveWikiRelationships`)
-   and persistence move to the kernel; Node asks it to refresh and only
-   forwards. The Node builder is then removed, not kept as a fallback.
+3. **Kernel builder.**
+   - *Relationships (done).* `wikiindex.Resolve` matches
+     `resolveWikiRelationships` on `shared/wiki-relationship-fixtures.json`
+     (refs, backlinks, unresolved links, wanted, ambiguous, duplicate titles
+     and ids, missing fragments). Similar-title pairs are still Node's.
+   - *Persistence (next).* The kernel writes every `wiki.db` table, the FTS
+     and bigram tables included, with Node's incremental rules (row diffs,
+     parse cache, per-repository head state). It is verified by building the
+     same vault with both builders into separate files and comparing them
+     table by table before the kernel takes over the real file.
+   - *Inventory and switch.* Repository discovery and file inventory move to
+     the kernel; Node asks it to refresh and only forwards. The Node builder
+     is then removed, not kept as a fallback.
 
 A change to what the index derives from a note changes the fixtures first.
 
