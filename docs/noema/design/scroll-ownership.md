@@ -66,3 +66,19 @@ NOEMA_SCROLL_APP_URL=http://127.0.0.1:50999 NOEMA_SCROLL_APP_FILE=/tmp/scroll-fi
 表格入口应锚定表格起点。离开长表格时，CM6 的行高缓存会暂时与实际 DOM 相差数行，按下正文的位置
 应使用 DOM 光标坐标作锚点。表格预览和逐格编辑的单元格尺寸也要由同一份结构样式定义，否则切换后
 表格高度本身会变化。未聚焦时打开格内公式必须用 `view.focus()`，由 CM6 同步源码光标后再接管焦点。
+
+## Where a pointer lands
+
+The caret has one owner too: `src/cm6/pointer-position.ts`. Every click,
+drag, double or triple click (`pointerSelectionStyle`, CodeMirror's mouse
+selection with our positions), hover, context-menu and drop lookup asks
+`pointerPosition` (the facade's `positionAtPoint`). It trusts the browser's
+hit test on text inside a real `.cm-line` under the pointer and falls back to
+CodeMirror's `posAtCoords` only for widgets, gaps and margins. CodeMirror
+chooses the line from its height map, which lags behind images, TikZ,
+diagrams and display math measured after they were drawn; that lag was the
+recurring "the caret does not land where I click". A press on a widget, a
+control, or with Alt/Cmd/Ctrl keeps CodeMirror's default.
+`tests/architecture-pointer.test.ts` keeps any other code from mapping a
+pointer itself.
+
