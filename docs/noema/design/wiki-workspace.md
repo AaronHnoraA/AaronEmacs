@@ -163,8 +163,11 @@ stages, each behind the same contract:
    - *Server reader (done).* It starts the kernel too (compiled on the
      server at deploy) and builds its catalogue from the kernel's index; its
      search and publishing boundary are unchanged.
-   - *Remaining.* The Node tests still use the host builder; it is removed
-     once they run a kernel.
+   - *Node builder removed (done).* The Wiki layout has one builder, the
+     kernel; `buildWikiIndex` fails without one. The test suite builds the
+     kernel's indexer once (`tests/setup/build-kernel-wikiindex.ts`) and
+     indexes through it like the hosts. The legacy single-folder layout keeps
+     its host builder.
 
 A change to what the index derives from a note changes the fixtures first.
 
