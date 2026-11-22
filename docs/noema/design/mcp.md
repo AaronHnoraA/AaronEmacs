@@ -73,14 +73,20 @@ the same published catalog as the public Wiki. It provides four read-only
 tools: `search_notes`, `list_notes`, `read_note` and `list_tags`. A note path is
 the public path returned by search or list, such as
 `public/Public-README/example.md`. Hidden pages and private repositories are
-absent from this catalog. Server mode does not start the Go kernel or expose
-its writable `/mcp/research` and `/mcp/coordinator` surfaces.
+absent from this catalog. Server mode starts the Go kernel only to build the
+Wiki index (docs/noema/design/wiki-workspace.md "Index ownership"); the host
+never forwards to it, so its writable `/mcp/research` and `/mcp/coordinator`
+surfaces are not served. The kernel listens on the server's loopback
+interface only, which other processes on that machine can reach.
 
 From AaronEmacs, `make noema-server-deploy` builds, uploads, restarts and
 checks the configured remote service. The ignored local files
 `server-config/runtime.json` and `server-config/deploy.json` in the Noema tree
 hold the site and SSH settings; initialize examples with
-`make noema-server-config-init`.
+`make noema-server-config-init`. The kernel is compiled on the server during
+deploy (cgo for SQLite, never cross-compiled on the Mac), so the server needs
+Go and a C compiler; `goBin` in `deploy.json` names the Go binary (default
+`/usr/local/go/bin/go`).
 
 ## Project MCP selection
 

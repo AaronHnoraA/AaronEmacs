@@ -160,8 +160,11 @@ stages, each behind the same contract:
      the host: a refresh while it restarts fails and says so. A kernel
      binary older than the endpoint is reported with the fix
      (`make kernel-build`).
-   - *Remaining.* The Server reader and the Node tests still use the host
-     builder; it is removed once they run a kernel.
+   - *Server reader (done).* It starts the kernel too (compiled on the
+     server at deploy) and builds its catalogue from the kernel's index; its
+     search and publishing boundary are unchanged.
+   - *Remaining.* The Node tests still use the host builder; it is removed
+     once they run a kernel.
 
 A change to what the index derives from a note changes the fixtures first.
 
