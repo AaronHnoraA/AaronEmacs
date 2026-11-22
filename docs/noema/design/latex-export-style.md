@@ -76,7 +76,8 @@ the gutter, to an arrow beside the note. Todos and revisions use matching
 elbow lines; the line does not run diagonally across body text. A note moved
 to another page keeps its source mark without a cross-page line. Long notes are divided
 into page-sized pieces before `marginfix` places them in the margin, allowing
-them to continue on later pages without losing text. The `marginnotes` option on
+them to continue on later pages without losing text. Each margin box scopes its
+own text colour so body text keeps the template's ink. The `marginnotes` option on
 `noema-macros` reserves a 52 mm right margin only for documents with side
 comments. Each kind is distinguishable by colour and
 prefix, so a reviewed PDF can be read without the source:
