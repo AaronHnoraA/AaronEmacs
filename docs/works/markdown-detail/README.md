@@ -127,3 +127,13 @@ string），换编辑器打开仍可读。这与 Noema 现有 `syntax.md` 的方
    （`noema-agent-worker`、`noema-sessions`、`noema-pi-router`、`noema-interaction-*`），
    按 AGENT.md 应在 `lisp/tools/agent/`；Research 只保留自己的 Run/DAG 适配。需逐文件列出调用方后
    分批迁移，每批跑 `make state-check`。
+
+   初步归类（按文件首行说明，尚未逐一核对调用方）：
+
+   | 去 `lisp/tools/agent/` | 留在 Noema（Research／项目） | 待核对 |
+   | --- | --- | --- |
+   | `noema-sessions`（1023）、`noema-agent-takeover`（192）、`noema-agent-promote`（169）、`noema-agent-text`（43）、`noema-interaction-*`（约 4300，CLI 适配、gptel/Magent 引擎） | `noema-agent-acp`（Research 关联适配，AGENT.md 已指定）、`noema-orchestration`、`noema-research*`、`noema-exploration`、`noema-findings` | `noema-agent-worker`（2190，文档执行 worker）、`noema-pi-router`/`noema-pi-sessions`（Pi 是 Emacs 全局管家，但会话记录在 Noema）、`noema-agent-inbox`、`noema-hy-memory`、`noema-agent-entry` |
+
+   迁移改名要同步所有调用方（含 `etc/config-store.el`、Raycast、Noema 服务端），不留兼容别名；
+   每批先在 `docs/design/agent-management.md` 写明归属，再按 `make state-baseline` → `make state-check` 验证。
+
