@@ -133,3 +133,22 @@ string），换编辑器打开仍可读。这与 Noema 现有 `syntax.md` 的方
    `noema-pi-*`、`noema-agent-inbox`、`noema-hy-memory` 依赖项目与 host，暂留。
    迁移中发现并修正：Noema 服务端到不存在的 `var/noema-interaction/magent/sessions` 找 Magent 历史，
    Emacs 实际写在 `var/noema/magent/sessions/`。
+
+## 7. 外观对照：AutumnMark（muya）与 Noema 默认主题
+
+读 `upstream/autumnmark/packages/muya/src/assets/styles/{index,blockSyntax}.css` 与 Noema
+`src/styles/themes/theme-typora.css`、`src/styles/widgets.css` 得出的数值对照（2026-11-23，静态阅读，
+未截图比对）。Pele 只画图表，不涉及正文排版，不在此列。
+
+| 项 | AutumnMark | Noema 现状 | 建议（待用户圈选） |
+| --- | --- | --- | --- |
+| 正文 | 16px 无衬线，行高 1.6 | 20px 衬线/楷体，行高 1.46 | 中文段落行高偏紧；可只把含 CJK 的正文行升到 1.6，西文保持 1.46 |
+| 段间距 | 段落上下 0.5em | 由行高决定，无额外段距（CM6 行不能有外边距） | 不改：CM6 的行高必须精确，段距只能靠行内 padding |
+| 标题阶梯 | h1 1.875 / h2 1.5 / h3 1.375em，粗体，行高 1.4，上下 1rem | h1 1.56em 小型大写居中加饰线，h2 1.16、h3 1.06em | h2、h3 与正文差距太小，层级不明显；可拉到 h2 1.3、h3 1.15em，保留现有字体与饰线 |
+| 引用块 | 2px 细竖线，内缩 15px，文字 30px 内边距，文字为 50% 墨色 | 3px 竖线，0.8em 内边距，次要色 | 可改为 2px 细线、略增内边距，更轻 |
+| 表格 | 单元格 6px 13px，细线全框，首行粗体 | 学术三线风格（上下 2px，表头 1.5px，内部细线） | 不改：三线表更合 Noema 的论文语境 |
+| 代码块 | 90% 字号，复制按钮，可换行 | 0.875em，卡片化（标题条、细边、圆角），Fold/Copy | 已对齐（noema c957d57、本轮收紧结束行） |
+| 折叠 | 标题左侧折叠按钮 | 标题折叠箭头 | 已有 |
+
+结论：可学的主要是**标题层级拉开**、**CJK 正文行高**、**更轻的引用线**三项；表格和段距保持 Noema
+现有做法。三项都只改 `theme-typora.css` 的数值，不动结构，等用户圈选后再改并截图验收。
