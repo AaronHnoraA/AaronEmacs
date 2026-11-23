@@ -79,7 +79,7 @@ pnpm + lerna monorepo，Sustainable Use License（源码可见，限制商用；
 | 公式编译成 SQL | av 的 `template` 列、`calc` | 不引入 SQL 公式；数据不在 SQL 里。 |
 | 缓存 key 带 workspace/base 前缀 | kernel 的 LRU 与 generation 失效（Knowledge Dock 等） | 已一致。 |
 | queryGuard / coalescer | 各处有界 LRU、去抖 | 思路可在新 host 端点里复用：凡是“触发多次、做一次”的通知走合并。 |
-| SiYuan 遗留的 `kernel/av` JSON 数据库（MCP `database` 工具、CLI `database`） | 代码在，但数据存在 JSON 里不在 Markdown 里 | **继续不启用**：违背 Markdown-first。 |
+| SiYuan 遗留的 `kernel/av` JSON 数据库（MCP `database` 工具、CLI `database`） | 代码在；`database` 工具随 kernel MCP 注册。`model/markdown_native_guard.go` 拒绝一切指向 Markdown 笔记本块的 AV 写操作（含全部镜像块的预检），只剩不挂块的兼容视图写在 kernel 自己的 `storage/av` | **不启用为 Noema 的数据库**：JSON 不在 Markdown 里。现有防护足够，不改代码。 |
 
 ### 可视化表格与操作手感
 
@@ -99,7 +99,9 @@ pnpm + lerna monorepo，Sustainable Use License（源码可见，限制商用；
 | NocoDB | Emacs grid |
 | --- | --- |
 | 方向键/Tab 按格移动，当前格高亮 | `←→ TAB S-TAB` 按格，`↑↓ n p j k` 保持列换行；当前格用 overlay 高亮 |
-| Enter 编辑 / Space 展开 / Delete 清空 / Cmd-C 复制 | `RET`/`e` 编辑，`SPC` 记录表单，`DEL` 清空，`w`/`M-w` 复制 |
+| Enter 编辑 / Space 展开 / Delete 清空 / Cmd-C 复制 | `RET` 编辑，`e` 按纯文本编辑，`SPC` 记录表单，`DEL` 清空，`w`/`M-w` 复制 |
+| 复选框单击翻转；单选列下拉 | 勾选列 `RET` 直接翻转并保留大小写，画成 ☑/☐；单选列 `RET` 补全该列已有的值（仍接受新值） |
+| CSV 导入的类型探测（`jobs/data-import/csv-type-detector.ts`） | 借用其规则：成对布尔写法表（去掉 1/0，让给数字列）；单选 = 不超过 64 种取值且不超过非空格数的一半。注意上游当前版本的 `detectColumnTypes` 已关闭探测、一律返回文本，这里只借规则 |
 | Alt-R 加行 | `+` 加行并直接编辑首格；`D` 删行（确认） |
 | 撤销（社区版 `useUndoRedo` 是空实现） | `u` 在 CSV buffer 里 `undo`；所有编辑都是文本编辑，天然可撤销 |
 | Filter / Sort / Group / Fields | `/` 叠加过滤（`~ !~ = != > < >= <= empty filled`，数字列按数值比较），`\` 清除；`s` 升/降/取消；`G` 分组；`h` 隐藏列，`H` 全部显示 |
@@ -155,6 +157,33 @@ pnpm + lerna monorepo，Sustainable Use License（源码可见，限制商用；
 Markdown 里的稳定身份（`{#UUIDv7}` 块 id、属性块、`@@todo`）：Agent、Agenda、属性视图、
 任务图谱都引用这些身份。继续往这个方向走，就能在不引入数据库的前提下得到同样的一体化。
 
+### 其余模块
+
+| 模块 | 内容 | 对 Noema |
+| --- | --- | --- |
+| Webhook（`Hook`、`HookFilter`、`HookLog`） | 表事件触发 HTTP，带过滤条件和调用日志 | Pi watches 已覆盖“事件 → 动作”，单人本机不需要出站 webhook。 |
+| 导入导出（`jobs/at-import`、`data-import`、`data-export`，`extensions/data-exporter`） | Airtable 导入、CSV/Excel 导入、导出 | CSV 就地成为表（`+csv/grid`），无需导入；导出由 Markdown/CSV 文本本身承担。 |
+| 评论与反应（`Comment`、`CommentReaction`） | 按行评论 | Noema 有锚定在文本里的评论（`.noema-comments.jsonl`，C70/C80），不新增。 |
+| 审计（`Audit`、`meta/audit.service.ts`） | 每次修改留痕 | Git 历史就是审计。 |
+| 行颜色（`RowColorCondition`） | 按条件给行或单元格上色 | 未采用；可作为 grid 的后续想法，按 `face` 而非颜色值实现。 |
+| 权限、RLS、角色可见性（`Permission`、`ModelRoleVisibility`、`getRlsConditions`） | 多用户 | 单人设计，不需要（见 Markdown-first、单人原则）。 |
+| 共享视图、公开表单（`public-datas.controller.ts`） | 对外分享 | 发布走 `make publish*` 的个人站点，不新增。 |
+| 在线状态（`RecordPresenceBadge`） | 多人同时编辑提示 | 单人，不需要。 |
+
+## Noema 审计发现
+
+本轮顺着数据路径（属性视图、Agenda 投影、Wiki 索引、MCP 工具、Emacs 桥）读下来：
+
+- 属性视图三层分工清楚：spec 只在 `shared/attribute-view.mjs` 与 Go `attributeview` 两处解析，
+  host 的 `buildAttributeView` 在 Go 不可用且属于 canonical scope 时拒绝回退（`requireGoCore`），
+  写回只经 `patchAttributeViewCell`，并且有 block 属性的版本校验重试。没有发现违反契约的地方。
+- 可编辑范围是 todo 行的 planning 键，以及带 UUIDv7 的块属性；其余列只读，错误信息会说明原因。
+  原生视图直接显示 host 的错误，不自己判断。
+- Noema 仓库曾跟踪编辑器备份 `lisp/noema-capability-actions.el~`；已移除，并在 `.gitignore`
+  忽略 `*~`。
+- Emacs 配置曾把 clutch 控制台目录 `clutch/` 跟踪在仓库根目录；已移到 `var/clutch/`。
+- 页面里的 `attribute-view.ts` widget 有另一项任务的未提交改动，本轮没有碰。
+
 ## 社区版与闭源边界
 
 以下后端模型在公开仓库里是空壳（`static async get(..._args) { return null }` 之类）：
@@ -177,6 +206,7 @@ CSV grid（10 万行、4.1 MB、每 10 行一个带引号的字段，batch Emacs
 | 过滤 | 0.70 s |
 | 编辑非排序列 | 0.10 s（只重读该记录，后续记录起点平移，沿用上次行序） |
 | 编辑排序列 | 0.97 s（需要重排） |
+| 单选列补全候选 | 0.04 s |
 
 边界：最多画 `+csv-grid-max-rows`（2000）行，超过时提示过滤或分组；超过
 `+csv-grid-max-bytes`（30 MB）拒绝打开；列宽上限 40 字符。没有用 vtable，因为它为每个
@@ -190,9 +220,10 @@ grid 在 0.3 s 空闲后重绘；最后一个 grid 关闭时摘掉 CSV buffer �
 
 - `site-lisp/noema/tests/elisp/noema-attribute-view-tests.el`：6 项（找块跳过代码围栏、
   spec 原样发送、画行/诊断/计算、丢弃过期答案、kanban 分组、编辑经 host 写回后重新求值）。
-- `test/csv-grid-tests.el`：12 项（引号/换行/空行解析、按需加引号、类型推断、数字排序空值
+- `test/csv-grid-tests.el`：16 项（引号/换行/空行解析、按需加引号、类型推断、数字排序空值
   垫底、过滤叠加且不改源、分组与聚合、编辑写回、拒绝过期记录、增删行、按格移动、
-  隐藏列、关闭最后一个视图后摘钩子）。
+  隐藏列、关闭最后一个视图后摘钩子、勾选与单选列识别、保留大小写的翻转、单选补全、
+  勾选列排序与计数）。
 
 ## 留给人决定的
 

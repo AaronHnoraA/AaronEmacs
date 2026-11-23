@@ -49,9 +49,20 @@
   "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\(?:[T ][0-9:.]+Z?\\)?\\'"
   "An ISO date or date-time.")
 
+(defconst +csv-grid--checkbox-pairs
+  '(("true" . "false") ("yes" . "no") ("y" . "n") ("on" . "off")
+    ("checked" . "unchecked") ("enabled" . "disabled") ("done" . "")
+    ("x" . "") ("[x]" . "[ ]") ("✓" . "") ("✔" . "") ("☑" . "") ("✅" . ""))
+  "Checked and unchecked spellings a checkbox column may use.
+Taken from NocoDB's CSV import; 1/0 is left to number columns.")
+
+(defconst +csv-grid--select-limit 64
+  "Most distinct values a column may hold to be offered as a choice.")
+
 (defconst +csv-grid--aggregates
   '((number . (count unique sum avg min max))
     (date . (count unique min max))
+    (checkbox . (checked unchecked))
     (t . (count unique)))
   "Totals offered per column type, in the order `a' cycles them.")
 
@@ -161,7 +172,10 @@ the record's buffer position.  Blank lines are not records."
 (defvar-local +csv-grid--tick nil "Source modification tick the records were read at.")
 (defvar-local +csv-grid--header nil "Column names, a vector.")
 (defvar-local +csv-grid--records nil "Data records, a vector of (START . FIELDS).")
-(defvar-local +csv-grid--types nil "Column types: `number', `date' or `text'.")
+(defvar-local +csv-grid--types nil
+  "Column types: `number', `date', `checkbox', `select' or `text'.")
+(defvar-local +csv-grid--checkboxes nil
+  "Per column, the (CHECKED . UNCHECKED) pair of a checkbox column.")
 (defvar-local +csv-grid--widths nil "Drawn column widths, a vector.")
 (defvar-local +csv-grid--filters nil "List of (COLUMN OP VALUE), all must hold.")
 (defvar-local +csv-grid--sort nil "(COLUMN . asc|desc) or nil.")
@@ -188,20 +202,80 @@ the record's buffer position.  Blank lines are not records."
        (string-match-p +csv-grid--number-re value)
        (string-to-number (string-replace "," "" value))))
 
+(defun +csv-grid--checkbox-pair (values)
+  "Return the checkbox pair all non-empty VALUES spell, or nil."
+  (let ((seen (delete-dups (mapcar #'downcase values))))
+    (and seen
+         (seq-find (lambda (pair)
+                     (seq-every-p (lambda (value) (member value (list (car pair) (cdr pair)))) seen))
+                   +csv-grid--checkbox-pairs))))
+
 (defun +csv-grid--guess-types (records width)
-  "Guess the type of each of WIDTH columns from RECORDS."
+  "Guess the type of each of WIDTH columns from RECORDS.
+Return (TYPES . CHECKBOXES).  A text column with few distinct values
+that repeat is a `select', as NocoDB's import decides: at most
+`+csv-grid--select-limit' values and at most half as many as filled cells."
   (let ((types (make-vector width nil))
+        (checkboxes (make-vector width nil))
         (limit (min (length records) +csv-grid--type-sample)))
     (dotimes (column width)
-      (let ((number t) (date t) (seen nil))
+      (let ((number t) (date t) (values nil))
         (dotimes (index limit)
           (let ((value (+csv-grid--field (aref records index) column)))
             (unless (string-empty-p value)
-              (setq seen t)
+              (push value values)
               (unless (string-match-p +csv-grid--number-re value) (setq number nil))
               (unless (string-match-p +csv-grid--date-re value) (setq date nil)))))
-        (aset types column (cond ((not seen) 'text) (number 'number) (date 'date) (t 'text)))))
-    types))
+        (let ((pair (and values (not number) (+csv-grid--checkbox-pair values)))
+              (distinct (length (delete-dups (copy-sequence values)))))
+          (aset checkboxes column pair)
+          (aset types column
+                (cond ((null values) 'text)
+                      (number 'number)
+                      (date 'date)
+                      (pair 'checkbox)
+                      ((and (>= (length values) 4)
+                            (<= distinct +csv-grid--select-limit)
+                            (<= distinct (ceiling (length values) 2)))
+                       'select)
+                      (t 'text))))))
+    (cons types checkboxes)))
+
+(defun +csv-grid--checked-p (column value)
+  "Non-nil when VALUE is the checked spelling of checkbox COLUMN."
+  (let ((pair (aref +csv-grid--checkboxes column)))
+    (and pair (not (string-empty-p value)) (equal (downcase value) (car pair)))))
+
+(defun +csv-grid--toggled (column value)
+  "Return VALUE of checkbox COLUMN flipped, keeping its letter case."
+  (pcase-let* ((`(,on . ,off) (aref +csv-grid--checkboxes column))
+               (next (if (+csv-grid--checked-p column value) off on))
+               (style (if (string-empty-p value)
+                          (seq-find (lambda (v) (not (string-empty-p v)))
+                                    (mapcar (lambda (r) (+csv-grid--field r column)) +csv-grid--records)
+                                    "")
+                        value)))
+    (cond ((and (not (string-empty-p style)) (string= style (upcase style)) (not (string= style (downcase style))))
+           (upcase next))
+          ((and (> (length style) 1) (string= style (capitalize style)) (not (string= style (downcase style))))
+           (capitalize next))
+          (t next))))
+
+(defun +csv-grid--display (column value)
+  "Return how VALUE of COLUMN is drawn."
+  (if (eq (aref +csv-grid--types column) 'checkbox)
+      (if (+csv-grid--checked-p column value) "☑" "☐")
+    value))
+
+(defun +csv-grid--choices (column)
+  "Return the distinct non-empty values of COLUMN, sorted."
+  (let ((seen (make-hash-table :test #'equal)) values)
+    (seq-doseq (record +csv-grid--records)
+      (let ((value (+csv-grid--field record column)))
+        (unless (or (string-empty-p value) (gethash value seen))
+          (puthash value t seen)
+          (push value values))))
+    (sort values #'string<)))
 
 (defun +csv-grid--read-source ()
   "Read the source buffer into this grid's state."
@@ -220,7 +294,10 @@ the record's buffer position.  Blank lines are not records."
                                                 collect (let ((name (if (< column (length header)) (aref header column) "")))
                                                           (if (string-empty-p name) (format "Column %d" (1+ column)) name))))
             +csv-grid--records (if (> (length records) 0) (seq-subseq records 1) [])
-            +csv-grid--types (+csv-grid--guess-types +csv-grid--records width)))))
+            +csv-grid--types nil)
+      (let ((guess (+csv-grid--guess-types +csv-grid--records width)))
+        (setq +csv-grid--types (car guess)
+              +csv-grid--checkboxes (cdr guess))))))
 
 ;;;; Filtering, sorting, totals
 
@@ -263,11 +340,13 @@ the record's buffer position.  Blank lines are not records."
     (when +csv-grid--sort
       (let* ((column (car +csv-grid--sort))
              (number (eq (aref +csv-grid--types column) 'number))
+             (checkbox (eq (aref +csv-grid--types column) 'checkbox))
              (desc (eq (cdr +csv-grid--sort) 'desc))
              ;; Each key is computed once; the comparison only compares keys.
              (keyed (mapcar (lambda (row)
                               (let ((value (+csv-grid--field (aref records row) column)))
-                                (cons (cond ((string-empty-p value) nil)
+                                (cons (cond (checkbox (if (+csv-grid--checked-p column value) 0 1))
+                                            ((string-empty-p value) nil)
                                             (number (or (+csv-grid--number value) (downcase value)))
                                             (t (downcase value)))
                                       row)))
@@ -297,6 +376,12 @@ the record's buffer position.  Blank lines are not records."
                        (eq (aref +csv-grid--types column) 'number)
                        (delq nil (mapcar #'+csv-grid--number values)))))
     (pcase op
+      ('checked (format "%d" (seq-count (lambda (row)
+                                          (+csv-grid--checked-p column (+csv-grid--field (aref +csv-grid--records row) column)))
+                                        rows)))
+      ('unchecked (format "%d" (seq-count (lambda (row)
+                                            (not (+csv-grid--checked-p column (+csv-grid--field (aref +csv-grid--records row) column))))
+                                          rows)))
       ('count (format "%d" (length values)))
       ('unique (format "%d" (length (delete-dups (copy-sequence values)))))
       ('sum (+csv-grid--format-number (apply #'+ numbers)))
@@ -357,7 +442,8 @@ the record's buffer position.  Blank lines are not records."
   "Insert the line of record index ROW."
   (let ((record (aref +csv-grid--records row))
         (start (point)))
-    (insert (+csv-grid--line (mapcar (lambda (column) (list column (+csv-grid--field record column)))
+    (insert (+csv-grid--line (mapcar (lambda (column)
+                                       (list column (+csv-grid--display column (+csv-grid--field record column))))
                                      +csv-grid--visible))
             "\n")
     (put-text-property start (point) 'csv-grid-row row)))
@@ -561,7 +647,24 @@ change in length, so an edit costs no reparse of the file."
                                 (assq column +csv-grid--filters))))))
 
 (defun +csv-grid-edit ()
-  "Edit the cell at point."
+  "Edit the cell at point.
+A checkbox flips without asking; a column of few repeated values offers
+them for completion, though any text is accepted."
+  (interactive)
+  (let* ((row (+csv-grid--row-at-point))
+         (column (+csv-grid--column-at-point))
+         (old (+csv-grid--field (aref +csv-grid--records row) column))
+         (name (aref +csv-grid--header column))
+         (value (pcase (aref +csv-grid--types column)
+                  ('checkbox (+csv-grid--toggled column old))
+                  ('select (completing-read (format-prompt name old) (+csv-grid--choices column)
+                                            nil nil nil nil old))
+                  (_ (read-string (format "%s: " name) old)))))
+    (unless (equal value old)
+      (+csv-grid--write row column value))))
+
+(defun +csv-grid-edit-text ()
+  "Edit the cell at point as plain text, whatever its column type."
   (interactive)
   (let* ((row (+csv-grid--row-at-point))
          (column (+csv-grid--column-at-point))
@@ -843,7 +946,7 @@ change in length, so an edit costs no reparse of the file."
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map special-mode-map)
     (define-key map (kbd "RET") #'+csv-grid-edit)
-    (define-key map (kbd "e") #'+csv-grid-edit)
+    (define-key map (kbd "e") #'+csv-grid-edit-text)
     (define-key map (kbd "SPC") #'+csv-grid-expand)
     (define-key map (kbd "DEL") #'+csv-grid-clear)
     (define-key map (kbd "<deletechar>") #'+csv-grid-clear)
@@ -903,7 +1006,8 @@ change in length, so an edit costs no reparse of the file."
 (transient-define-prefix +csv-grid-menu ()
     "Act on a CSV grid."
     [["Cell"
-      ("RET" "edit" +csv-grid-edit)
+      ("RET" "edit (flip a checkbox)" +csv-grid-edit)
+      ("e" "edit as text" +csv-grid-edit-text)
       ("SPC" "whole record" +csv-grid-expand)
       ("DEL" "clear" +csv-grid-clear)
       ("w" "copy" +csv-grid-copy)]

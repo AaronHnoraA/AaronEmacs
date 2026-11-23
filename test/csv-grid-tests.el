@@ -169,4 +169,62 @@ kiwi,1,2025-12-31,
             (should-not (memq #'+csv-grid--source-changed-h after-change-functions))))
       (kill-buffer source))))
 
+(defconst csv-grid-tests--typed
+  "task,done,team
+a,Yes,red
+b,No,blue
+c,Yes,red
+d,,red
+e,No,blue
+")
+
+(defmacro csv-grid-tests--with-typed-grid (&rest body)
+  "Run BODY in a grid over `csv-grid-tests--typed'."
+  (declare (indent 0))
+  `(let ((csv-grid-tests--text csv-grid-tests--typed))
+     (csv-grid-tests--with-grid ,@body)))
+
+(ert-deftest csv-grid-detects-checkbox-and-select-columns ()
+  (csv-grid-tests--with-typed-grid
+    (should (eq 'checkbox (aref +csv-grid--types 1)))
+    (should (equal '("yes" . "no") (aref +csv-grid--checkboxes 1)))
+    (should (eq 'select (aref +csv-grid--types 2)))
+    (should (eq 'text (aref +csv-grid--types 0)))
+    (should (equal '("blue" "red") (+csv-grid--choices 2)))
+    ;; Checkboxes draw as boxes, not their spelling.
+    (should (string-match-p "☑" (buffer-string)))
+    (should-not (string-match-p "Yes" (buffer-string)))))
+
+(ert-deftest csv-grid-flips-a-checkbox-keeping-its-case ()
+  (csv-grid-tests--with-typed-grid
+    (+csv-grid--goto-row 0 1)
+    (+csv-grid-edit)
+    (with-current-buffer +csv-grid--source
+      (should (string-match-p "^a,No,red$" (buffer-string))))
+    ;; An empty cell takes the column's spelling style.
+    (+csv-grid--goto-row 3 1)
+    (+csv-grid-edit)
+    (with-current-buffer +csv-grid--source
+      (should (string-match-p "^d,Yes,red$" (buffer-string))))))
+
+(ert-deftest csv-grid-offers-a-select-column-its-values ()
+  (csv-grid-tests--with-typed-grid
+    (+csv-grid--goto-row 0 2)
+    (let (offered)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt collection &rest _) (setq offered collection) "green")))
+        (+csv-grid-edit))
+      (should (equal '("blue" "red") offered)))
+    (with-current-buffer +csv-grid--source
+      (should (string-match-p "^a,Yes,green$" (buffer-string))))))
+
+(ert-deftest csv-grid-sorts-and-counts-checkboxes ()
+  (csv-grid-tests--with-typed-grid
+    (setq +csv-grid--sort (cons 1 'asc)
+          +csv-grid--totals (list (cons 1 'checked)))
+    (+csv-grid--render)
+    (should (equal '("a" "c") (seq-take (csv-grid-tests--drawn-names) 2)))
+    (should (string-match-p "checked 2" (buffer-string)))
+    (should (equal "3" (+csv-grid--aggregate '(0 1 2 3 4) 1 'unchecked)))))
+
 ;;; csv-grid-tests.el ends here
