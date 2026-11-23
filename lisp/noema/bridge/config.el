@@ -4047,6 +4047,7 @@ RELOAD and WINDOW-MENU select the backend's implementations."
 (defun +noema--setup-portal-chrome ()
   "Install native Noema controls in the current Portal page."
   (setq-local header-line-format '(:eval (+noema--portal-header-line)))
+  (+noema-portal-keys-mode 1)
   (force-mode-line-update t))
 
 (defun +noema--restore-native-chrome-h ()

@@ -785,7 +785,11 @@ Noema Markdown panes:
   (`handleHostOwnedKey`) is only the fallback for hosts without that handler.
   Emacs cannot type into WKWebView on macOS, so a pane entered from the
   keyboard gets its keys through the always-on recovery map (`key` command)
-  until it is clicked.  Sandboxed output iframes run `FRAME_KEY_RELAY_SOURCE`
+  until it is clicked.  A Portal pane (`portal-web-mode`) has the same rule
+  through `+noema-portal-keys-mode`: while Emacs holds the keyboard its plain
+  keys and Escape go to the page, never to Portal's browser keys (g reload,
+  l/r history) or `special-mode`'s q/b; chords stay with Emacs.  Sandboxed
+  output iframes run `FRAME_KEY_RELAY_SOURCE`
   (`src/frame-key-relay.ts`), a mirror of the chord and prefix gates kept
   identical by `tests/frame-key-relay.test.ts`; a new srcdoc frame that can
   take focus must include it.

@@ -138,6 +138,61 @@ Wiki surface that asked to open a note."
             (setq-local +portal--explicitly-unfocused nil))
           (+portal--focus-selected-window (selected-frame) t))))))
 
+(declare-function noema--xwidget-recovery-detail "noema-xwidget-keys" (event))
+(declare-function noema--forward-recovery-key "noema-xwidget-keys" (buffer detail))
+
+(defun +noema-portal/deliver-key (event)
+  "Give this Noema page the keyboard back and deliver EVENT to it.
+A Noema pane's keys reach Emacs only while Emacs holds the keyboard (after
+a forwarded chord, a prompt, an input-method switch).  `portal-web-mode'
+then read them as browser commands: g reloaded the page, l and r went back
+and forward, q closed the window, b prompted for a bookmark, and Escape
+became the Meta prefix.  In a Noema page they are document keys (Vim's gg,
+l, r, q, Escape...), so they go to the page, as an xwidget pane's recovery
+map does."
+  (interactive (list last-command-event))
+  (let ((buffer (current-buffer)))
+    (when-let* ((detail (noema--xwidget-recovery-detail event)))
+      (run-at-time 0 nil #'noema--forward-recovery-key buffer detail))
+    (+noema-portal-focus buffer)))
+
+(defun +noema-portal/enter ()
+  "Give this Noema page the keyboard, as RET does in any Portal page."
+  (interactive)
+  (+noema-portal-focus (current-buffer)))
+
+(defvar-keymap +noema-portal-keys-mode-map
+  :doc "Plain keys of a Noema Portal pane while Emacs holds the keyboard.
+Modifier chords stay with Emacs: the page forwards those on purpose."
+  "RET" #'+noema-portal/enter
+  "<return>" #'+noema-portal/enter)
+
+(dotimes (offset 95)
+  (keymap-set +noema-portal-keys-mode-map
+              (key-description (char-to-string (+ 32 offset)))
+              #'+noema-portal/deliver-key))
+;; Only the GUI Escape key: binding ESC itself would take the Meta prefix and
+;; hide every M- chord (M-x included).
+(dolist (key '("<escape>" "TAB" "<tab>" "<backtab>" "DEL" "<backspace>"
+               "<delete>" "<left>" "<right>" "<up>" "<down>" "<home>" "<end>"
+               "<prior>" "<next>"))
+  (keymap-set +noema-portal-keys-mode-map key #'+noema-portal/deliver-key))
+
+(define-minor-mode +noema-portal-keys-mode
+  "Deliver a Noema Portal pane's plain keys to the page, not to Portal's browser keys."
+  :init-value nil
+  :lighter nil)
+
+(defvar +noema-portal--keys-emulation-alist
+  `((+noema-portal-keys-mode . ,+noema-portal-keys-mode-map))
+  "Precede Evil and Portal's own maps in a Noema Portal pane.")
+
+;; Evil's state maps are emulation maps too and outrank minor-mode maps, so
+;; g, l, q and Escape would still reach Evil commands.  As the xwidget
+;; recovery map does, this map goes first, only while its buffer-local mode
+;; is on.
+(add-to-list 'emulation-mode-map-alists '+noema-portal--keys-emulation-alist)
+
 (defun +noema-portal-send (buffer message)
   "Send MESSAGE to the Noema page in Portal BUFFER."
   (when (+noema-portal-buffer-p buffer)

@@ -1840,6 +1840,36 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
           (should (equal commands '("focus"))))
       (when (buffer-live-p page) (kill-buffer page)))))
 
+(ert-deftest +noema-portal-plain-keys-reach-the-page-not-browser-commands ()
+  "With Emacs holding the keyboard, a Noema Portal pane's plain keys go to the page.
+g, l, q and Escape were Portal reload/back, quit-window and the Meta prefix."
+  (require 'noema/bridge/portal)
+  (with-temp-buffer
+    (+noema-portal-keys-mode 1)
+    (dolist (key '("g" "l" "r" "q" "b" "j" "<escape>" "<left>"))
+      (should (eq (key-binding (kbd key)) #'+noema-portal/deliver-key)))
+    (should (eq (key-binding (kbd "RET")) #'+noema-portal/enter))
+    ;; Modifier chords stay with Emacs; ESC itself is never taken.
+    (should-not (eq (key-binding (kbd "M-x")) #'+noema-portal/deliver-key))
+    (should-not (eq (key-binding (kbd "C-x")) #'+noema-portal/deliver-key))
+    (should-not (lookup-key +noema-portal-keys-mode-map (kbd "ESC")))))
+
+(ert-deftest +noema-portal-delivered-key-goes-to-the-page-and-refocuses ()
+  "A delivered key is forwarded as the page's key command and the page takes focus."
+  (require 'noema/bridge/portal)
+  (let (forwarded focused)
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'run-at-time)
+                 (lambda (_time _repeat fn &rest args) (apply fn args)))
+                ((symbol-function '+noema/command)
+                 (lambda (command &optional detail) (push (cons command detail) forwarded)))
+                ((symbol-function '+noema-portal-focus)
+                 (lambda (&optional buffer) (setq focused buffer))))
+        (+noema-portal/deliver-key ?g)
+        (should (equal (caar forwarded) "key"))
+        (should (equal (alist-get 'key (cdar forwarded)) "g"))
+        (should (eq focused (current-buffer)))))))
+
 (ert-deftest +noema-windmove-to-portal-uses-shared-focus-manager ()
   "Noema's windmove bridge delegates Portal focus once to its shared path."
   (require 'noema/bridge/portal)
