@@ -350,6 +350,14 @@ This config already has maintenance and workflow entry points. Reuse them:
   `remote-transfer-list`).  `remote-machines` holds hand-entered targets.  Do
   not add another uploader, sync command, host list or progress indicator.  See
   `docs/design/remote-files.md`.
+- Tables and data views: a CSV buffer or a note's pipe table is the table, and
+  `+csv/grid` / `+markdown/table-grid` (`lisp/lang/filetypes/csv-grid.el`) is
+  its view: sort, filter, group, hide and total change only the view, an edit
+  is a text edit of the field.  A new tabular source joins that file's source
+  dispatch rather than adding another grid.  `#+begin av` views are drawn in
+  Emacs by `noema-attribute-view` from the host's answer (the Go kernel stays
+  the only evaluator); external databases stay in clutch.  See
+  `docs/guide/dev-guide.md` and `docs/works/nocodb/README.md`.
 - Command shell: eshell, through `+eshell-run` / `+eshell-run-sync` /
   `+eshell-buffer` (queued, with status and output) and `SPC o s`
   (`+eshell/toggle`); see `docs/design/command-shell.md`.  Code that needs to
