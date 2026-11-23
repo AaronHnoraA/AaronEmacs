@@ -2,8 +2,11 @@
 
 对象：`upstream/`，NocoDB 浅克隆 `eabb8b1`（2026-11-23），被 `.gitignore` 的
 `/docs/works/*/upstream/` 忽略。本页是工作台，不是权威文档；定下来的结论已经进入代码和
-下文列出的文档。两份附表：[inventory.md](inventory.md) 是 NocoDB 每个目录的读法与结论，
-[noema-coverage.md](noema-coverage.md) 是 Noema 全部 542 个源文件的测试与文档覆盖。
+下文列出的文档。三份附表：[inventory.md](inventory.md) 是 NocoDB 每个目录的读法与结论；
+[nocodb-files.md](nocodb-files.md)（`nocodb_files.py` 生成）读入并检查了 NocoDB 全部 3508 个源文件
+（约 78 万行）的行数、导出、头注释与是否为社区版空壳，找出 48 个空壳，证实 Agent、Chat、Workflow、
+Script、Dashboard、Document 等后端与前端 Chat/撤销都是空实现；[noema-coverage.md](noema-coverage.md)
+（`noema_coverage.py` 生成）是 Noema 全部 542 个源文件的测试与文档覆盖。
 
 ## 先说结论
 
@@ -251,6 +254,7 @@ Markdown 里的稳定身份（`{#UUIDv7}` 块 id、属性块、`@@todo`）：Age
 | `make kernel-test`（新增，`-tags fts5`） | `kernel/noema/...` 与 `kernel/mcp/...` 共 16 个包通过 |
 | `tests/elisp/` 18 个文件 | 约 230 项全部通过（需完整配置的 7 个文件在完整配置下通过） |
 | 实机：真实 Noema host + Go kernel，batch Emacs 加载完整配置 | 属性视图在 vault 范围走 `kernel-attribute-view`，28 条 todo 中画出前 5 条，计数栏正确；在 scratch 笔记上改格写回文件并重新求值 |
+| 实机：独立 daemon（完整配置、真实事件循环、tty frame） | grid 显示在窗口里时，外部给 CSV 加一行，0.3 s 空闲重绘后 grid 读到第 3 行且 tick 对齐；Markdown 表格 grid 写回表格行；`noema-attribute-view` 从入口命令读出块、经真实 host 走 Go kernel 画表；Jupyter 运行时清理在 target `local` 上用真实主机名删除文件、错主机拒绝并保留 |
 
 ### 全文件覆盖
 
@@ -330,18 +334,19 @@ grid 在 0.3 s 空闲后重绘；最后一个 grid 关闭时摘掉 CSV buffer �
   隐藏列、关闭最后一个视图后摘钩子、勾选与单选列识别、保留大小写的翻转、单选补全、
   勾选列排序与计数）。
 
-## 留给人决定的
+## 决定
 
-- av 是否增加 `source: csv FILE`，让 Markdown 里的视图直接查询 vault 中的 CSV。这要改
-  `shared/attribute-view.mjs`、Go 求值器和 fixture，属于 `syntax.md` 的新形式。
-- Pi watch 与任务图谱是否采用 NocoDB 式的失败分类（retryable / needsRun / deferred）和
-  逐次尝试记录。
-- “让 Agent 填一列”是否作为 `agent:document:propose` 的一种：对一个 av 的某列，为每行
-  生成属性块 ediff 卡片。
-- 规划属性的行内写法：保留每行原来的分隔符，还是把 `key=value` 定为规范（`agenda-dsl.md` G1）。
-- 发布出去的 HTML 是否保留 `html` 块里的 `<iframe>`（例如嵌入视频），还是与编辑器一样删除。
-- 是否把“无人值守 AI 活动”（标题、总结、压缩）的模型选择收成一张表（`agent-management.md`）。
-- `noema/jupyter` 的 Remote-first 违规（`jupyter-workflow.md` G1–G3）何时在 Aaron-PC 上带测试修。
-- av 标题是否像其它环境一样剥掉标签形锚点（改 `cleanTitle` 与 Go `identityTail`，并更新
-  `attribute-view-fixtures.json`）；以及“锚点可以是标签、引用只能是身份”是否写进 `syntax.md`。
-- 删除或改名会断链的操作，是否先列出反向链接（借 NocoDB 的依赖报告，`wiki-workspace.md`）。
+用户授权由我决定并提交。每一项的决定与落点：
+
+| 问题 | 决定 | 落点 |
+| --- | --- | --- |
+| 规划属性行内写法被改成 `key=value` | 保持代码：`planning-semantic-fixtures.json` 把它钉为规范（保留别名与顺序）。文档按“代码加 fixture 为准”改正 | `agenda-dsl.md` 语法一节，G1 关闭 |
+| 导出时 `html` 块的 `<iframe>` | 与编辑器同一策略，删除（vault 中没有这样用的块）；并修好 happy-dom 下清洗漏掉兄弟节点的问题 | Noema `a6eed1f`，`syntax.md` |
+| av 标题里的标签形锚点 | 与其它环境一致，剥掉；JS 用 `parseOrgEnvIdentityTitle`，Go 用同一 id 文法，两条 fixture 钉住 | Noema `1d18f02` |
+| 锚点可为标签、引用只能是身份 | 维持现状（有意的区分），由新测试钉住两端形状一致 | Noema `5362a11`、`d567482` |
+| `noema/jupyter` Remote-first 违规 | 修：清理统一路径、服务器按放置决定直连、TRAMP 写法检查标注为兼容边界；doctor 对 noema 清零 | Emacs `d27a30c3`，`jupyter-workflow.md` |
+| 删除/改名前列出反向链接 | 采用于删除：移入废纸篓的确认框写出链接到此处的笔记。改名已由 `noema-move-note` 重写链接 | Noema `8259daa` |
+| “让 Agent 填一列” | 不做直接写入（违背可审阅提案）。若将来需要，按 `agent:document:propose` 为每行生成属性块 ediff | 本页 |
+| av 增加 `source: csv` | 暂不做：CSV 已由 `+csv/grid` 在 Emacs 里成为表；新增来源要跨 JS/Go/fixture 扩一种语法，等有笔记真正需要时再加 | 本页 |
+| 按活动路由模型（NocoDB `AiUseCase`） | 不做：模型由各 ACP provider 自己选，Noema 再加一层配置会与 provider 设置重复 | 本页 |
+| Pi watch 的失败分类（retryable / needsRun / deferred） | 暂不做：Pi watch 本身“一定结束、不重放”（`pi-watches.md`），没有重试路径，分类没有用处；若加入重试再采用 | 本页 |
