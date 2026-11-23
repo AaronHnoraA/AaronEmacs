@@ -1,7 +1,7 @@
 """Which Noema source files no test and no document mentions.
 
 Run with -I; paths are passed in, nothing is imported from the trees read.
-usage: python3 -I noema_coverage.py EMACS_ROOT OUT_TSV
+usage: python3 -I noema_coverage.py EMACS_ROOT OUT_TSV [OUT_MD]
 """
 import os, re, sys
 from collections import defaultdict
@@ -42,7 +42,9 @@ def read_all(paths):
 test_files = list(walk(os.path.join(noema, "tests"), (".ts", ".mjs", ".el", ".py", ".json")))
 test_files += list(walk(os.path.join(root, "test"), (".el",)))
 tests_text = read_all(test_files)
-doc_files = list(walk(os.path.join(root, "docs"), (".md",), skip=("/works/nocodb/upstream", "/upstream")))
+doc_files = [p for p in walk(os.path.join(root, "docs"), (".md",), skip=("/works/nocodb/upstream", "/upstream"))
+             # This audit's own workbench names the files it found; it is not documentation.
+             if "/works/nocodb/" not in p]
 doc_files += [os.path.join(root, "AGENT.md"), os.path.join(noema, "CLAUDE.md"), os.path.join(noema, "AGENTS.md")]
 docs_text = read_all(doc_files)
 
@@ -84,3 +86,30 @@ for group, path, lines, tested, documented in rows:
 print("group\tfiles\tlines\ttested\tdocumented\tneither(files/lines)")
 for group, s in summary.items():
     print(f"{group}\t{s[0]}\t{s[1]}\t{s[2]}\t{s[3]}\t{s[4]}/{s[5]}")
+
+if len(sys.argv) > 3:
+    import subprocess
+    head = subprocess.run(["git", "-C", noema, "rev-parse", "--short", "HEAD"],
+                          capture_output=True, text=True).stdout.strip()
+    md = ["# Noema 源文件覆盖表", "",
+          f"由同目录的 `noema_coverage.py` 生成（`python3 -I noema_coverage.py ~/.config/emacs OUT.tsv noema-coverage.md`，Noema `{head}`）。"
+          "“测试”指 Noema `tests/`、Emacs `test/` 中出现该文件名（Go 文件看所在包是否有 `_test.go`）；"
+          "“文档”指 `docs/`（本审计的 `works/nocodb/` 除外）、`AGENT.md`、Noema `CLAUDE.md`/`AGENTS.md` 中出现该文件名或路径。"
+          "只按名字匹配，间接覆盖（经由引用它的模块被测试）不算在内；结论见 [README](README.md) 的“Noema 审计”。",
+          "", "## 汇总", "",
+          "| 层 | 文件 | 行数 | 有测试引用 | 有文档提到 | 两者都没有（文件/行） |",
+          "| --- | ---: | ---: | ---: | ---: | ---: |"]
+    tot = [0, 0, 0, 0, 0, 0]
+    for group, v in summary.items():
+        md.append(f"| {group} | {v[0]} | {v[1]} | {v[2]} | {v[3]} | {v[4]}/{v[5]} |")
+        tot = [a + b for a, b in zip(tot, v)]
+    md.append(f"| 合计 | {tot[0]} | {tot[1]} | {tot[2]} | {tot[3]} | {tot[4]}/{tot[5]} |")
+    md += ["", "## 逐文件"]
+    current = None
+    for group, path, lines, tested, documented in rows:
+        if group != current:
+            current = group
+            md += ["", f"### {group}", "", "| 文件 | 行数 | 测试 | 文档 |", "| --- | ---: | :---: | :---: |"]
+        md.append(f"| `{path.replace('site-lisp/noema/', '')}` | {lines} | {'✓' if tested else '—'} | {'✓' if documented else '—'} |")
+    with open(sys.argv[3], "w") as fh:
+        fh.write("\n".join(md) + "\n")

@@ -254,15 +254,17 @@ Markdown 里的稳定身份（`{#UUIDv7}` 块 id、属性块、`@@todo`）：Age
 
 ### 全文件覆盖
 
-[noema-coverage.md](noema-coverage.md) 列出全部 542 个源文件（约 21.5 万行）：472 个有测试引用，
-382 个有文档提到，37 个（3736 行）两者都没有。对这 37 个再查引用方：
+[noema-coverage.md](noema-coverage.md) 列出全部 542 个源文件（约 21.5 万行）：475 个有测试引用
+（补测试前 472），382 个有文档提到，37 个（3736 行）两者都没有（扫描文档时排除本工作台，免得
+自引用）。对这 37 个再查引用方：
 
 - **死代码**：`server/lib/lsp-base.mjs`（158 行）从第一次提交起没有任何引用；**已删除**，测试仍全部通过。
 - 其余 36 个都有引用方，大多是页面入口（`slides-main`、`markdown-box-lab-main`、资源清理页）、
   Worker 与小工具（`tikz-worker`、`coalesced-timer`、`heading-slug`），由引用它们的模块间接覆盖。
-- **应补测试的核心模块**：`shared/block-identity.mjs`（块 id 唯一的解析器）没有测试直接引用；Go
-  `kernel/noema/identity` 包没有 `_test.go`。块身份是 Noema 一体化的锚，而审计恰好在这里发现了
-  JS 与 Go 的不一致（下表）。其次是 `server/jupyter/` 的 wire-protocol、raw-socket、kernel-process
+- **核心模块已补测试**：`shared/block-identity.mjs`（块 id 唯一的解析器）原先没有测试直接引用，
+  新增 `tests/block-identity.test.ts`；Go `kernel/noema/identity` 包原先没有 `_test.go`，新增
+  `identity_test.go`，并钉住两端的 id 形状一致。块身份是 Noema 一体化的锚。
+- **仍缺直接测试的较大模块**： `server/jupyter/` 的 wire-protocol、raw-socket、kernel-process
   （有文档无直接测试）、`server/lib/jupyter-notebook-format.mjs`（411 行）、
   `src/cm6/extensions/visual/widgets/inline-commands.ts`（1332 行）。
 
@@ -280,7 +282,7 @@ Markdown 里的稳定身份（`{#UUIDv7}` 块 id、属性块、`@@todo`）：Age
 | 测试入口 | Makefile、`scripts/test-all` | **已修**：Go 测试需要 `fts5` 标签但没有入口（裸 `go test` 18 项失败），新增 `make kernel-test`；Noema 的 Elisp 测试不在任何汇总里，`scripts/test-all` 现在包含它们。 |
 | Emacs 侧 `lisp/noema/`（module-doctor） | 策略报错 | **已修** `bridge/note-code.el`（改问 `remote-client-file-name`）与 `bridge/config.el`（TRAMP 兼容边界，标注 `aaron-allow`）。`noema/jupyter` 的 5 处记为 `jupyter-workflow.md` G1–G3，需要 Aaron-PC 远端测试后再改。 |
 | 仓库卫生 | 跟踪文件 | **已修**：Noema 跟踪的 `.el~` 备份已移除并忽略 `*~`；Emacs 根目录被跟踪的 `clutch/` 移到 `var/clutch/`。`upstream/org-mode` 是子模块，不是误提交。 |
-| 块身份文法（`shared/block-identity.mjs`、`kernel/noema/markdown/scan.go`、av 标题清理） | 三处正则对照 | **不一致**：JS `BLOCK_ID_SOURCE` 接受 3–128 位 `[A-Za-z0-9._:-]`；Go 扫描与 av 标题清理（JS `cleanTitle`、Go `identityTail`）只认 36 位 UUID 形状。所以 `#+begin av 标题 {#my-view}` 的 `{#my-view}` 会显示在视图标题里。哪种文法是规范需要人定。另有 `shared/columns-layout.mjs`（另一任务未提交的新文件）也自写了一份。 |
+| 块身份文法（`shared/block-identity.mjs`、`kernel/noema/markdown/scan.go`、av 标题清理） | 三处正则对照，补测试 | 锚点 `{#…}` 接受标签形 id（如 `fig:setup`），而可引用的 `((id))` 与 Go 扫描只认 UUIDv7/旧版形状：这看来是有意的“标签 vs 身份”之分。真正不一致的是标题清理：其它环境用 `parseOrgEnvIdentityTitle` 剥掉任何锚点，av 的 `cleanTitle`（JS）与 `identityTail`（Go）只剥 UUID 形状，所以 `#+begin av 标题 {#fig:x}` 的锚点会显示在视图标题里。另有 `shared/columns-layout.mjs`（另一任务未提交的新文件）也自写了一份。 |
 | 页面里的 `attribute-view.ts` widget、`syntax.md`、`rendered-constructs.md` | — | 另一项任务有未提交改动，本轮只在 `syntax.md` 提交了自己的行。 |
 
 没有跑的：`scripts/check-*.mjs` 这类 WebKit 驱动的交互检查（需要图形环境），以及在用户
@@ -340,6 +342,6 @@ grid 在 0.3 s 空闲后重绘；最后一个 grid 关闭时摘掉 CSV buffer �
 - 发布出去的 HTML 是否保留 `html` 块里的 `<iframe>`（例如嵌入视频），还是与编辑器一样删除。
 - 是否把“无人值守 AI 活动”（标题、总结、压缩）的模型选择收成一张表（`agent-management.md`）。
 - `noema/jupyter` 的 Remote-first 违规（`jupyter-workflow.md` G1–G3）何时在 Aaron-PC 上带测试修。
-- 块 id 的规范文法：通用 `BLOCK_ID_SOURCE` 还是只认 UUIDv7；定下后统一 av 标题清理与 Go 扫描，
-  并给 `block-identity.mjs` 与 Go `identity` 包补测试。
+- av 标题是否像其它环境一样剥掉标签形锚点（改 `cleanTitle` 与 Go `identityTail`，并更新
+  `attribute-view-fixtures.json`）；以及“锚点可以是标签、引用只能是身份”是否写进 `syntax.md`。
 - 删除或改名会断链的操作，是否先列出反向链接（借 NocoDB 的依赖报告，`wiki-workspace.md`）。

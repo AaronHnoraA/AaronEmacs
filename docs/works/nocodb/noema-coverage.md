@@ -1,6 +1,6 @@
 # Noema 源文件覆盖表
 
-由同目录的 `noema_coverage.py` 生成（`python3 -I noema_coverage.py ~/.config/emacs OUT.tsv`）（2026-11-24，Noema `853ba6a`）。“测试”指 Noema `tests/`、Emacs `test/` 中出现该文件名（Go 文件看所在包是否有 `_test.go`）；“文档”指 `docs/`、`AGENT.md`、Noema `CLAUDE.md`/`AGENTS.md` 中出现该文件名或路径。只按名字匹配，所以间接覆盖（经由引用它的模块被测试）不算在内；结论见 [README](README.md) 的“Noema 审计”。
+由同目录的 `noema_coverage.py` 生成（`python3 -I noema_coverage.py ~/.config/emacs OUT.tsv noema-coverage.md`，Noema `d567482`）。“测试”指 Noema `tests/`、Emacs `test/` 中出现该文件名（Go 文件看所在包是否有 `_test.go`）；“文档”指 `docs/`（本审计的 `works/nocodb/` 除外）、`AGENT.md`、Noema `CLAUDE.md`/`AGENTS.md` 中出现该文件名或路径。只按名字匹配，间接覆盖（经由引用它的模块被测试）不算在内；结论见 [README](README.md) 的“Noema 审计”。
 
 ## 汇总
 
@@ -8,15 +8,14 @@
 | --- | ---: | ---: | ---: | ---: | ---: |
 | src | 170 | 54894 | 135 | 119 | 19/1237 |
 | pages | 83 | 43306 | 72 | 33 | 11/1964 |
-| shared | 35 | 5336 | 28 | 29 | 2/129 |
+| shared | 35 | 5336 | 29 | 29 | 2/129 |
 | server | 145 | 47892 | 133 | 101 | 4/242 |
-| kernel/noema | 52 | 30549 | 50 | 51 | 0/0 |
+| kernel/noema | 52 | 30549 | 52 | 51 | 0/0 |
 | lisp | 35 | 16510 | 33 | 28 | 1/164 |
 | emacs lisp/noema | 22 | 16865 | 21 | 21 | 0/0 |
-| 合计 | 542 | 215352 | 472 | 382 | 37/3736 |
+| 合计 | 542 | 215352 | 475 | 382 | 37/3736 |
 
 ## 逐文件
-
 
 ### src
 
@@ -299,7 +298,7 @@
 | `shared/layout-attrs.mjs` | 299 | ✓ | ✓ |
 | `shared/block-properties.mjs` | 189 | ✓ | ✓ |
 | `shared/note-code.mjs` | 13 | ✓ | ✓ |
-| `shared/block-identity.mjs` | 79 | — | ✓ |
+| `shared/block-identity.mjs` | 79 | ✓ | ✓ |
 | `shared/knowledge-query.mjs` | 183 | ✓ | ✓ |
 | `shared/planning-dsl.mjs` | 328 | ✓ | ✓ |
 | `shared/command-syntax.mjs` | 277 | ✓ | ✓ |
@@ -496,8 +495,8 @@
 | `kernel/noema/research/knowledge.go` | 257 | ✓ | ✓ |
 | `kernel/noema/research/notebook.go` | 725 | ✓ | ✓ |
 | `kernel/noema/vaultgit/vaultgit.go` | 791 | ✓ | ✓ |
-| `kernel/noema/identity/block_projection.go` | 55 | — | ✓ |
-| `kernel/noema/identity/identity.go` | 77 | — | ✓ |
+| `kernel/noema/identity/block_projection.go` | 55 | ✓ | ✓ |
+| `kernel/noema/identity/identity.go` | 77 | ✓ | ✓ |
 | `kernel/noema/bibliography/library.go` | 441 | ✓ | ✓ |
 | `kernel/noema/bibliography/parser.go` | 449 | ✓ | ✓ |
 | `kernel/noema/markdown/scan.go` | 472 | ✓ | ✓ |
