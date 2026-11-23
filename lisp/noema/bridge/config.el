@@ -556,7 +556,8 @@ is dropped.  A raw buffer you are editing elsewhere keeps the jump."
                      (or (and (fboundp 'remote-fs-file-name-p)
                               (remote-fs-file-name-p file))
                          (string-match-p "\\`fs://" file)
-                         (file-remote-p file))
+                         ;; A TRAMP name carries its own target: compatibility input.
+                         (file-remote-p file)) ; aaron-allow: file-remote-p
                    "local"))))
            ;; Remote mode represents native paths as /fs:local:.  Preserve
            ;; that logical identity while resolving native directory aliases.

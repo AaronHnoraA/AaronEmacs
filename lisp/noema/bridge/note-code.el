@@ -11,6 +11,7 @@
 
 (require 'subr-x)
 (require 'aaron-open)
+(declare-function remote-client-file-name "remote-fs" (file-name &optional adapter))
 
 (declare-function +noema-roam-root "noema/roam/config" ())
 (defvar +noema--notes-root)
@@ -194,10 +195,15 @@ SELECTOR is a path relative to the note root, e.g. \"math/foo.lean\"."
      (format "#note-code(lang: %S, path: %S)[%s]" lang path tag))))
 
 (defun +note-code-ensure-style-link ()
-  "Ensure the note root exposes roam's internal Typst support files."
-  (when (and buffer-file-name
-             (not (file-remote-p buffer-file-name))
-             (file-in-directory-p buffer-file-name (+note-code--root)))
+  "Ensure the note root exposes roam's internal Typst support files.
+The note root is on this machine, so only a file the client can reach
+directly can be in it; asking placement first keeps a remote buffer from
+paying for `file-in-directory-p' on its target."
+  (when-let* ((file (and buffer-file-name
+                         (if (fboundp 'remote-client-file-name)
+                             (remote-client-file-name buffer-file-name)
+                           buffer-file-name)))
+              ((file-in-directory-p file (+note-code--root))))
     (let ((directory (expand-file-name "_typst" (+note-code--root))))
       (dolist (entry '(("notes/note-code.typ" . "note-code.typ")
                        ("notes/noema-html.css" . "roam/note.css")))

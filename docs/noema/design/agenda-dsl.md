@@ -652,3 +652,12 @@ not accepted by this Markdown endpoint.
 Roam's `F` entry uses this snapshot instead of scanning the vault or falling
 back to regexes. Roam's task list uses `agenda:query-active` and the same scoped
 writes as the main Agenda, including protected buffers and repeat completion.
+
+## 已知差距
+
+- **G1 行内属性的写法被改写。** 修改一个行内 `{key: value}` 属性时，JS
+  `serializeInlineAttrs`（`shared/planning-dsl.mjs`）和 Go `serializeSemanticAttrs`
+  （`kernel/noema/planning/semantic.go`）都会把整组属性重写成 `key=value`；块形式保持
+  `key: value`。本页“Structural grammar”展示的是 `{key: value}`，`syntax.md` 规定编辑器写回
+  它读到的形式。复现：对 `@@todo(todo) [x] {prio: B}` 用属性视图把 `prio` 改成 A，结果是
+  `{prio=A}`。待定：保留每行原来的分隔符，还是把 `=` 定为行内的规范形式并改写文档。

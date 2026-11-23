@@ -577,3 +577,18 @@ Run the vendored Python tests before changing the launcher:
 The SSH implementation uses `StrictHostKeyChecking=accept-new`: first-use keys
 are recorded, while changed keys fail instead of being silently accepted.
 CLI output from Board operations is retained in `*Jupyter Board Log*`.
+
+## 已知差距
+
+`M-x module-doctor` 在 `:noema jupyter` 报出的 Remote-first 违规，修改都需要 Aaron-PC 上的
+远端与韧性测试（`docs/acceptance/remote-parity.md`），所以先记在这里：
+
+- **G1 运行时文件清理按 target 分支。** `+noema-jupyter-runtime` 清理连接文件和日志时
+  （`lisp/noema/jupyter/runtime.el` 的 `(equal target "local")`），本机直接 `delete-file`，
+  其它 target 另走主机分支。应当对 `/fs:TARGET:` 路径统一调用文件 API。
+- **G2 Jupyter 服务器按 target 选择直连。** `+noema-jupyter-server--resolve-entry`
+  （`server.el` 的 `local-p`）对 `local` 直连 URL，其它 target 走 `remote-channel`。本机也应
+  作为 `remote-channel` 的一种输入，由 backend 决定物理连接方式。
+- **G3 用 `file-remote-p` 识别 TRAMP 写法。** `cell.el` 的项目根判断和网关路径投影、
+  `project.el` 的 kernelspec 目录判断，用 `file-remote-p` 区分“路径自带 target”。可以改问
+  `remote-client-file-name`（纯查询，不建立连接），或者在确属兼容边界时标注 `aaron-allow`。

@@ -124,15 +124,31 @@ Markdown 表格作为源（同一文件里的适配层）：表格范围用 mark
 
 ### Markdown 与渲染
 
-- NocoDB 的 Markdown 只用在富文本单元格：tiptap（ProseMirror）编辑，markdown-it 序列化
-  （`helpers/tiptap-markdown/`，改编自 MIT 的 tiptap-markdown），提及写成
-  `@(id|email|name)`。Documents 是 ProseMirror JSON + Yjs 协作（`meta/migrations/docs-content`），
-  模型在社区版是空壳。
-- 对照：Noema 的文档就是 Markdown 源本身，CM6 `EditorState` 是唯一编辑权威，渲染构件
-  只是源的视图。ProseMirror JSON 的路线与 Noema 的根相反，不学。
-- 可学的是渲染缓存的形状：按 key 的有界 LRU、同 key 解析在途时不重复发起、全部落定后
-  只触发一次重绘。Noema 的 `math-render.ts` 缓存已是同类做法；若将来 av widget 要把单元
-  格渲染成内联 Markdown，应按这个形状接 `renderInlineMarkdownHTML`。
+NocoDB 里 Markdown 出现在三处，用了两套解析器：
+
+| 场景 | 实现 | 要点 |
+| --- | --- | --- |
+| 富文本单元格的编辑 | tiptap（ProseMirror）+ `helpers/tiptap-markdown/`（改编自 MIT 的 tiptap-markdown） | 编辑时是 ProseMirror 文档，保存时序列化回 Markdown；提及写成 `@(id\|email\|name)` |
+| 富文本的 DOM 渲染（展开格、表单、邮件预览） | `NcMarkdownParser`（`helpers/tiptap/functionality/markdown/markdown.ts`）：markdown-it + task-lists + 链接规则 + 提及，再经 DOMPurify | 单例；`patchedRender` 按 `maxBlockTokens` 只渲染前 N 个块（块栈配平后才截断），用于预览；清洗配置禁掉 `form/button/select/textarea/style/iframe/object/embed/img/…/dialog` 和 `style/id/srcset/formaction/popover*` 等属性，class 只留渲染器自己产生的几种，`input` 只留只读复选框 |
+| canvas 表格里的单元格 | `components/smartsheet/grid/canvas/utils/markdownUtils.ts`：手写的 inline 标记分词器 | 只认 `** * _ ~~ <u> <s>`、链接、`\` 转义和 `@(…)` 提及；没有代码 span 规则，反引号原样显示。解析结果进 1000 项 LRU（`loaders/markdownLoader.ts`），同 key 在途不重复解析，全部落定后触发一次重绘 |
+| Documents（EE） | ProseMirror JSON + Yjs（`meta/migrations/docs-content`：`yjs_state`、`doc_revisions`） | 社区版模型是空壳 |
+
+对照 Noema：
+
+- **一种语法一个解析器**是 Noema 的硬规则（`syntax.md` 开头；`shared/*.mjs` + fixture 钉住 Go 端）。
+  NocoDB 的 DOM 渲染和 canvas 渲染对同一段 Markdown 给出不同结果（代码 span 就是例子），正是
+  这条规则要防的分叉。不学。
+- **文档模型**：ProseMirror JSON / Yjs 把文档变成编辑器私有的结构，Noema 的文档就是 Markdown
+  源，CM6 `EditorState` 是唯一编辑权威，渲染构件只是源的视图（`rendered-constructs.md`）。不学。
+- **清洗策略**：学了一部分。对照后发现 Noema 的 `sanitizeEmbeddedHtml` 允许 `<form>`、
+  `formaction`、`popover*` 和 `<dialog>`，而笔记里的 HTML 也来自网页摘录、导入和 Agent，
+  页面又带宿主桥接能力。已收紧（见“Noema 审计”）。`style`、`id` 和普通按钮保留，因为笔记
+  的 HTML 块会用到。
+- **有界预览**：`maxBlockTokens` 的“块栈配平后再截断”是个干净的做法。Noema 的链接悬停、
+  搜索摘录目前用的是文本截取；若将来要做“只渲染前几块”的富预览，应在 `src/render-html.ts`
+  里以同样方式在 token 层截断，而不是截字符串。
+- **渲染缓存形状**：有界 LRU、在途去重、落定后一次重绘。Noema 的 `math-render.ts` 已是同类
+  做法；若 av widget 要把单元格渲染成内联 Markdown，应按这个形状接 `renderInlineMarkdownHTML`。
 
 ### AI 一体化、工作流与 Agent
 
@@ -147,6 +163,22 @@ Markdown 表格作为源（同一文件里的适配层）：表格范围用 mark
   `deferred`（资源满而未开始，不算重试）、`simulated`（只检查未执行）、`needsRun`
   （只能靠真正执行来检查，与“坏了”区分开），循环有逐次迭代记录；执行可在节点边界
   暂停或取消。
+- **表达式与可视化编辑**（`lib/workflow/expressionCatalog.ts`、`transforms.ts`）：变量写成
+  `{{ $("Node").fields.Title }}`，可调用的方法是白名单（目录与执行器的白名单由
+  `expressionCatalog.test.ts` 保持一致）。可视化的“变换芯片”（大写、截取、加日期等）每个都有
+  `apply`（套一层）和 `peel`（从最外层剥回参数），所以芯片只是表达式文本的视图，保存的永远是
+  普通表达式；参数里的花括号会被去掉，免得提前结束 `{{ }}`。画布上的“加号节点”只属于 UI，
+  保存前由 `filterOutPlusNodes` 过滤（`utils/workflowGraphUtils.ts`）。
+- **节点运行契约**（`noco-integrations/core/src/workflow-node/types.ts`）：节点拿到
+  `inputs.config`、`testMode`、取消用的 `AbortSignal`、按 id 取集成的 `getIntegration`，以及
+  `htmlInputPaths`：哪些配置路径的模板是富文本、插值时做过 HTML 转义，由模板一次决定，节点
+  不得从插值结果反推，否则一条记录的内容就能翻转转义模式。
+- **AI 集成**（`noco-integrations/core/src/ai/types.ts`）：一个集成抽象，按“活动”
+  （`AiUseCase`）路由模型：聊天路由器、建表、数据问答、支持、页面专职 Agent，会话标题、
+  历史压缩、回合末总结（写给后续回合做上下文）、建议芯片，公式、Cmd+K 理解、文档写作/
+  总结/翻译、补全、嵌入。用户明确选了模型的功能（AI 字段、AI 按钮、工作流 AI 节点）直接传
+  `customModel`，不走路由。底层是 Vercel AI SDK，可选的 devtools 中间件记录每一次调用；
+  usage 字段供计费。
 - **Agent / Chat**（`lib/agent/`、`lib/chat/`）：Agent 带角色上限（commenter/viewer）、
   触发器、Web/计算工具；编码 Agent 按 `nocodb-agent/{slug}` 开分支、提 PR、指定评审人；
   Chat 有工具调用状态、会话状态和“factory”任务列表。MCP 按 base 发 token。
@@ -161,6 +193,12 @@ Markdown 表格作为源（同一文件里的适配层）：表格范围用 mark
 | Agent 角色上限 | ACP 权限模式、`agent-management` 的所有权契约 | 已有；更强（Emacs 持有执行）。 |
 | 编码 Agent 开分支提 PR | `tools/agent` worktree | 已有。 |
 | MCP 按 base 发 token | kernel MCP 服务 | 已有，单人本机无需 token 体系。 |
+| 表达式是源，芯片是视图（`apply`/`peel` 可逆） | `syntax.md`：视图不发明源里放不下的形式，编辑器写回读到的形式 | 同一条原则，NocoDB 在工作流编辑器里做到了。可作为 Noema 构件的检查方法：每个可视化编辑都应能从源“剥”回来。本轮实测发现 Noema 的规划属性写回会把 `{prio: B}` 改成 `{prio=A}`，已记为 `agenda-dsl.md` G1。 |
+| 只属于 UI 的节点保存前过滤 | 渲染构件不写回文档（rendered-constructs 契约） | 已一致。 |
+| `htmlInputPaths`：转义模式由模板一次决定 | Agent 上下文与 ediff 回执 | 原则可借：一个值是否转义、是否可信，应由声明它的地方决定，不从内容推断。 |
+| 按活动路由模型（`AiUseCase`） | 各 Agent 由 provider 自己选模型；Pi、Copilot、LaTeX 导出各自配置 | 值得考虑：把“标题、总结、压缩这类无人值守活动用便宜模型，构建类用强模型”收成一张表。属于 `agent-management.md` 的待定设计。 |
+| 回合末总结写给后续回合 | Hy Memory、交接与任务图谱 journal | 已有，且落在项目 Markdown 里，更合 Noema 的根。 |
+| devtools 记录每次调用 | ACP 事件、Agent Manager 的 Usage 页 | 已有，数据来自协议事件而非渲染（AGENT.md）。 |
 
 一体化思路本身值得记下：NocoDB 把数据（表）、视图、自动化（工作流）、AI（列/Agent）
 放在**同一个对象模型**上，AI 和工作流引用的都是“列/表/视图”的 id。Noema 的对应物是
@@ -180,19 +218,35 @@ Markdown 里的稳定身份（`{#UUIDv7}` 块 id、属性块、`@@todo`）：Age
 | 共享视图、公开表单（`public-datas.controller.ts`） | 对外分享 | 发布走 `make publish*` 的个人站点，不新增。 |
 | 在线状态（`RecordPresenceBadge`） | 多人同时编辑提示 | 单人，不需要。 |
 
-## Noema 审计发现
+## Noema 审计
 
-本轮顺着数据路径（属性视图、Agenda 投影、Wiki 索引、MCP 工具、Emacs 桥）读下来：
+### 全量测试（2026-11-24，工作区含其它任务的未提交改动）
 
-- 属性视图三层分工清楚：spec 只在 `shared/attribute-view.mjs` 与 Go `attributeview` 两处解析，
-  host 的 `buildAttributeView` 在 Go 不可用且属于 canonical scope 时拒绝回退（`requireGoCore`），
-  写回只经 `patchAttributeViewCell`，并且有 block 属性的版本校验重试。没有发现违反契约的地方。
-- 可编辑范围是 todo 行的 planning 键，以及带 UUIDv7 的块属性；其余列只读，错误信息会说明原因。
-  原生视图直接显示 host 的错误，不自己判断。
-- Noema 仓库曾跟踪编辑器备份 `lisp/noema-capability-actions.el~`；已移除，并在 `.gitignore`
-  忽略 `*~`。
-- Emacs 配置曾把 clutch 控制台目录 `clutch/` 跟踪在仓库根目录；已移到 `var/clutch/`。
-- 页面里的 `attribute-view.ts` widget 有另一项任务的未提交改动，本轮没有碰。
+| 套件 | 结果 |
+| --- | --- |
+| `npm test`（前端、Node host、架构守护测试） | 373 个文件、3833 项通过，17 项原本标记为跳过 |
+| `make kernel-test`（新增，`-tags fts5`） | `kernel/noema/...` 与 `kernel/mcp/...` 共 16 个包通过 |
+| `tests/elisp/` 18 个文件 | 约 230 项全部通过（需完整配置的 7 个文件在完整配置下通过） |
+| 实机：真实 Noema host + Go kernel，batch Emacs 加载完整配置 | 属性视图在 vault 范围走 `kernel-attribute-view`，28 条 todo 中画出前 5 条，计数栏正确；在 scratch 笔记上改格写回文件并重新求值 |
+
+### 按模块
+
+| 模块 | 读了什么 | 结论 |
+| --- | --- | --- |
+| 属性视图（`shared/attribute-view.mjs`、`kernel/noema/attributeview`、`buildAttributeView`、`patchAttributeViewCell`） | 解析、求值、回退、写回 | spec 只在 JS 与 Go 两处解析并有 fixture；canonical scope 下 Go 不可用时拒绝回退（`requireGoCore`）；块属性写回带版本校验重试。可编辑范围是 todo 的 planning 键和带 UUIDv7 的块属性。 |
+| 规划 DSL 写回（`serializeInlineAttrs`、`serializeSemanticAttrs`） | 实测与两端序列化器 | 行内属性被改写成 `key=value`，与文档和“写回读到的形式”不一致：`agenda-dsl.md` G1。 |
+| SiYuan 遗留数据库（`kernel/av`、MCP `database`、CLI `database`） | 注册与防护 | 工具随 MCP 注册，但 `markdown_native_guard.go` 拒绝一切指向 Markdown 笔记本块的写入（含镜像块预检）。不改。 |
+| MCP 暴露（`kernel/mcp/server.go`） | 投影与策略 | 默认 `/mcp` 暴露非 research 工具，由 `ExposurePolicy` 收窄。 |
+| 嵌入 HTML 清洗（`src/sanitize-html.ts`） | 对照 NocoDB 策略 | **已修**：禁止 `form`、`dialog` 与 `formaction`、`form`、`popover*`。附带发现：happy-dom 的 NodeIterator 在 DOMPurify 删除元素后跳过其后兄弟节点的属性清洗，所以测试按向量分开写；导出渲染实测仍会删掉 iframe 之后的事件属性。 |
+| HTML 导出（`src/export-html.ts`、`scripts/render-html.mjs`） | 实测 `#+begin html` | 裸 HTML 被转义（安全）；`html` 块里的 `<iframe>` 在编辑器被删、在导出中保留，`syntax.md` 原先写“iframes are removed”。已改文档并标为待定。 |
+| Node host 结构 | `server/lib` 与 `server/Features` 体量 | `server/lib` 约 2.3 MB、`Features` 约 140 KB，`runtime.mjs` 9749 行；与 `architecture.md` “迁移未完成”的描述一致。 |
+| 测试入口 | Makefile、`scripts/test-all` | **已修**：Go 测试需要 `fts5` 标签但没有入口（裸 `go test` 18 项失败），新增 `make kernel-test`；Noema 的 Elisp 测试不在任何汇总里，`scripts/test-all` 现在包含它们。 |
+| Emacs 侧 `lisp/noema/`（module-doctor） | 策略报错 | **已修** `bridge/note-code.el`（改问 `remote-client-file-name`）与 `bridge/config.el`（TRAMP 兼容边界，标注 `aaron-allow`）。`noema/jupyter` 的 5 处记为 `jupyter-workflow.md` G1–G3，需要 Aaron-PC 远端测试后再改。 |
+| 仓库卫生 | 跟踪文件 | **已修**：Noema 跟踪的 `.el~` 备份已移除并忽略 `*~`；Emacs 根目录被跟踪的 `clutch/` 移到 `var/clutch/`。`upstream/org-mode` 是子模块，不是误提交。 |
+| 页面里的 `attribute-view.ts` widget、`syntax.md`、`rendered-constructs.md` | — | 另一项任务有未提交改动，本轮只在 `syntax.md` 提交了自己的行。 |
+
+没有跑的：`scripts/check-*.mjs` 这类 WebKit 驱动的交互检查（需要图形环境），以及在用户
+正在运行的 Emacs 图形界面里的手动操作（本次 Emacs 未运行，没有替用户启动常驻实例）。
 
 ## 社区版与闭源边界
 
@@ -244,3 +298,7 @@ grid 在 0.3 s 空闲后重绘；最后一个 grid 关闭时摘掉 CSV buffer �
   逐次尝试记录。
 - “让 Agent 填一列”是否作为 `agent:document:propose` 的一种：对一个 av 的某列，为每行
   生成属性块 ediff 卡片。
+- 规划属性的行内写法：保留每行原来的分隔符，还是把 `key=value` 定为规范（`agenda-dsl.md` G1）。
+- 发布出去的 HTML 是否保留 `html` 块里的 `<iframe>`（例如嵌入视频），还是与编辑器一样删除。
+- 是否把“无人值守 AI 活动”（标题、总结、压缩）的模型选择收成一张表（`agent-management.md`）。
+- `noema/jupyter` 的 Remote-first 违规（`jupyter-workflow.md` G1–G3）何时在 Aaron-PC 上带测试修。

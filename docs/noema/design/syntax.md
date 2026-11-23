@@ -180,7 +180,7 @@ autolinks.  Noema adds, in `src/render-html.ts` and the editor's Lezer rules:
 | `1)` and `(a)` list markers | ordered lists with matching labels in export |
 | `\` at line end | hard line break |
 | ` ```python title="ridge.py" {2-3,5} ` | code fence attributes (`src/code-info.ts`): the language is the first word; `title` is shown before the language badge and as the exported `<figcaption>`; `{…}` marks body lines (from 1) with a band. Other editors read only the language |
-| safe inline HTML (`<kbd>`) | sanitized by `src/sanitize-html.ts`; scripts, iframes and objects are removed |
+| safe inline HTML (`<kbd>`) | sanitized by `src/sanitize-html.ts`; scripts, styles, iframes, objects, embeds, forms and dialogs are removed, and so are the `formaction`, `form` and `popover*` attributes |
 
 Heading numbers are display-only (`src/heading-number.ts`) and never enter
 the source.
@@ -207,7 +207,7 @@ Open and close lines pair by kind and nest.  Parser: `ORG_ENV_OPEN_RE` in
 | `fold` | folded region |
 | `layout {cols=3 mode=grid widths=30-40-30 align=center}` | side-by-side Markdown group; `cols` 1–4, `grid` keeps blocks in cells, `flow` continues prose across columns (`src/layout-group.ts`) |
 | `tikz [id]` | TikZ/PGFPlots figure, kept verbatim in LaTeX (`shared/tikz-source.mjs`) |
-| `html` | sanitized raw HTML block |
+| `html` | sanitized raw HTML block; the editor drops an `<iframe>` in it, while HTML export (`src/export-html.ts`) still keeps one, which is undecided (see `docs/works/nocodb/README.md`) |
 | `av [title]` | attribute view (below) |
 | `embed [title]` | query embed (below) |
 | `lean4` | Lean source carrier, not rendered as an environment |
