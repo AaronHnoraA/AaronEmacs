@@ -469,7 +469,7 @@ CSV buffer 是表，`M-x +csv/grid`（csv-mode 里 `SPC m g`）打开它的视�
 | `+`，`D`，`u`，`o` | 加行并编辑，删行，在 CSV buffer 里撤销，跳到 CSV 里的这条记录 |
 | `/`，`\` | 叠加过滤（`~ !~ = != > < >= <= empty filled`），清除过滤 |
 | `s`，`G`，`h`，`H` | 按本列排序（升、降、取消），按本列分组，隐藏本列，显示全部列 |
-| `a`，`g`，`?` | 循环本列聚合（count、unique；数字列另有 sum/avg/min/max，勾选列为 checked/unchecked），重读 CSV，菜单 |
+| `a`，`g`，`?` | 循环本列聚合（count、unique、duplicates；数字列另有 sum/avg/min/max，勾选列为 checked/unchecked），重读 CSV，菜单 |
 
 记录表单里 `RET` 改字段，`n`/`p` 按视图顺序换记录。列类型自动识别：数字（右对齐、按数值
 排序）、ISO 日期、勾选（`yes/no`、`true/false`、`x` 等成对写法，画成 ☑/☐，翻转时保留原来的

@@ -98,6 +98,8 @@ kiwi,1,2025-12-31,
       (should (equal "16" (+csv-grid--aggregate '(0 1 2 3) qty 'sum)))
       (should (equal "5.333" (+csv-grid--aggregate '(0 1 2 3) qty 'avg)))
       (should (equal "3" (+csv-grid--aggregate '(0 1 2 3) qty 'count)))
+      ;; name has no repeats; the typed fixture's team column repeats red and blue.
+      (should (equal "0" (+csv-grid--aggregate '(0 1 2 3) 0 'duplicates)))
       (setq +csv-grid--group (csv-grid-tests--column "qty"))
       (+csv-grid--render)
       (should (string-match-p "^qty: (empty)  1$" (buffer-string))))))
@@ -191,6 +193,7 @@ e,No,blue
     (should (eq 'select (aref +csv-grid--types 2)))
     (should (eq 'text (aref +csv-grid--types 0)))
     (should (equal '("blue" "red") (+csv-grid--choices 2)))
+    (should (equal "5" (+csv-grid--aggregate '(0 1 2 3 4) 2 'duplicates)))
     ;; Checkboxes draw as boxes, not their spelling.
     (should (string-match-p "☑" (buffer-string)))
     (should-not (string-match-p "Yes" (buffer-string)))))

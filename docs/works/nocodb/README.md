@@ -2,7 +2,8 @@
 
 对象：`upstream/`，NocoDB 浅克隆 `eabb8b1`（2026-11-23），被 `.gitignore` 的
 `/docs/works/*/upstream/` 忽略。本页是工作台，不是权威文档；定下来的结论已经进入代码和
-下文列出的文档。
+下文列出的文档。两份附表：[inventory.md](inventory.md) 是 NocoDB 每个目录的读法与结论，
+[noema-coverage.md](noema-coverage.md) 是 Noema 全部 542 个源文件的测试与文档覆盖。
 
 ## 先说结论
 
@@ -69,6 +70,11 @@ pnpm + lerna monorepo，Sustainable Use License（源码可见，限制商用；
 - **公式**：jsep 解析成 AST（sdk `lib/formula/`，前端也要用来校验），后端
   `formulav2/formulaQueryBuilderv2.ts` 编译成 SQL，`functionMappings/` 按方言
   （pg/mysql/sqlite/mssql/oracle/databricks）实现 91 个函数。
+- **数据管理服务**（`services/`）：SmartText 写入回传内容哈希做乐观并发（`expectedMdHash`）；
+  `duplicate-detection` 按列找重复值；`dependency` 在改列、删列前列出会被破坏的依赖；
+  `formula-column-type-changer` 与 `column-data-backup-handler` 改类型前先建带撤销的备份列；
+  `link-placeholder` 删除链接列时换成装着显示值的文本列；`meta-diffs` 发现外部 schema 漂移并同步。
+  共同点是“破坏性改动先保住数据、并说清会影响谁”。
 - **保护性设施**：`db/queryGuard.ts` 按 async 链限定一次请求能跑的 SQL；
   `helpers/coalescer.ts` 把同一主体的多次触发合并成一次 flush；`db/search/` 是独立的
   搜索索引（构建队列、scope、live 更新）。
@@ -83,6 +89,10 @@ pnpm + lerna monorepo，Sustainable Use License（源码可见，限制商用；
 | 公式编译成 SQL | av 的 `template` 列、`calc` | 不引入 SQL 公式；数据不在 SQL 里。 |
 | 缓存 key 带 workspace/base 前缀 | kernel 的 LRU 与 generation 失效（Knowledge Dock 等） | 已一致。 |
 | queryGuard / coalescer | 各处有界 LRU、去抖 | 思路可在新 host 端点里复用：凡是“触发多次、做一次”的通知走合并。 |
+| 乐观并发（内容哈希） | Agenda/属性视图写回的 `expectedRevision`、块属性版本校验 | 已一致。 |
+| 重复值检测 | — | **已采用**：grid 的 `duplicates` 聚合。 |
+| 改动前报告依赖；改类型先备份；删链接列留文本 | 笔记改名/删除与反向链接、wanted pages | 原则可借：Noema 删除或改名会断链的操作，先列出反向链接。属于 `wiki-workspace.md` 的待定设计。 |
+| `meta-diffs` 外部漂移同步 | 文件监视与外部修改检测（`current-architecture.md`） | 已一致。 |
 | SiYuan 遗留的 `kernel/av` JSON 数据库（MCP `database` 工具、CLI `database`） | 代码在；`database` 工具随 kernel MCP 注册。`model/markdown_native_guard.go` 拒绝一切指向 Markdown 笔记本块的 AV 写操作（含全部镜像块的预检），只剩不挂块的兼容视图写在 kernel 自己的 `storage/av` | **不启用为 Noema 的数据库**：JSON 不在 Markdown 里。现有防护足够，不改代码。 |
 
 ### 可视化表格与操作手感
@@ -109,7 +119,7 @@ pnpm + lerna monorepo，Sustainable Use License（源码可见，限制商用；
 | Alt-R 加行 | `+` 加行并直接编辑首格；`D` 删行（确认） |
 | 撤销（社区版 `useUndoRedo` 是空实现） | `u` 在 CSV buffer 里 `undo`；所有编辑都是文本编辑，天然可撤销 |
 | Filter / Sort / Group / Fields | `/` 叠加过滤（`~ !~ = != > < >= <= empty filled`，数字列按数值比较），`\` 清除；`s` 升/降/取消；`G` 分组；`h` 隐藏列，`H` 全部显示 |
-| 聚合栏 | `a` 循环本列聚合：count、unique，数字列另有 sum/avg/min/max；分组时每组一行 |
+| 聚合栏 | `a` 循环本列聚合：count、unique、duplicates，数字列另有 sum/avg/min/max；分组时每组一行 |
 | 展开记录 | 记录表单 buffer，一字段一段，`RET` 改字段，`n`/`p` 按视图顺序换记录 |
 | 冻结表头 | `header-line` 显示列名，随横向滚动 |
 | 工具栏 | `?` 打开 transient 菜单（Cell / Row / View / Columns 四组） |
@@ -169,6 +179,15 @@ NocoDB 里 Markdown 出现在三处，用了两套解析器：
   `apply`（套一层）和 `peel`（从最外层剥回参数），所以芯片只是表达式文本的视图，保存的永远是
   普通表达式；参数里的花括号会被去掉，免得提前结束 `{{ }}`。画布上的“加号节点”只属于 UI，
   保存前由 `filterOutPlusNodes` 过滤（`utils/workflowGraphUtils.ts`）。
+- **步骤引用、改名与测试新鲜度**（`nc-gui/utils/workflowUtils.ts`）：步骤按标题引用
+  （`$('标题')`），改标题时 `updateVariableReferences` 重写所有配置中的单、双引号引用；
+  `getRunStepReferenceIssues` 报出引用了不存在的步骤，或从循环外引用循环体里的步骤（每个元素各有
+  一个结果）；步骤的测试结果有新鲜度（未测、过期、失败），上游没有当前有效的通过结果时下游不能测
+  （`findBlockingParentNodes`）。
+- **MCP**（`nocodb/src/mcp/`）：13 个工具（库信息、表清单、表结构、查询、读、计数、附件、聚合、
+  增改删、关联/解除）。输入 schema 严格；过滤先编译再校验（`filter-compile`、`filter-verify`）；
+  `read-echo` 让“读出、改一处、整条写回”可行：只读键丢弃，不可写键若被改则拒绝，“对不可写字段的
+  修改永远不会显示成功”；工具描述写全查询语法（`descriptions.ts`）。
 - **节点运行契约**（`noco-integrations/core/src/workflow-node/types.ts`）：节点拿到
   `inputs.config`、`testMode`、取消用的 `AbortSignal`、按 id 取集成的 `getIntegration`，以及
   `htmlInputPaths`：哪些配置路径的模板是富文本、插值时做过 HTML 转义，由模板一次决定，节点
@@ -199,6 +218,10 @@ NocoDB 里 Markdown 出现在三处，用了两套解析器：
 | 按活动路由模型（`AiUseCase`） | 各 Agent 由 provider 自己选模型；Pi、Copilot、LaTeX 导出各自配置 | 值得考虑：把“标题、总结、压缩这类无人值守活动用便宜模型，构建类用强模型”收成一张表。属于 `agent-management.md` 的待定设计。 |
 | 回合末总结写给后续回合 | Hy Memory、交接与任务图谱 journal | 已有，且落在项目 Markdown 里，更合 Noema 的根。 |
 | devtools 记录每次调用 | ACP 事件、Agent Manager 的 Usage 页 | 已有，数据来自协议事件而非渲染（AGENT.md）。 |
+| 步骤按标题引用，改名时重写引用 | 笔记链接、块引用 `((id))` | Noema 用稳定 id 引用块，不怕改名，比按标题更稳；按标题的 `[[链接]]` 改名重写由 `noema-move-note` 负责。 |
+| 测试结果新鲜度与上游阻塞 | Research 的冻结 RunSpec、任务图谱依赖 | 已有同类机制；“过期”状态可借来表达上游变化后的结论复核。 |
+| MCP 读回配对：不可写字段被改则拒绝 | `agent:document:edit` / `propose`、C24“说清楚实际失败了什么” | 同一原则。可作为 Noema `agent:*` 写入工具的检查项：写入请求里改了不可写的部分，要明确拒绝而不是静默忽略。 |
+| 描述写全语法 | `resources/agent/tools.md`（C26） | 已有。 |
 
 一体化思路本身值得记下：NocoDB 把数据（表）、视图、自动化（工作流）、AI（列/Agent）
 放在**同一个对象模型**上，AI 和工作流引用的都是“列/表/视图”的 id。Noema 的对应物是
@@ -229,6 +252,20 @@ Markdown 里的稳定身份（`{#UUIDv7}` 块 id、属性块、`@@todo`）：Age
 | `tests/elisp/` 18 个文件 | 约 230 项全部通过（需完整配置的 7 个文件在完整配置下通过） |
 | 实机：真实 Noema host + Go kernel，batch Emacs 加载完整配置 | 属性视图在 vault 范围走 `kernel-attribute-view`，28 条 todo 中画出前 5 条，计数栏正确；在 scratch 笔记上改格写回文件并重新求值 |
 
+### 全文件覆盖
+
+[noema-coverage.md](noema-coverage.md) 列出全部 542 个源文件（约 21.5 万行）：472 个有测试引用，
+382 个有文档提到，37 个（3736 行）两者都没有。对这 37 个再查引用方：
+
+- **死代码**：`server/lib/lsp-base.mjs`（158 行）从第一次提交起没有任何引用；**已删除**，测试仍全部通过。
+- 其余 36 个都有引用方，大多是页面入口（`slides-main`、`markdown-box-lab-main`、资源清理页）、
+  Worker 与小工具（`tikz-worker`、`coalesced-timer`、`heading-slug`），由引用它们的模块间接覆盖。
+- **应补测试的核心模块**：`shared/block-identity.mjs`（块 id 唯一的解析器）没有测试直接引用；Go
+  `kernel/noema/identity` 包没有 `_test.go`。块身份是 Noema 一体化的锚，而审计恰好在这里发现了
+  JS 与 Go 的不一致（下表）。其次是 `server/jupyter/` 的 wire-protocol、raw-socket、kernel-process
+  （有文档无直接测试）、`server/lib/jupyter-notebook-format.mjs`（411 行）、
+  `src/cm6/extensions/visual/widgets/inline-commands.ts`（1332 行）。
+
 ### 按模块
 
 | 模块 | 读了什么 | 结论 |
@@ -243,6 +280,7 @@ Markdown 里的稳定身份（`{#UUIDv7}` 块 id、属性块、`@@todo`）：Age
 | 测试入口 | Makefile、`scripts/test-all` | **已修**：Go 测试需要 `fts5` 标签但没有入口（裸 `go test` 18 项失败），新增 `make kernel-test`；Noema 的 Elisp 测试不在任何汇总里，`scripts/test-all` 现在包含它们。 |
 | Emacs 侧 `lisp/noema/`（module-doctor） | 策略报错 | **已修** `bridge/note-code.el`（改问 `remote-client-file-name`）与 `bridge/config.el`（TRAMP 兼容边界，标注 `aaron-allow`）。`noema/jupyter` 的 5 处记为 `jupyter-workflow.md` G1–G3，需要 Aaron-PC 远端测试后再改。 |
 | 仓库卫生 | 跟踪文件 | **已修**：Noema 跟踪的 `.el~` 备份已移除并忽略 `*~`；Emacs 根目录被跟踪的 `clutch/` 移到 `var/clutch/`。`upstream/org-mode` 是子模块，不是误提交。 |
+| 块身份文法（`shared/block-identity.mjs`、`kernel/noema/markdown/scan.go`、av 标题清理） | 三处正则对照 | **不一致**：JS `BLOCK_ID_SOURCE` 接受 3–128 位 `[A-Za-z0-9._:-]`；Go 扫描与 av 标题清理（JS `cleanTitle`、Go `identityTail`）只认 36 位 UUID 形状。所以 `#+begin av 标题 {#my-view}` 的 `{#my-view}` 会显示在视图标题里。哪种文法是规范需要人定。另有 `shared/columns-layout.mjs`（另一任务未提交的新文件）也自写了一份。 |
 | 页面里的 `attribute-view.ts` widget、`syntax.md`、`rendered-constructs.md` | — | 另一项任务有未提交改动，本轮只在 `syntax.md` 提交了自己的行。 |
 
 没有跑的：`scripts/check-*.mjs` 这类 WebKit 驱动的交互检查（需要图形环境），以及在用户
@@ -302,3 +340,6 @@ grid 在 0.3 s 空闲后重绘；最后一个 grid 关闭时摘掉 CSV buffer �
 - 发布出去的 HTML 是否保留 `html` 块里的 `<iframe>`（例如嵌入视频），还是与编辑器一样删除。
 - 是否把“无人值守 AI 活动”（标题、总结、压缩）的模型选择收成一张表（`agent-management.md`）。
 - `noema/jupyter` 的 Remote-first 违规（`jupyter-workflow.md` G1–G3）何时在 Aaron-PC 上带测试修。
+- 块 id 的规范文法：通用 `BLOCK_ID_SOURCE` 还是只认 UUIDv7；定下后统一 av 标题清理与 Go 扫描，
+  并给 `block-identity.mjs` 与 Go `identity` 包补测试。
+- 删除或改名会断链的操作，是否先列出反向链接（借 NocoDB 的依赖报告，`wiki-workspace.md`）。

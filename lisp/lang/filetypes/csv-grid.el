@@ -60,10 +60,10 @@ Taken from NocoDB's CSV import; 1/0 is left to number columns.")
   "Most distinct values a column may hold to be offered as a choice.")
 
 (defconst +csv-grid--aggregates
-  '((number . (count unique sum avg min max))
-    (date . (count unique min max))
+  '((number . (count unique duplicates sum avg min max))
+    (date . (count unique duplicates min max))
     (checkbox . (checked unchecked))
-    (t . (count unique)))
+    (t . (count unique duplicates)))
   "Totals offered per column type, in the order `a' cycles them.")
 
 (defface +csv-grid-header '((t :inherit (bold header-line)))
@@ -554,6 +554,12 @@ Runs in GRID's source buffer with CELLS read with bounds."
                                             (not (+csv-grid--checked-p column (+csv-grid--field (aref +csv-grid--records row) column))))
                                           rows)))
       ('count (format "%d" (length values)))
+      ;; Rows whose filled value occurs in another row too, as NocoDB's
+      ;; duplicate detection counts them.
+      ('duplicates
+       (let ((seen (make-hash-table :test #'equal)))
+         (dolist (value values) (puthash value (1+ (gethash value seen 0)) seen))
+         (format "%d" (seq-count (lambda (value) (> (gethash value seen) 1)) values))))
       ('unique (format "%d" (length (delete-dups (copy-sequence values)))))
       ('sum (+csv-grid--format-number (apply #'+ numbers)))
       ('avg (if numbers (+csv-grid--format-number (/ (apply #'+ numbers) (float (length numbers)))) ""))
