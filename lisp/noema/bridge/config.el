@@ -78,6 +78,9 @@
 (autoload 'noema-project-overview "noema-project-overview" nil t)
 (autoload 'noema-history-search "noema-history-search" nil t)
 (autoload 'noema-findings "noema-findings" nil t)
+;; `#+begin av' views drawn as Emacs tables over the same host evaluation.
+(autoload 'noema-attribute-view "noema-attribute-view" nil t)
+(set-evil-initial-state! 'noema-attribute-view-mode 'emacs)
 
 (defgroup +noema nil
   "Noema Markdown web editor integration."
@@ -4230,6 +4233,7 @@ RELOAD and WINDOW-MENU select the backend's implementations."
       ("A" "agenda"           noema-agenda)
       ("L" "agenda log"       noema-agenda-log)
       ("F" "file todos"       +noema-roam/jump-file-todo)
+      ("!v" "attribute view"  noema-attribute-view)
       ("M" "repositories"     +noema/wiki-repositories)]
      ["Wiki pages"
       ("!r" "reports"         +noema/wiki-reports)

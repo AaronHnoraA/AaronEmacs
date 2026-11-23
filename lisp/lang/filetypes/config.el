@@ -81,6 +81,16 @@
   (csv-align-max-width 80)
   (csv-separators '("," "\t" "|" ";")))
 
+;; A CSV buffer is the table; `+csv/grid' opens a view of it that sorts,
+;; filters, groups and totals without editing it, and writes cell edits back
+;; as text edits (lang/filetypes/csv-grid.el).
+(autoload '+csv/grid "lang/filetypes/csv-grid" nil t)
+(set-evil-initial-state! '(+csv-grid-mode +csv-grid-record-mode) 'emacs)
+(with-eval-after-load 'csv-mode
+  (define-localleader-key!
+    :keymaps 'csv-mode-map
+    "g" '(+csv/grid :which-key "grid view")))
+
 ;; Databases.  The header entry catches extensionless SQLite files; extension
 ;; entries make ordinary .db/.sqlite opens land in the DB client immediately.
 (add-to-list 'magic-mode-alist

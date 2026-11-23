@@ -299,6 +299,9 @@ COLUMN TYPE`, `calc COLUMN OP`, `sort`, `limit`, `group`, `view` (`table`,
 `ATTRIBUTE_VIEW_*` lists in `shared/attribute-view.mjs`; the projection is
 computed by `kernel/noema/attributeview`.  Fixtures:
 `shared/attribute-view-fixtures.json`.
+In Emacs, `noema-attribute-view` (`lisp/noema-attribute-view.el`) draws the
+same host answer as a native table and edits cells through the same
+cell-patch channel; it never evaluates a spec itself.
 
 ### Query embed
 

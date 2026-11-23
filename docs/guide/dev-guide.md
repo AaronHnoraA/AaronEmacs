@@ -448,9 +448,31 @@ Dape 原生 `dape-restart` 重启。
 - 密码优先走 `auth-source` / `pass`
 - 连接、查询、JDBC 的超时和结果行数上限是 config 设置（config-board 的 `+clutch` 组）
 
+查询控制台的内容保存在 `var/clutch/`（运行时状态，不在配置根目录）。
+
 文件：`.sql` / `.ddl` / `.dml` 用 `clutch-mode` 打开。它就是 `sql-mode`，只是能连库执行；
 `.redis` 用 `clutch-redis-mode`。打开文件不会安装 clutch：没装时分别退回
 `sql-mode` 和 `prog-mode`。SQL 缩进不用 tab。
+
+### CSV 表格视图
+
+CSV buffer 是表，`M-x +csv/grid`（csv-mode 里 `SPC m g`）打开它的视图：排序、过滤、
+分组、隐藏列和聚合只改视图，不改文件；编辑是对 CSV 文本的原位修改，撤销、保存、diff
+都照常。实现：[lisp/lang/filetypes/csv-grid.el](../../lisp/lang/filetypes/csv-grid.el)。
+
+| 键 | 作用 |
+| --- | --- |
+| `← → TAB S-TAB`，`↑ ↓ n p j k` | 按格移动；上下移动保持列 |
+| `RET` / `e`，`SPC`，`DEL`，`w` | 编辑本格，打开整条记录，清空本格，复制本格 |
+| `+`，`D`，`u`，`o` | 加行并编辑，删行，在 CSV buffer 里撤销，跳到 CSV 里的这条记录 |
+| `/`，`\` | 叠加过滤（`~ !~ = != > < >= <= empty filled`），清除过滤 |
+| `s`，`G`，`h`，`H` | 按本列排序（升、降、取消），按本列分组，隐藏本列，显示全部列 |
+| `a`，`g`，`?` | 循环本列聚合（count、unique，数字列另有 sum/avg/min/max），重读 CSV，菜单 |
+
+记录表单里 `RET` 改字段，`n`/`p` 按视图顺序换记录。数字、ISO 日期列自动识别，数字列
+右对齐、按数值排序，空值总排在最后。最多画 `+csv-grid-max-rows` 行，超过
+`+csv-grid-max-bytes` 的文件不打开。CSV buffer 改动后，可见的视图在短暂空闲后自动重绘。
+外部数据库用上面的 clutch。
 
 ## 6. Remote 框架、TRAMP 与 tramp-rpc
 
