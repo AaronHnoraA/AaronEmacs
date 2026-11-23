@@ -4290,6 +4290,39 @@ g, l, q and Escape were Portal reload/back, quit-window and the Meta prefix."
             (should-not (file-exists-p file))))
       (when (file-exists-p file) (delete-file file)))))
 
+(ert-deftest +noema-jupyter-local-file-cleanup-takes-the-target-path ()
+  "Target `local' with a recorded host is cleaned by the same host-checked command."
+  (let* ((context (remote-context-create :target-id "local" :localname "/"))
+         (runtime (+noema-jupyter-runtime-create
+                   :id "runtime-local" :context context :host-name "this-host"
+                   :connection-file "/tmp/kernel-x.json"))
+         command)
+    (cl-letf (((symbol-function '+noema-jupyter--output)
+               (lambda (_context program &rest args) (setq command (cons program args)) ""))
+              ((symbol-function 'remote-file-local-name) #'identity))
+      (+noema-jupyter--delete-runtime-files runtime))
+    (should (equal (car command) "sh"))
+    (should (member "this-host" command))))
+
+(ert-deftest +noema-jupyter-hostless-cleanup-follows-placement ()
+  "Without a recorded host, files are removed only where the client reaches them."
+  (let* ((file (make-temp-file "noema-jupyter-hostless-"))
+         (runtime (+noema-jupyter-runtime-create
+                   :id "runtime-hostless"
+                   :context (remote-context-create :target-id "anything" :localname "/")
+                   :connection-file file)))
+    (unwind-protect
+        (progn
+          ;; Placement says the client cannot reach it: refuse, keep the file.
+          (cl-letf (((symbol-function 'remote-client-file-name) #'ignore))
+            (should-error (+noema-jupyter--delete-runtime-files runtime))
+            (should (file-exists-p file)))
+          ;; Placement shares the client's filesystem: remove it there.
+          (cl-letf (((symbol-function 'remote-client-file-name) #'identity))
+            (+noema-jupyter--delete-runtime-files runtime))
+          (should-not (file-exists-p file)))
+      (when (file-exists-p file) (delete-file file)))))
+
 (ert-deftest +noema-jupyter-shutdown-all-releases-every-brokered-runtime ()
   "Brokered kernels are detached, so Emacs must close them before it exits."
   (let* ((+noema-jupyter-runtimes (make-hash-table :test #'equal))

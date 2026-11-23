@@ -292,7 +292,8 @@ to create one; quitting aborts the command.  Passive requests never ask."
               ;; Both logical and native TRAMP spellings use the Remote
               ;; gateway; neither belongs to the local research-project gate.
               ((not (or (string-prefix-p "/fs:" file)
-                        (file-remote-p file)))))
+                        ;; A TRAMP spelling names its own target: compatibility input.
+                        (file-remote-p file))))) ; aaron-allow: file-remote-p
     (require 'noema-research)
     (or +noema-jupyter-cell--project-root-cache
         (setq +noema-jupyter-cell--project-root-cache
@@ -311,7 +312,8 @@ ENSURE is passed to `+noema-jupyter-cell--project-root'."
   (dolist (key '(file scriptFile sourceFile))
     (when-let* ((value (alist-get key body))
                 ((stringp value))
-                ((file-remote-p value)))
+                ;; Only TRAMP spellings need projecting to the host's logical name.
+                ((file-remote-p value))) ; aaron-allow: file-remote-p
       (setf (alist-get key body) (+noema--host-file value))))
   (if-let* (((not (assq 'projectRoot body)))
             (root (+noema-jupyter-cell--project-root ensure)))

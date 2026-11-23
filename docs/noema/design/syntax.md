@@ -207,7 +207,7 @@ Open and close lines pair by kind and nest.  Parser: `ORG_ENV_OPEN_RE` in
 | `fold` | folded region |
 | `layout {cols=3 mode=grid widths=30-40-30 align=center}` | side-by-side Markdown group; `cols` 1–4, `grid` keeps blocks in cells, `flow` continues prose across columns (`src/layout-group.ts`) |
 | `tikz [id]` | TikZ/PGFPlots figure, kept verbatim in LaTeX (`shared/tikz-source.mjs`) |
-| `html` | sanitized raw HTML block; the editor drops an `<iframe>` in it, while HTML export (`src/export-html.ts`) still keeps one, which is undecided (see `docs/works/nocodb/README.md`) |
+| `html` | raw HTML block, sanitized by `src/sanitize-html.ts` in the editor and in HTML export alike (`src/render-html.ts`), so a published page shows what the editor showed |
 | `av [title]` | attribute view (below) |
 | `embed [title]` | query embed (below) |
 | `lean4` | Lean source carrier, not rendered as an environment |

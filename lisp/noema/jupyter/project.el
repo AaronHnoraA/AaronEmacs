@@ -92,7 +92,7 @@ for older profiles and editor hints, never an independent execution truth."
 (defun +noema-jupyter-project--fresh-entry (entry &optional source)
   "Read ENTRY's original kernelspec, on SOURCE's target when supplied."
   (if-let* ((directory (+jupyter-management-get 'resourceDir entry)))
-      (let* ((directory (if (and source (not (file-remote-p directory))
+      (let* ((directory (if (and source (not (file-remote-p directory)) ; aaron-allow: file-remote-p — a bare kernelspec path gets SOURCE's target
                                        (not (remote-fs-file-name-p directory)))
                                   (remote-make-file-name (remote-file-name-target source) directory)
                                 directory))

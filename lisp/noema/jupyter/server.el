@@ -34,6 +34,7 @@
 (require 'remote-workspace)
 (require 'remote-backend)
 (require 'remote-backend-jupyter)
+(declare-function remote-client-file-name "remote-fs" (file-name &optional adapter))
 
 (declare-function +noema-jupyter--defer "noema/jupyter/runtime" (function))
 (declare-function +noema-jupyter--get "noema/jupyter/runtime" (key alist))
@@ -304,7 +305,14 @@ group is rather than leaving Noema pointed at a dead local port."
   (let* ((id (format "%s" (plist-get entry :id)))
          (target (+noema-jupyter-server--target entry))
          (auth (or (plist-get entry :auth) 'token))
-         (local-p (equal target "local"))
+         ;; Placement, not the target's name: a target whose root the client
+         ;; reaches directly runs on this machine (filesystem sharing implies
+         ;; the same host here, since mounts are not used), so its server is
+         ;; dialled as is; every other target needs a routed channel.
+         ;; A target placement cannot resolve is not on the client; the
+         ;; channel below then reports what is wrong with it.
+         (local-p (ignore-errors
+                    (remote-client-file-name (remote-make-file-name target "/"))))
          (url (format "%s" (plist-get entry :url)))
          (server-name (plist-get entry :server-name))
          secret)

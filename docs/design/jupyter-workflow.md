@@ -347,7 +347,9 @@ URL 仍能连接，但不会在公开 catalog / Board 中显示密钥。
 
 ## Remote-first 路由
 
-`:target` 不是 `local` 时，Emacs 先在该 Target 的 workspace 里开一个
+是否直连由放置位置决定，而不是比较 Target 的名字：Target 的根目录能被客户端直接访问
+（`remote-client-file-name` 有答案）时，它就在本机，server URL 原样交给 Noema；放置无法解析
+的 Target 按不在本机处理。其余情况下，Emacs 先在该 Target 的 workspace 里开一个
 `remote-port-forward`，再把改写成 `127.0.0.1:<本地端口>` 的 URL 交给 Noema，同时
 带上真实主机名（否则 TLS 证书校验和 virtual-host 路由会对着 127.0.0.1 失败）。
 forward 作为 recoverable resource 注册在 workspace 上，传输断开后与 kernel 的
@@ -361,6 +363,12 @@ connection，而不是永久缓存第一次收到的本地端口。
 提前刷新 registry cache 掩盖。WebSocket 重绑或握手失败只记 `disconnected` 并继续连接
 同一个 server kernel id；只有 server 明确返回该 kernel 不存在才判死。配置清单成功
 刷新时，已经删除的 server provider 会立即注销，其 Remote forward 不会等进程退出才清理。
+
+kernel 的连接文件和日志清理对所有 Target 走同一条路径：记录了启动主机时，删除在 Target
+上执行，并先核对 `hostname`，换了机器就拒绝（本机也一样）；没有记录主机的旧 runtime，只在
+客户端能直接访问这些文件时删除，否则报错（`+noema-jupyter--delete-runtime-files`）。识别 TRAMP
+写法的 `file-remote-p`（`cell.el` 的项目根与网关路径投影、`project.el` 的 kernelspec 目录）是
+兼容边界，按 `aaron-allow` 标注。
 
 Target 无法提供 channel 时会报错，不会退回到客户端直连。这条规则是有意的：
 远端 server 常常绑在 loopback 上，直接在本机连同一个端口要么失败得莫名其妙，
@@ -577,18 +585,3 @@ Run the vendored Python tests before changing the launcher:
 The SSH implementation uses `StrictHostKeyChecking=accept-new`: first-use keys
 are recorded, while changed keys fail instead of being silently accepted.
 CLI output from Board operations is retained in `*Jupyter Board Log*`.
-
-## 已知差距
-
-`M-x module-doctor` 在 `:noema jupyter` 报出的 Remote-first 违规，修改都需要 Aaron-PC 上的
-远端与韧性测试（`docs/acceptance/remote-parity.md`），所以先记在这里：
-
-- **G1 运行时文件清理按 target 分支。** `+noema-jupyter-runtime` 清理连接文件和日志时
-  （`lisp/noema/jupyter/runtime.el` 的 `(equal target "local")`），本机直接 `delete-file`，
-  其它 target 另走主机分支。应当对 `/fs:TARGET:` 路径统一调用文件 API。
-- **G2 Jupyter 服务器按 target 选择直连。** `+noema-jupyter-server--resolve-entry`
-  （`server.el` 的 `local-p`）对 `local` 直连 URL，其它 target 走 `remote-channel`。本机也应
-  作为 `remote-channel` 的一种输入，由 backend 决定物理连接方式。
-- **G3 用 `file-remote-p` 识别 TRAMP 写法。** `cell.el` 的项目根判断和网关路径投影、
-  `project.el` 的 kernelspec 目录判断，用 `file-remote-p` 区分“路径自带 target”。可以改问
-  `remote-client-file-name`（纯查询，不建立连接），或者在确属兼容边界时标注 `aaron-allow`。

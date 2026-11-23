@@ -788,27 +788,33 @@ An unreachable target or a still-live group is not a completed shutdown."
                 (+noema-jupyter-runtime-id runtime))))))
 
 (defun +noema-jupyter--delete-runtime-files (runtime)
-  "Delete RUNTIME's connection and log files on its verified target host."
+  "Delete RUNTIME's connection and log files on its verified target host.
+Every target takes one path: when the launching host is recorded, the
+removal runs on the target and refuses a different machine.  A runtime
+saved without a host is cleaned only where the client reaches its files
+directly, decided by placement rather than by target name."
   (let* ((context (+noema-jupyter-runtime-context runtime))
-         (target (remote-context-target-id context))
+         (host (+noema-jupyter-runtime-host-name runtime))
          (files (seq-filter
                  (lambda (file)
                    (and (stringp file) (not (string-empty-p file))))
                  (list (+noema-jupyter-runtime-connection-file runtime)
-                       (+noema-jupyter-runtime-log-file runtime)))))
-    (when files
-      (if (equal target "local")
-          (dolist (file files)
-            (when (file-exists-p file) (delete-file file)))
-        (let ((host (+noema-jupyter-runtime-host-name runtime)))
-          (unless host
-            (error "Cannot remove kernel files: original target host is unknown"))
-          (apply #'+noema-jupyter--output
-                 (+noema-jupyter--probe-context context)
-                 "sh" "-c"
-                 "if [ \"$(hostname)\" != \"$1\" ]; then exit 77; fi; shift; for file do rm -f -- \"$file\" || exit; done"
-                 "sh" host
-                 (mapcar #'remote-file-local-name files)))))))
+                       (+noema-jupyter-runtime-log-file runtime))))
+         (client-files (and files (not host)
+                            (mapcar #'remote-client-file-name files))))
+    (cond
+     ((null files) nil)
+     (host
+      (apply #'+noema-jupyter--output
+             (+noema-jupyter--probe-context context)
+             "sh" "-c"
+             "if [ \"$(hostname)\" != \"$1\" ]; then exit 77; fi; shift; for file do rm -f -- \"$file\" || exit; done"
+             "sh" host
+             (mapcar #'remote-file-local-name files)))
+     ((seq-every-p #'identity client-files)
+      (dolist (file client-files)
+        (when (file-exists-p file) (delete-file file))))
+     (t (error "Cannot remove kernel files: original target host is unknown")))))
 
 (defun +noema-jupyter--verify-pending-runtime (runtime)
   "Verify that RUNTIME's old PID still owns its unique connection file.
