@@ -292,6 +292,13 @@ or editing when the web editor is unavailable."
 (add-hook 'after-init-hook #'+noema--pin-markdown-redirect-mode 90)
 (add-hook 'find-file-hook #'+noema-redirect-markdown-file-h)
 
+;; A pipe table is a small database: SPC m g opens it as a grid view whose
+;; edits write the table (lang/filetypes/csv-grid.el).
+(with-eval-after-load 'markdown-mode
+  (define-localleader-key!
+    :keymaps 'markdown-mode-map
+    "g" '(+markdown/table-grid :which-key "table grid")))
+
 (provide 'lang/markdown/config)
 
 ;;; lang/markdown/config.el ends here

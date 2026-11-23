@@ -4234,6 +4234,7 @@ RELOAD and WINDOW-MENU select the backend's implementations."
       ("L" "agenda log"       noema-agenda-log)
       ("F" "file todos"       +noema-roam/jump-file-todo)
       ("!v" "attribute view"  noema-attribute-view)
+      ("!t" "table grid"      +markdown/table-grid)
       ("M" "repositories"     +noema/wiki-repositories)]
      ["Wiki pages"
       ("!r" "reports"         +noema/wiki-reports)

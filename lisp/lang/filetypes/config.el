@@ -83,8 +83,10 @@
 
 ;; A CSV buffer is the table; `+csv/grid' opens a view of it that sorts,
 ;; filters, groups and totals without editing it, and writes cell edits back
-;; as text edits (lang/filetypes/csv-grid.el).
+;; as text edits (lang/filetypes/csv-grid.el).  `+markdown/table-grid' does
+;; the same for a pipe table in a note; lang/markdown binds it.
 (autoload '+csv/grid "lang/filetypes/csv-grid" nil t)
+(autoload '+markdown/table-grid "lang/filetypes/csv-grid" nil t)
 (set-evil-initial-state! '(+csv-grid-mode +csv-grid-record-mode) 'emacs)
 (with-eval-after-load 'csv-mode
   (define-localleader-key!

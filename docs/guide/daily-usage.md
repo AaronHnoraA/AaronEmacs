@@ -298,7 +298,9 @@ Noema 任务使用 `@@todo(state) [text] {key: value}`，例如
 打开原生 Agenda；`M-x noema-agenda-web` 打开含 Gantt 等视图的 Web Agenda。
 笔记里的 `#+begin av` 属性视图也可在 Emacs 里看：`M-x noema-attribute-view`（dispatch
 `!v`）把当前笔记的视图画成表（光标在块内时选它，多个时询问），`RET` 跳到行的源位置，
-`e` 改格（写回 Markdown），`g` 重新求值，`v` 跳到视图定义。
+`e` 改格（写回 Markdown），`g` 重新求值，`v` 跳到视图定义。笔记里的管道表格可用
+`M-x +markdown/table-grid`（dispatch `!t`，markdown-mode 里 `SPC m g`）当作表格视图排序、
+过滤、分组和汇总，编辑写回表格；键位见 [dev-guide](dev-guide.md) 的“CSV 与 Markdown 表格视图”。
 原生 `c` 和 Web New todo 共用 Task / Deadline / Appointment 模板；`C-u c`
 可改目标 Markdown 文件。保存失败保留输入，原生再按 `c` 继续修改。
 `+noema-agenda-capture-templates` 可配置字段、默认值和按日期命名的文件，

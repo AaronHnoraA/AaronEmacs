@@ -227,4 +227,103 @@ e,No,blue
     (should (string-match-p "checked 2" (buffer-string)))
     (should (equal "3" (+csv-grid--aggregate '(0 1 2 3 4) 1 'unchecked)))))
 
+(defconst csv-grid-tests--note
+  "# Fruit
+
+```
+| not | a table |
+|-----|---------|
+| x   | y       |
+```
+
+| name | qty | ok |
+|:-----|----:|----|
+| apple | 3 | yes |
+| pear \\| nashi | 12 | no |
+| fig |  | yes |
+
+After.
+")
+
+(defmacro csv-grid-tests--with-table-grid (&rest body)
+  "Run BODY in a table grid over the table in `csv-grid-tests--note'."
+  (declare (indent 0))
+  `(let ((source (generate-new-buffer "note.md")) grid)
+     (unwind-protect
+         (progn
+           (with-current-buffer source
+             (insert csv-grid-tests--note)
+             (goto-char (point-min))
+             (search-forward "| apple")
+             (cl-letf (((symbol-function 'pop-to-buffer) #'ignore))
+               (setq grid (+markdown/table-grid))))
+           (with-current-buffer grid
+             (unwind-protect (progn ,@body)
+               (kill-buffer grid))))
+       (kill-buffer source))))
+
+(ert-deftest csv-grid-finds-pipe-tables-outside-fences ()
+  (with-temp-buffer
+    (insert csv-grid-tests--note)
+    (let ((tables (+csv-grid--md-tables)))
+      (should (= 1 (length tables)))
+      (should (string-prefix-p "| name" (buffer-substring (car (car tables)) (cdr (car tables))))))))
+
+(ert-deftest csv-grid-reads-a-markdown-table ()
+  (csv-grid-tests--with-table-grid
+    (should (equal ["name" "qty" "ok"] +csv-grid--header))
+    (should (= 3 (length +csv-grid--records)))
+    (should (equal ["pear | nashi" "12" "no"] (cdr (aref +csv-grid--records 1))))
+    (should (equal ["fig" "" "yes"] (cdr (aref +csv-grid--records 2))))
+    (should (eq 'number (aref +csv-grid--types 1)))
+    (should (eq 'checkbox (aref +csv-grid--types 2)))))
+
+(ert-deftest csv-grid-writes-markdown-cells-in-place ()
+  (csv-grid-tests--with-table-grid
+    (+csv-grid--write 0 0 "red | apple")
+    (+csv-grid--write 2 1 "7")
+    (let ((text (with-current-buffer +csv-grid--source (buffer-string))))
+      (should (string-match-p "^| red \\\\| apple | 3 | yes |$" text))
+      (should (string-match-p "^| fig | 7 | yes |$" text))
+      (should (string-match-p "^After\\.$" text)))
+    ;; Incremental records agree with a fresh read of the table.
+    (let ((now +csv-grid--records))
+      (+csv-grid-refresh)
+      (should (equal now +csv-grid--records)))))
+
+(ert-deftest csv-grid-adds-and-deletes-markdown-rows ()
+  (csv-grid-tests--with-table-grid
+    (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "kiwi")))
+      (+csv-grid-add-row))
+    (let ((text (with-current-buffer +csv-grid--source (buffer-string))))
+      (should (string-match-p "^| fig |  | yes |\n| kiwi |  |  |\n\nAfter" text)))
+    (should (= 4 (length +csv-grid--records)))
+    (+csv-grid--goto-row 0)
+    (cl-letf (((symbol-function 'y-or-n-p) #'always))
+      (+csv-grid-delete-row))
+    (let ((text (with-current-buffer +csv-grid--source (buffer-string))))
+      (should-not (string-match-p "apple" text))
+      (should (string-match-p "^|:-----|----:|----|\n| pear" text)))))
+
+(ert-deftest csv-grid-saves-a-note-it-visited-itself ()
+  (let* ((dir (make-temp-file "grid" t))
+         (file (expand-file-name "note.md" dir)))
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert csv-grid-tests--note))
+          (with-temp-buffer
+            (setq-local +noema-buffer-file-name file)
+            (cl-letf (((symbol-function '+noema-buffer-file) (lambda (&rest _) file))
+                      ((symbol-function 'pop-to-buffer) #'set-buffer))
+              (+markdown/table-grid))
+            (should +csv-grid--save-source)
+            (+csv-grid--write 0 1 "4")
+            (should (string-match-p "^| apple | 4 | yes |$"
+                                    (with-temp-buffer (insert-file-contents file) (buffer-string))))
+            (let ((source +csv-grid--source))
+              (kill-buffer)
+              ;; Nobody else showed it, so it goes with its last grid.
+              (should-not (buffer-live-p source)))))
+      (delete-directory dir t))))
+
 ;;; csv-grid-tests.el ends here

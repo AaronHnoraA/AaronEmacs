@@ -165,10 +165,122 @@ the record's buffer position.  Blank lines are not records."
       (concat "\"" (string-replace "\"" "\"\"" value) "\"")
     value))
 
+;;;; Reading a Markdown table
+;;
+;; A GFM table in a note is the same kind of table: its rows are records,
+;; its first row names the columns and its delimiter row is skipped.  Cells
+;; are split at unescaped pipes; a written value escapes `|' and turns a
+;; newline into `<br>', so the row stays one line.
+
+(defconst +csv-grid--md-row-re "^[ \t]*|"
+  "A line that belongs to a pipe table.")
+
+(defconst +csv-grid--md-delimiter-re
+  "^[ \t]*|?[ \t]*:?-+:?[ \t]*\\(?:|[ \t]*:?-+:?[ \t]*\\)*|?[ \t]*$"
+  "The delimiter row under a table's header.")
+
+(defconst +csv-grid--md-fence-re "^[ \t]*\\(```\\|~~~\\)"
+  "A code fence; tables inside one are examples.")
+
+(defun +csv-grid--md-table-at (pos)
+  "Return (BEG . END) of the pipe table whose rows include POS, or nil.
+BEG is the start of the header line, END the end of the last row."
+  (save-excursion
+    (goto-char pos)
+    (beginning-of-line)
+    (when (looking-at-p +csv-grid--md-row-re)
+      (while (and (not (bobp))
+                  (save-excursion (forward-line -1) (looking-at-p +csv-grid--md-row-re)))
+        (forward-line -1))
+      (let ((beg (point)))
+        (when (save-excursion (forward-line 1) (looking-at-p +csv-grid--md-delimiter-re))
+          (while (and (not (eobp))
+                      (save-excursion (forward-line 1)
+                                      (and (not (eobp)) (looking-at-p +csv-grid--md-row-re))))
+            (forward-line 1))
+          (cons beg (line-end-position)))))))
+
+(defun +csv-grid--md-tables ()
+  "Return every pipe table outside code fences as (BEG . END), in order."
+  (save-excursion
+    (save-restriction
+      (widen)
+      (goto-char (point-min))
+      (let (tables fence)
+        (while (not (eobp))
+          (cond
+           ((looking-at +csv-grid--md-fence-re)
+            (let ((marker (match-string 1)))
+              (cond ((null fence) (setq fence marker))
+                    ((string= fence marker) (setq fence nil))))
+            (forward-line 1))
+           ((and (not fence) (looking-at-p +csv-grid--md-row-re)
+                 (+csv-grid--md-table-at (point)))
+            (let ((table (+csv-grid--md-table-at (point))))
+              (push table tables)
+              (goto-char (cdr table))
+              (forward-line 1)))
+           (t (forward-line 1))))
+        (nreverse tables)))))
+
+(defun +csv-grid--md-read-row (&optional bounds)
+  "Read the table row at point and move to the next line.
+Return its cell strings, or with BOUNDS a list of (VALUE BEG END) where
+BEG and END delimit the trimmed cell text (equal for an empty cell)."
+  (let* ((eol (line-end-position))
+         (cells nil))
+    (skip-chars-forward " \t" eol)
+    (when (eq (char-after) ?|) (forward-char 1))
+    (while (< (point) eol)
+      (let ((start (point)))
+        ;; The cell ends at the next pipe not escaped by a backslash.
+        (while (and (< (point) eol)
+                    (progn (skip-chars-forward "^|\\\\" eol)
+                           (eq (char-after) ?\\)))
+          (forward-char (min 2 (- eol (point)))))
+        (let* ((end (point))
+               (raw (buffer-substring-no-properties start end))
+               (lead (progn (string-match "\\`[ \t]*" raw) (match-end 0)))
+               (trimmed (string-trim raw))
+               (beg (if (string-empty-p trimmed) (min (1+ start) end) (+ start lead)))
+               (value (string-replace "\\|" "|" trimmed)))
+          ;; Text after the last pipe is a cell only when it is not blank.
+          (unless (and (= end eol) (string-empty-p trimmed) (> start (line-beginning-position))
+                       (eq (char-before start) ?|))
+            (push (if bounds (list value beg (+ beg (length trimmed))) value) cells))
+          (when (< (point) eol) (forward-char 1)))))
+    (forward-line 1)
+    (nreverse cells)))
+
+(defun +csv-grid--md-parse (beg end)
+  "Parse the pipe table between BEG and END into (START . FIELDS) records."
+  (save-excursion
+    (goto-char beg)
+    (let ((records nil) (line 0))
+      (while (and (< (point) end) (not (eobp)))
+        (let ((start (point)))
+          (if (= line 1)
+              (forward-line 1)
+            (push (cons start (vconcat (+csv-grid--md-read-row))) records)))
+        (cl-incf line))
+      (vconcat (nreverse records)))))
+
+(defun +csv-grid--md-encode (value)
+  "Return VALUE as Markdown table cell text."
+  (string-replace "\n" "<br>" (string-replace "|" "\\|" value)))
+
 ;;;; Grid state
 
 (defvar-local +csv-grid--source nil "The CSV buffer this grid views.")
-(defvar-local +csv-grid--separator nil "Field separator of the source.")
+(defvar-local +csv-grid--separator nil "Field separator of a CSV source.")
+(defvar-local +csv-grid--format 'csv
+  "What the source holds: `csv' (the whole buffer) or `markdown' (one table).")
+(defvar-local +csv-grid--save-source nil
+  "Non-nil when the grid visited its source itself and saves each change.
+Nobody else shows that buffer, so an unsaved edit would hide there; a
+buffer the user had open is left for the user to save.")
+(defvar-local +csv-grid--region nil
+  "For a Markdown table, (BEG . END) markers around it in the source.")
 (defvar-local +csv-grid--tick nil "Source modification tick the records were read at.")
 (defvar-local +csv-grid--header nil "Column names, a vector.")
 (defvar-local +csv-grid--records nil "Data records, a vector of (START . FIELDS).")
@@ -277,19 +389,78 @@ that repeat is a `select', as NocoDB's import decides: at most
           (push value values))))
     (sort values #'string<)))
 
+;;;; The source, whatever it holds
+
+(defun +csv-grid--source-parse ()
+  "Parse the source as this grid's format; header record first."
+  (let ((kind +csv-grid--format) (region +csv-grid--region) separator records)
+    (with-current-buffer +csv-grid--source
+      (pcase kind
+        ('csv (setq separator (+csv-grid--separator)
+                    records (+csv-grid--parse separator)))
+        ('markdown
+         (let ((table (+csv-grid--md-table-at (marker-position (car region)))))
+           (unless table (user-error "The table is gone from %s" (buffer-name)))
+           (set-marker (car region) (car table))
+           (set-marker (cdr region) (cdr table))
+           (setq records (+csv-grid--md-parse (car table) (cdr table)))))))
+    (setq +csv-grid--separator separator)
+    records))
+
+(defun +csv-grid--source-encode (value)
+  "Return VALUE as field text of the source's format."
+  (if (eq +csv-grid--format 'markdown)
+      (+csv-grid--md-encode value)
+    (+csv-grid--encode value +csv-grid--separator)))
+
+(defun +csv-grid--source-read-in (grid &optional bounds)
+  "Read the record at point of the current buffer as GRID's source."
+  (let ((format (buffer-local-value '+csv-grid--format grid))
+        (separator (buffer-local-value '+csv-grid--separator grid)))
+    (if (eq format 'markdown)
+        (+csv-grid--md-read-row bounds)
+      (+csv-grid--read-record separator bounds))))
+
+(defun +csv-grid--source-grow (grid cells column text)
+  "Extend the record whose CELLS end before COLUMN, putting TEXT there.
+Runs in GRID's source buffer with CELLS read with bounds."
+  (let ((missing (- column (length cells))))
+    (if (eq (buffer-local-value '+csv-grid--format grid) 'markdown)
+        (progn
+          (end-of-line)
+          (skip-chars-backward " \t")
+          (unless (eq (char-before) ?|) (insert " |"))
+          (insert (apply #'concat (make-list missing "  |")) " " text " |"))
+      (pcase-let ((`(,_ ,_ ,end) (car (last cells))))
+        (goto-char end)
+        (insert (make-string (1+ missing) (buffer-local-value '+csv-grid--separator grid)) text)))))
+
+(defun +csv-grid--source-changed ()
+  "Save the source after a grid change when the grid owns its visit."
+  (when +csv-grid--save-source
+    (let ((tick nil))
+      (with-current-buffer +csv-grid--source
+        (when (buffer-modified-p)
+          (let ((save-silently t) (inhibit-message t))
+            (save-buffer)))
+        (setq tick (buffer-chars-modified-tick)))
+      (setq +csv-grid--tick tick))))
+
+(defun +csv-grid--source-name ()
+  "Name the source for messages."
+  (if (eq +csv-grid--format 'markdown) "table" "CSV"))
+
 (defun +csv-grid--read-source ()
   "Read the source buffer into this grid's state."
-  (let ((source +csv-grid--source) separator records tick)
+  (let ((source +csv-grid--source) records tick)
     (with-current-buffer source
       (when (> (buffer-size) +csv-grid-max-bytes)
-        (user-error "%s is larger than `+csv-grid-max-bytes'" (buffer-name)))
-      (setq separator (+csv-grid--separator)
-            records (+csv-grid--parse separator)
-            tick (buffer-chars-modified-tick)))
+        (user-error "%s is larger than `+csv-grid-max-bytes'" (buffer-name))))
+    (setq records (+csv-grid--source-parse)
+          tick (buffer-chars-modified-tick source))
     (let* ((width (seq-reduce (lambda (most record) (max most (length (cdr record)))) records 0))
            (header (if (> (length records) 0) (cdr (aref records 0)) [])))
-      (setq +csv-grid--separator separator
-            +csv-grid--tick tick
+      (setq +csv-grid--tick tick
             +csv-grid--header (vconcat (cl-loop for column below width
                                                 collect (let ((name (if (< column (length header)) (aref header column) "")))
                                                           (if (string-empty-p name) (format "Column %d" (1+ column)) name))))
@@ -608,7 +779,7 @@ which is right when only a column outside the filters and sort changed."
   (unless (and (buffer-live-p +csv-grid--source)
                (eql +csv-grid--tick (buffer-chars-modified-tick +csv-grid--source)))
     (+csv-grid-refresh)
-    (user-error "The CSV changed; the grid is redrawn, try again")))
+    (user-error "The %s changed; the grid is redrawn, try again" (+csv-grid--source-name))))
 
 (defun +csv-grid--write (row column value)
   "Set COLUMN of record index ROW to VALUE in the source buffer.
@@ -616,33 +787,30 @@ Only that record is read again: the records after it move by the
 change in length, so an edit costs no reparse of the file."
   (+csv-grid--ensure-current)
   (let* ((start (car (aref +csv-grid--records row)))
-         (separator +csv-grid--separator)
-         (source +csv-grid--source)
+         (grid (current-buffer))
+         (text (+csv-grid--source-encode value))
          delta fields tick)
-    (with-current-buffer source
+    (with-current-buffer +csv-grid--source
       (save-excursion
         (let ((size (buffer-size)))
           (goto-char start)
-          (let ((old (+csv-grid--read-record separator t))
-                (text (+csv-grid--encode value separator)))
+          (let ((old (+csv-grid--source-read-in grid t)))
             (if (< column (length old))
                 (pcase-let ((`(,_ ,beg ,end) (nth column old)))
                   (goto-char beg)
                   (delete-region beg end)
                   (insert text))
-              ;; A short record grows to reach the column.
-              (pcase-let ((`(,_ ,_ ,end) (car (last old))))
-                (goto-char end)
-                (insert (make-string (- column (length old) -1) separator) text))))
+              (+csv-grid--source-grow grid old column text)))
           (setq delta (- (buffer-size) size))
           (goto-char start)
-          (setq fields (vconcat (+csv-grid--read-record separator))
+          (setq fields (vconcat (+csv-grid--source-read-in grid))
                 tick (buffer-chars-modified-tick)))))
     (setcdr (aref +csv-grid--records row) fields)
     (unless (zerop delta)
       (cl-loop for index from (1+ row) below (length +csv-grid--records)
                do (cl-incf (car (aref +csv-grid--records index)) delta)))
     (setq +csv-grid--tick tick)
+    (+csv-grid--source-changed)
     (+csv-grid--render (not (or (eql column (car +csv-grid--sort))
                                 (assq column +csv-grid--filters))))))
 
@@ -687,17 +855,23 @@ them for completion, though any text is accepted."
     (message "Copied: %s" (truncate-string-to-width value 60 nil nil "…"))))
 
 (defun +csv-grid-add-row ()
-  "Append an empty record to the CSV and edit its first visible cell."
+  "Append an empty record to the source and edit its first visible cell."
   (interactive)
   (+csv-grid--ensure-current)
   (let ((separator +csv-grid--separator)
-        (width (length +csv-grid--header)))
+        (width (length +csv-grid--header))
+        (region +csv-grid--region))
     (with-current-buffer +csv-grid--source
       (save-excursion
-        (goto-char (point-max))
-        (unless (bolp) (insert "\n"))
-        ;; A blank line is not a record, so the new one holds its separators.
-        (insert (make-string (max 1 (1- width)) separator) "\n"))))
+        (if region
+            (progn
+              (goto-char (cdr region))
+              (insert "\n|" (apply #'concat (make-list (max 1 width) "  |"))))
+          (goto-char (point-max))
+          (unless (bolp) (insert "\n"))
+          ;; A blank line is not a record, so the new one holds its separators.
+          (insert (make-string (max 1 (1- width)) separator) "\n")))))
+  (+csv-grid--source-changed)
   (+csv-grid-refresh)
   (let ((row (1- (length +csv-grid--records))))
     (if (+csv-grid--goto-row row (car +csv-grid--visible))
@@ -705,7 +879,7 @@ them for completion, though any text is accepted."
       (message "Row added; it is outside the current filter"))))
 
 (defun +csv-grid-delete-row ()
-  "Delete the record at point from the CSV."
+  "Delete the record at point from the source."
   (interactive)
   (let* ((row (+csv-grid--row-at-point))
          (fields (cdr (aref +csv-grid--records row))))
@@ -713,28 +887,39 @@ them for completion, though any text is accepted."
                                                (string-join (append fields nil) ", ") 50 nil nil "…")))
       (+csv-grid--ensure-current)
       (let ((start (car (aref +csv-grid--records row)))
-            (separator +csv-grid--separator))
+            (grid (current-buffer)))
         (with-current-buffer +csv-grid--source
           (save-excursion
             (goto-char start)
-            (+csv-grid--read-record separator)
-            (delete-region start (point)))))
+            (if (eq (buffer-local-value '+csv-grid--format grid) 'markdown)
+                ;; A data row always follows the header and delimiter lines,
+                ;; so it goes with the newline before it.
+                (delete-region (1- start) (line-end-position))
+              (+csv-grid--source-read-in grid)
+              (delete-region start (point))))))
+      (+csv-grid--source-changed)
       (+csv-grid-refresh))))
 
 (defun +csv-grid-undo ()
-  "Undo the last change in the CSV buffer."
+  "Undo the last change in the source buffer."
   (interactive)
   (with-current-buffer +csv-grid--source
     (undo))
+  (+csv-grid--source-changed)
   (+csv-grid-refresh))
 
 (defun +csv-grid-visit ()
-  "Show the record at point in the CSV buffer."
+  "Show the record at point in its source."
   (interactive)
   (let* ((row (+csv-grid--row-at-point))
-         (start (car (aref +csv-grid--records row))))
-    (pop-to-buffer +csv-grid--source)
-    (goto-char start)))
+         (start (car (aref +csv-grid--records row)))
+         (source +csv-grid--source)
+         (file (buffer-file-name source)))
+    (if (and +csv-grid--save-source file (fboundp 'aaron-open-place))
+        ;; The note is shown where it normally is (a Noema page, say).
+        (aaron-open-place file 'other (with-current-buffer source (line-number-at-pos start)))
+      (pop-to-buffer source)
+      (goto-char start))))
 
 ;;;; View settings
 
@@ -814,7 +999,7 @@ them for completion, though any text is accepted."
   "Read the CSV buffer again and redraw."
   (interactive)
   (unless (buffer-live-p +csv-grid--source)
-    (user-error "The CSV buffer is gone"))
+    (user-error "The source buffer is gone"))
   (+csv-grid--read-source)
   (setq +csv-grid--hidden (seq-filter (lambda (c) (< c (length +csv-grid--header))) +csv-grid--hidden))
   (+csv-grid--render))
@@ -930,15 +1115,28 @@ them for completion, though any text is accepted."
   (setq +csv-grid--timer nil))
 
 (defun +csv-grid--view-killed-h ()
-  "Stop the source following this grid when it is the last one."
-  (let ((view (current-buffer)) (source +csv-grid--source))
+  "Release what this grid holds when it is killed.
+The table markers go; the source stops being followed when this was its
+last grid, and a source the grid visited itself is killed then, unless
+it holds unsaved text or is on screen."
+  (let ((view (current-buffer))
+        (source +csv-grid--source)
+        (owned +csv-grid--save-source))
+    (when +csv-grid--region
+      (set-marker (car +csv-grid--region) nil)
+      (set-marker (cdr +csv-grid--region) nil))
     (when (buffer-live-p source)
       (with-current-buffer source
         (setq +csv-grid--views (delq view (seq-filter #'buffer-live-p +csv-grid--views)))
         (unless +csv-grid--views
           (remove-hook 'after-change-functions #'+csv-grid--source-changed-h t)
           (remove-hook 'kill-buffer-hook #'+csv-grid--source-killed-h t)
-          (+csv-grid--source-killed-h))))))
+          (+csv-grid--source-killed-h)))
+      (when (and owned
+                 (null (buffer-local-value '+csv-grid--views source))
+                 (not (buffer-modified-p source))
+                 (not (get-buffer-window source t)))
+        (kill-buffer source)))))
 
 ;;;; Mode and entry
 
@@ -978,8 +1176,9 @@ them for completion, though any text is accepted."
     map)
   "Keys of a CSV grid.")
 
-(define-derived-mode +csv-grid-mode special-mode "CSV-Grid"
-  "A view over a CSV buffer: sort, filter, group and total without editing it.
+(define-derived-mode +csv-grid-mode special-mode "Grid"
+  "A view over a CSV buffer or a Markdown table: sort, filter, group and
+total without editing it.
 \\{+csv-grid-mode-map}"
   (setq truncate-lines t
         buffer-read-only t)
@@ -991,17 +1190,66 @@ them for completion, though any text is accepted."
 (defun +csv/grid ()
   "Open a grid view of the current CSV buffer."
   (interactive)
-  (let* ((source (if (derived-mode-p '+csv-grid-mode) +csv-grid--source (current-buffer)))
-         (buffer (get-buffer-create (format "*CSV grid: %s*" (buffer-name source)))))
+  (if (derived-mode-p '+csv-grid-mode)
+      (+csv-grid-refresh)
+    (+csv-grid--open (current-buffer) 'csv nil nil
+                     (format "*CSV grid: %s*" (buffer-name)))))
+
+(defun +csv-grid--open (source kind region save name)
+  "Show grid NAME over SOURCE holding KIND, within REGION, saving if SAVE."
+  (let ((buffer (get-buffer-create name)))
     (with-current-buffer buffer
       (unless (derived-mode-p '+csv-grid-mode) (+csv-grid-mode))
-      (setq +csv-grid--source source)
+      (setq +csv-grid--source source
+            +csv-grid--format kind
+            +csv-grid--region region
+            +csv-grid--save-source save)
       (+csv-grid-refresh))
     (with-current-buffer source
       (cl-pushnew buffer +csv-grid--views)
       (add-hook 'after-change-functions #'+csv-grid--source-changed-h nil t)
       (add-hook 'kill-buffer-hook #'+csv-grid--source-killed-h nil t))
-    (pop-to-buffer buffer)))
+    (pop-to-buffer buffer)
+    buffer))
+
+(defvar +programmatic-file-visit)
+(declare-function +noema-buffer-file "noema/bridge/config" (&optional buffer))
+
+(defun +csv-grid--md-label (table)
+  "Name TABLE, a (BEG . END) pair in the current buffer, for choosing."
+  (save-excursion
+    (goto-char (car table))
+    (format "line %d: %s" (line-number-at-pos)
+            (string-trim (buffer-substring-no-properties (point) (line-end-position))))))
+
+;;;###autoload
+(defun +markdown/table-grid ()
+  "Open a grid view of a pipe table in the current Markdown note.
+Point in a table picks it; otherwise the note's tables are offered.  In a
+Noema page the note's source file is read, and each change is saved
+so the page sees it."
+  (interactive)
+  (let* ((page-file (and (fboundp '+noema-buffer-file) (+noema-buffer-file)))
+         (existing (and page-file (find-buffer-visiting page-file)))
+         (source (cond (page-file (or existing
+                                      (let ((+programmatic-file-visit t))
+                                        (find-file-noselect page-file))))
+                       (t (current-buffer))))
+         (save (and page-file (not existing)))
+         (table (with-current-buffer source
+                  (or (and (not page-file) (+csv-grid--md-table-at (point)))
+                      (let ((tables (+csv-grid--md-tables)))
+                        (cond ((null tables) (user-error "No pipe table in %s" (buffer-name)))
+                              ((null (cdr tables)) (car tables))
+                              (t (let* ((choices (mapcar (lambda (table) (cons (+csv-grid--md-label table) table))
+                                                         tables)))
+                                   (cdr (assoc (completing-read "Table: " choices nil t) choices)))))))))
+         (region (with-current-buffer source
+                   (let ((end (copy-marker (cdr table) t)))
+                     (cons (copy-marker (car table)) end)))))
+    (+csv-grid--open source 'markdown region save
+                     (format "*Table grid: %s:%d*" (buffer-name source)
+                             (with-current-buffer source (line-number-at-pos (car table)))))))
 
 (transient-define-prefix +csv-grid-menu ()
     "Act on a CSV grid."

@@ -12,7 +12,7 @@ Delete 清空、方向键按格移动。它的 AI、工作流、文档、Agent �
 （见“社区版与闭源边界”），能学的只有类型设计和交互思路。
 
 Noema 已经有同一种“视图”：`#+begin av` 属性视图是对 Markdown 事实的查询，由 Go kernel
-求值，单元格修改写回源文件。所以本轮没有把 NocoDB 的数据库搬进来，而是做了三件
+求值，单元格修改写回源文件。所以本轮没有把 NocoDB 的数据库搬进来，而是做了几件
 符合 Noema/Emacs 根的事：
 
 1. **Emacs 原生属性视图** `noema-attribute-view`（`noema-menu` `!v`）：同一个
@@ -21,7 +21,11 @@ Noema 已经有同一种“视图”：`#+begin av` 属性视图是对 Markdown 
 2. **CSV 表格视图** `+csv/grid`（csv-mode 里 `SPC m g`）：CSV buffer 是表，grid 是视图。
    按 NocoDB 表格的手感做了键位、过滤、排序、分组、隐藏列、聚合栏和记录表单；编辑是对
    CSV 文本的原位修改，撤销和保存都是 Emacs 原生的。
-3. **顺手修正**：clutch 查询控制台原先落在配置根目录 `clutch/`（还被 git 跟踪），现在
+3. **Markdown 表格视图** `+markdown/table-grid`（markdown-mode `SPC m g`，`noema-menu`
+   `!t`）：笔记里的管道表格就是一张小表，用同一个 grid 视图排序、过滤、分组、汇总，编辑
+   直接写回表格行。CSV 和 Markdown 表格共用一份视图实现，只有“读一条记录、编码、加删行”
+   按源格式分派。
+4. **顺手修正**：clutch 查询控制台原先落在配置根目录 `clutch/`（还被 git 跟踪），现在
    放在 `var/clutch/`。
 
 ## 红线怎么守
@@ -109,6 +113,12 @@ pnpm + lerna monorepo，Sustainable Use License（源码可见，限制商用；
 | 展开记录 | 记录表单 buffer，一字段一段，`RET` 改字段，`n`/`p` 按视图顺序换记录 |
 | 冻结表头 | `header-line` 显示列名，随横向滚动 |
 | 工具栏 | `?` 打开 transient 菜单（Cell / Row / View / Columns 四组） |
+
+Markdown 表格作为源（同一文件里的适配层）：表格范围用 marker 记住，跳过分隔行；单元格按
+未转义的 `|` 切分（GFM 规则：`\\|` 是转义的反斜杠加真正的分隔符）；写回把 `|` 写成 `\|`、换行写成
+`<br>`。在 Noema 页面上，按 AGENT.md 的规则在笔记的普通源 buffer 上工作；视图自己打开的
+源 buffer 每次改动立即保存（页面经文件监视重读），最后一个视图关闭时关掉它；用户自己开着的
+源 buffer 只改不存。
 
 没有采用：canvas 绘制、分块网络取数（本地文本无需）、行颜色条件、多选范围操作。
 
@@ -220,7 +230,8 @@ grid 在 0.3 s 空闲后重绘；最后一个 grid 关闭时摘掉 CSV buffer �
 
 - `site-lisp/noema/tests/elisp/noema-attribute-view-tests.el`：6 项（找块跳过代码围栏、
   spec 原样发送、画行/诊断/计算、丢弃过期答案、kanban 分组、编辑经 host 写回后重新求值）。
-- `test/csv-grid-tests.el`：16 项（引号/换行/空行解析、按需加引号、类型推断、数字排序空值
+- `test/csv-grid-tests.el`：21 项（Markdown 表格：围栏外找表、读表含转义竖线、原位写回且
+  与重读一致、增删行、自己打开的笔记每次保存并在最后一个视图关闭时释放；CSV：引号/换行/空行解析、按需加引号、类型推断、数字排序空值
   垫底、过滤叠加且不改源、分组与聚合、编辑写回、拒绝过期记录、增删行、按格移动、
   隐藏列、关闭最后一个视图后摘钩子、勾选与单选列识别、保留大小写的翻转、单选补全、
   勾选列排序与计数）。

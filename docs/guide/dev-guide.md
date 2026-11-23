@@ -454,9 +454,11 @@ Dape 原生 `dape-restart` 重启。
 `.redis` 用 `clutch-redis-mode`。打开文件不会安装 clutch：没装时分别退回
 `sql-mode` 和 `prog-mode`。SQL 缩进不用 tab。
 
-### CSV 表格视图
+### CSV 与 Markdown 表格视图
 
-CSV buffer 是表，`M-x +csv/grid`（csv-mode 里 `SPC m g`）打开它的视图：排序、过滤、
+CSV buffer 是表，`M-x +csv/grid`（csv-mode 里 `SPC m g`）打开它的视图；笔记里的管道表格
+同样可以：`M-x +markdown/table-grid`（markdown-mode 里 `SPC m g`，Noema dispatch `!t`），
+光标在表格里时用这张，否则列出笔记中代码围栏之外的所有表格。视图排序、过滤、
 分组、隐藏列和聚合只改视图，不改文件；编辑是对 CSV 文本的原位修改，撤销、保存、diff
 都照常。实现：[lisp/lang/filetypes/csv-grid.el](../../lisp/lang/filetypes/csv-grid.el)。
 
@@ -474,7 +476,10 @@ CSV buffer 是表，`M-x +csv/grid`（csv-mode 里 `SPC m g`）打开它的视�
 大小写，聚合为 checked/unchecked）、单选（取值少且重复：不超过 64 种、不超过非空格数的一半）
 和文本；空值总排在最后。最多画 `+csv-grid-max-rows` 行，超过
 `+csv-grid-max-bytes` 的文件不打开。CSV buffer 改动后，可见的视图在短暂空闲后自动重绘。
-外部数据库用上面的 clutch。
+Markdown 表格的单元格按未转义的 `|` 切分；写回时 `|` 写成 `\|`，换行写成 `<br>`，加行接在
+表格末尾，删行连同它的换行一起删。在 Noema 页面里，视图读笔记的源文件：如果这个源 buffer
+是视图自己打开的，每次改动都会立即保存，让页面看到外部修改，最后一个视图关闭时这个 buffer
+也随之关闭；你自己打开着的源 buffer 只改不存，由你保存。外部数据库用上面的 clutch。
 
 ## 6. Remote 框架、TRAMP 与 tramp-rpc
 
