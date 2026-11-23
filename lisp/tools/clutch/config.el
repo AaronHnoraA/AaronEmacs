@@ -10,6 +10,7 @@
 
 (require 'config)
 
+(require 'aaron-base)
 (require 'aaron-packages)
 (require 'aaron-lib)
 
@@ -33,6 +34,12 @@
   "Whether `+clutch-config-file` has already been loaded.")
 
 (aaron-package-register-vc 'clutch `(:url ,+clutch-package-url :rev :last-release))
+
+;; Query consoles are runtime state: clutch would otherwise keep them in a
+;; `clutch/' folder at the top of the configuration.  Set before clutch loads,
+;; so its defcustom keeps this value.
+(defvar clutch-console-directory)
+(setq clutch-console-directory (expand-file-name "clutch/" aaron-state-dir))
 
 (defun +clutch--load-config ()
   "Load `+clutch-config-file` once when it exists."
