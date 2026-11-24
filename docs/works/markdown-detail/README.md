@@ -169,6 +169,8 @@ string），换编辑器打开仍可读。这与 Noema 现有 `syntax.md` 的方
 | `renderMarkdownHTML` 新建的临时根节点被深拷贝 | 调用方拥有的根原地处理 |
 
 只把这次改动应用到 HEAD 上，`GraphTensor.md` 与 5 MB fixture 的 250 KB、500 KB 前缀输出逐字节一致。
+下表是 happy-dom（Node 脚本）里的数字；**在 WebKit 里复测后（`bench-render-webkit.mjs`）单遍 JS 遍历反而更慢，
+已改回原生选择器（noema `ce13f6f`），见下文“WebKit 实测”。**
 
 | 输入 | 耗时 | 内存峰值 |
 | --- | --- | --- |
@@ -182,6 +184,20 @@ Pandoc，`make publish` 发布手写站点、不渲染笔记）；同一段代�
 Jupyter 输出页，它们在 WebKit 里运行，也因此受益。超过约 800 KB 的笔记会让这个脚本在 happy-dom 下耗尽
 4 GB 堆（happy-dom 为 KaTeX 的每个 span 建很重的节点），只影响这个无人调用的脚本；按顶层块分段渲染在 250 KB
 前缀上与整篇逐字节一致，可行，但为一个无人调用的入口加代码不值得，没有加入。
+
+### WebKit 实测（渲染器真正运行的环境）
+
+`bench-render-webkit.mjs` 用 Vite 在 Playwright 驱动的 WebKit 里加载某个源码树的 `render-html.ts`，测
+GraphTensor.md 整篇（带选项，不走缓存）与 200 个段落（组件大小）的首次、再次渲染，各跑三次取典型值：
+
+| 版本 | 整篇 | 200 段首次 | 200 段再次 |
+| --- | --- | --- | --- |
+| 改动前（`3bdb21a^`） | 618 ms | 372 ms | 351 ms |
+| 只有单遍 JS 遍历的清理（`3bdb21a`） | 600 ms | 421 ms | 372 ms |
+| 现在：原生选择器 + 批量公式清洗 + 原地处理 + 渲染缓存 | 579 ms | 365 ms | 0 ms |
+
+happy-dom 里慢的是选择器引擎与 DOMPurify，WebKit 里两者是原生实现，JS 遍历在小片段上输给原生
+`querySelectorAll`；以 WebKit 为准改回。Node 脚本因此为 3.1 s（原 3.5 s，单遍遍历时 2.5 s）。
 
 ### 手感：组件渲染缓存
 
@@ -209,10 +225,21 @@ Markdown 的缓存（noema `30fbb0c`）。happy-dom 下 50 个带公式的单元
 - **真实页面**：`make build-web`（`.nvmrc` 的 Node 26.5.0）后，由真实 Noema host 提供的编辑页上读计算样式：
   正文 23.2px / 37.12px，h2 31.32px，h3 26.68px，h4 24.36px，引用 2px 线、23.2px 缩进；页面的
   `__noemaRendererBuild` 与新构建一致。
-- **WebKit 滚动检查**（`npm run check:scroll`）：playwright 不在依赖中，从镜像下载 tar 包离线安装后，用本机
-  缓存的 WebKit 构建（2370，playwright 1.65.1 期望 2388；下载匹配构建的操作未获许可）运行。去掉本次排版
-  提交时 21 处违规，带上时 20 处，类别相同，差别只是同类条目的 start/end 变体在两次运行间交替，排版没有
-  引入新的违规。这批既有违规是否来自构建版本不匹配，需要匹配的 WebKit 才能确认。
+- **WebKit 滚动检查**（`npm run check:scroll`，`NOEMA_PLAYWRIGHT_MODULE` 指向离线安装的 playwright 1.65.1，
+  浏览器用本机缓存的 WebKit 2370）：
+
+  | 版本 | 违规 |
+  | --- | --- |
+  | `5cf3b6c`：本轮之前最后一个一致的提交（HEAD 页面因缺符号无法加载） | 12 |
+  | 当前工作区，去掉本次排版提交 | 21 |
+  | 当前工作区，带上本次排版提交 | 20 |
+
+  排版没有引入违规。12 处早已存在：任务框、分隔线“点击正文离开”时光标没有落在被点的字上，以及左右环绕表格。
+  `repro-kp-click.mjs` 复现了其中的机制：点击最优换行（`cm-kp-paragraph`）段落时，三层映射（WebKit
+  `caretRangeFromPoint`、CM6 `posAtCoords`、Noema `pointerPosition`）在该点给出同一位置，但点击后的选区
+  时对时错——有时不动，有时落到同段另一视觉行。最可能是光标进入段落使它从最优换行退回原生换行、折行改变，
+  点击处理用的已是新布局。`pointer-position.ts` 正由另一任务修改，未在此改动；多出的 8–9 处属于工作区里
+  该任务的新构件（多栏、行内评论、代码块、图片）。
 
 **部署说明**：`dist/` 是从工作区构建的，不是从 HEAD：HEAD 本身过不了 `tsc`，已提交的
 `src/cm6/editor-cm6.ts` 引用了只存在于另一任务未提交的 `commands/index.ts`、`paste-context.ts` 中的符号
