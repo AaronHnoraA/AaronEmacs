@@ -245,6 +245,12 @@ Markdown 的缓存（noema `30fbb0c`）。happy-dom 下 50 个带公式的单元
   一类位移（本轮之前没有，去掉排版提交时也存在，随工作区里另一任务未提交的改动出现）。设计文档
   `scroll-ownership.md` 已记录。
 
+  剩下 6 处的归因（逐项临时撤掉本轮改动后只跑 `ONLY="image,inline comment"`，各两次）：撤掉排版、
+  撤掉渲染缓存（让 `cachedRender` 每次直接渲染）、换回本轮之前的 `export-html.ts`，图片“点击正文离开”与
+  行内评论“未聚焦点击”的失败都不变；点击修复之前它们也已存在。`5cf3b6c` 上没有这两类，所以来自其后另一
+  任务的改动（已提交的部分或工作区里未提交的部分；HEAD 本身因缺符号无法运行，不能再细分）。环绕表格两处见
+  `scroll-ownership.md` 的已知差距。
+
 **部署说明**：`dist/` 是从工作区构建的，不是从 HEAD：HEAD 本身过不了 `tsc`，已提交的
 `src/cm6/editor-cm6.ts` 引用了只存在于另一任务未提交的 `commands/index.ts`、`paste-context.ts` 中的符号
 （`handleTablePipeInput`、`tableGridPasteTransactionSpec` 等），只有工作区是一致的。Go kernel 从 HEAD 构建
