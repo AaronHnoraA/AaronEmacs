@@ -205,7 +205,7 @@ Open and close lines pair by kind and nest.  Parser: `ORG_ENV_OPEN_RE` in
 | `note`, `info`, `attention`, `warning`, `important` | admonition |
 | `comment` | collapsed comment, shown on demand |
 | `fold` | folded region |
-| `layout {cols=3 mode=grid widths=30-40-30 align=center}` | side-by-side Markdown group; `cols` 1–4, `grid` keeps blocks in cells, `flow` continues prose across columns (`src/layout-group.ts`) |
+| `columns [{widths=60-40 valign=top gap=md rule=on align=left}]` | multi-column layout; each pane separated by `#+col [{align=...}]` holds arbitrary multi-block Markdown (headings, lists, math, code, images, tables, nested org-envs), or `{mode=flow cols=2..4}` for newspaper-style flowing prose; exports to LaTeX `minipage` / `multicols` (`shared/columns-layout.mjs`) |
 | `tikz [id]` | TikZ/PGFPlots figure, kept verbatim in LaTeX (`shared/tikz-source.mjs`) |
 | `html` | raw HTML block, sanitized by `src/sanitize-html.ts` in the editor and in HTML export alike (`src/render-html.ts`), so a published page shows what the editor showed |
 | `av [title]` | attribute view (below) |

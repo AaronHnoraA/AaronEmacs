@@ -263,6 +263,26 @@ widget 内部显示的 Markdown（表格单元格、todo 标签、旁注卡片�
 渲染状态下：从一格拖到另一格是框选；Shift-点击选中单元格，方向键在选中的格子间移动，Enter
 进入主编辑器中的对应单元格。工具栏、右键菜单或边缘条插入行列后，光标进入新单元格。
 
+## 图元定位、环绕与自适应尺寸（Figure Layout）
+
+所有视觉图元——图片（含视频、draw.io、HTML 嵌入）、TikZ、Mermaid/Mindmap 图表与表格——共用同一套源码属性（`shared/layout-attrs.mjs`：`{align, wrap, width, height}`）与唯一的交互控制器（`src/cm6/figure-layout-menu.ts`）：
+
+- **自适应百分比优先**：交互式宽度缩放（拖拽与方向键 ±5%）一律以正文栏宽为基准换算并写回相对百分比 `{width=62%}`（拖拽过程带实时百分比徽章并轻吸附 `25/33/50/67/75/100%`），确保窄分屏、移动端阅读器、发布 HTML 与 LaTeX 导出（`\textwidth`）全部自适应；已有笔记中的历史 `px` 属性继续兼容解析，且外层始终受 `max-width: 100%` 约束不溢出。
+- **单一容器测量（禁止双重百分比）**：外层 figure 在带 `noema-layout-has-width` 时负责按栏宽解析一次 `width`，内部媒体（`img/video/svg/iframe`）铺满 `width: 100%`，避免 `fit-content` 内百分比失效或 `wrap` 浮动下宽度被双重压缩/锁死在 45%。窄视口（`≤ 560px`）下 `wrap` 浮动自动退化为居中块级堆叠。
+- **统一浮动锚点**：所有块级环绕图元（TikZ、Mermaid/Mindmap、预览表格）一律使用 `MeasuredWidget.floatedBlock = true`（零高 `.cm-float-anchor`），保证 CM6 高度图记为 `0` 且拖拽手柄始终锚定在浮动本体底部；编辑态表格行保持对齐块流而不逐行浮动。
+- **按能力挂载控件**：高度拖拽条仅挂载于固定视口类图元（HTML `iframe` 嵌入、Mermaid/Mindmap 图表），不挂载于等比图画（图片、TikZ）或流式文本表格；表格将图元排版收拢进唯一顶栏的 `◫` 浮层与右键菜单，不再叠加第二条悬浮条，编辑态宽度手柄位于底部边缘条并实时同步所有表格行。
+
+## 多栏排版（`#+begin columns` + `#+col`）
+
+多栏排版由 `shared/columns-layout.mjs` 统一定义语法解析、属性序列化、CSS Grid 轨道/分隔线位置与 LaTeX 导出（Go 端在 `kernel/noema/latex/preprocess.go` 保持字节一致镜像）：
+
+- **表达完整 Markdown 分栏**：默认模式以顶层 `#+col [{align=...}]` 分隔各栏（自动跳过围栏代码、展示公式、HTML 注释与嵌套 `#+begin ... #+end` 环境），每栏可自由包含标题、多段落、列表、公式、代码块、图片、表格乃至嵌套 org 环境块；报纸式流式文本分栏使用 `{mode=flow cols=2..4}`。
+- **单一编辑面所见即所得（语法与手感分离）**：
+  - 预览态下 `ColumnsWidget`（继承 `MeasuredWidget`，根节点零纵向 `margin`）使用 CSS Grid 渲染各栏，通过共享 `renderMarkdownHTML`（携带 `assetResolver` 与 `noteFile`）及 `enhanceRenderedMarkdown` 渲染每栏内容；栏间分隔线使用 `::before` + `columnDividerLeftCss` 精确落在 CSS Grid 缝隙正中，拖拽缩放时显示实时百分比徽章并提交严格相加为 100 的整数 `widths=60-40`。
+  - **就地并排编辑（类似表格单一编辑面）**：直接点击任意一栏后，**不折叠为竖排、也不暴露 `#+begin columns` / `#+col` / `#+end columns` 源码**——激活栏以原生 CM6 `.cm-line`（通过 `--cm-col-left`/`--cm-col-right` 与 CSS 兄弟选择器对齐到对应栏宽）直接编辑，无嵌套编辑器；其余兄弟栏由 `ColumnsActiveTopWidget` 中的 `.cm-columns-sibling-stage` 实时渲染在原位，并由 `ColumnsStageSyncPlugin` 同步最大栏高与底部占位（`ColumnsActiveBottomWidget`），点击任意兄弟栏即可原地切换焦点；编辑中仍可直接使用右上角工具栏与栏间拖拽柄；`←`/`→` 在栏首/栏尾平滑跨栏或离开，`↑`/`↓` 在首/末行离开分栏，栏边界上的 `Backspace`/`Delete` 受保护不会误删指令行。
+  - **按需展开源码**：仅当用户手动点击工具栏 `Source`（或光标直接落到 `#+begin`/`#+col`/`#+end` 指令行）时，经 `columnsRawSourceField` 切入源码/横幅视图（`ColumnsOpenBannerWidget` / `ColumnsMarkerBannerWidget` / `ColumnsCloseBannerWidget`，并附 `Visual` / `Done` 快捷返回）。
+- **全链路导出一致**：HTML/发布阅读器与编辑器共用 `.noema-columns` 样式契约；LaTeX/PDF 导出将显式多栏转为紧邻无空行的 `minipage`（继承栏宽比例、垂直对齐与单栏对齐），流式多栏转为 `multicols` 并按需自动注入 `\RequirePackage{multicol}`。
+
 ## 上下移动：一个行模型
 
 Vim 的 `j`/`k` 与编辑器的 ↑/↓（原生按键与 xwidget 宿主都经由 `runEditorMovement`）走同一套
