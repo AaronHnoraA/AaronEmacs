@@ -138,7 +138,9 @@ string），换编辑器打开仍可读。这与 Noema 现有 `syntax.md` 的方
 
 读 `upstream/autumnmark/packages/muya/src/assets/styles/{index,blockSyntax}.css` 与 Noema
 `src/styles/themes/theme-typora.css`、`src/styles/widgets.css` 得出的数值对照（2026-11-23，静态阅读，
-未截图比对）。Pele 只画图表，不涉及正文排版，不在此列。
+未截图比对）。**更正（2026-11-24）**：编辑器默认启用视觉排版（`noema-visual-typography`），正文实际是
+`typography.css` 的 23.2px / 1.5，`theme-typora.css` 里 20px / 1.46 的规则在编辑器中不生效；下表“Noema
+现状”一列的正文与标题数值因此不准，实际结论与落地见第 8 节。Pele 只画图表，不涉及正文排版，不在此列。
 
 | 项 | AutumnMark | Noema 现状 | 建议（待用户圈选） |
 | --- | --- | --- | --- |
@@ -152,3 +154,63 @@ string），换编辑器打开仍可读。这与 Noema 现有 `syntax.md` 的方
 
 结论：可学的主要是**标题层级拉开**、**CJK 正文行高**、**更轻的引用线**三项；表格和段距保持 Noema
 现有做法。三项都只改 `theme-typora.css` 的数值，不动结构，等用户圈选后再改并截图验收。
+
+## 8. 渲染性能、手感、排版与 wiki.db（2026-11-24）
+
+### 导出渲染性能
+
+用 vault 里最大的真实笔记 `GraphTensor.md`（113 KB、115 个公式）做 CPU profile：渲染 2.7 s 中有
+2.1 s 在 `cleanEditorHTML`。三处改动（noema `3bdb21a`）：
+
+| 热点 | 改法 |
+| --- | --- |
+| `protectMathML` 每个 `<math>` 一次 DOMPurify（每次重建文档） | 全部公式一次清洗，私用区字符分隔，每段仍包在自己的 `<div>` 里 |
+| 四次全树 `querySelectorAll`（编辑器部件、图表源码、`[hidden]`、剥属性） | 一次树遍历，用 `classList` 和父节点判断，删掉的子树直接跳过 |
+| `renderMarkdownHTML` 新建的临时根节点被深拷贝 | 调用方拥有的根原地处理 |
+
+只把这次改动应用到 HEAD 上，`GraphTensor.md` 与 5 MB fixture 的 250 KB、500 KB 前缀输出逐字节一致。
+
+| 输入 | 耗时 | 内存峰值 |
+| --- | --- | --- |
+| GraphTensor.md | 3.5 s → 2.5 s | — |
+| 250 KB 前缀 | 3.3 s → 2.4 s | 2182 → 1544 MB |
+| 500 KB 前缀 | 7.7 s → 4.9 s | 4101 → 2925 MB |
+
+**遗留**：超过约 800 KB 的笔记在 happy-dom 下仍会耗尽 4 GB 堆（KaTeX 把每个公式展开成大量 span，
+happy-dom 的节点很重）。真实笔记最大 113 KB，日常不触发；彻底解决要换掉“先建 DOM 再处理”的导出架构。
+
+### 手感：组件渲染缓存
+
+表格单元格、环境块、折叠块、评论在每次重建时重新渲染周围没变的 Markdown。无选项的
+`renderMarkdownHTML` / `renderMarkdownInlineHTML` 现在进有界 LRU（8 MB HTML，超过 2 万字符的整篇不进），
+key 含源文本、宏版本和数学缓存代数（刷新按钮与宏变化都会重新渲染），借自 NocoDB 表格对单元格
+Markdown 的缓存（noema `30fbb0c`）。happy-dom 下 50 个带公式的单元格冷渲染 103 ms、命中 0.1 ms。
+
+### 排版
+
+视觉排版里正文从 20px 放大到 23.2px 时，标题留在旧的 20px 体系：h3（24px）几乎等于正文，h4–h6
+（21/19/18px）比正文还小。改动（noema `9b8684a`）：
+
+| 项 | 改前 | 改后 |
+| --- | --- | --- |
+| 正文行高 | 1.5（34.8px） | 1.6（37.1px），统一值，不做“仅中文行”：那样在英文行里打出第一个汉字会让整行跳高 |
+| h2 / h3 / h4 / h5 / h6 | 29 / 24 / 21 / 19 / 18px | 正文的 1.35 / 1.15 / 1.05 / 1.0 / 0.95 倍（31.3 / 26.7 / 24.4 / 23.2 / 22.0px）；h1 35px 不变 |
+| 引用块 | 3px 竖线、0.8em 缩进 | 2px 细线、1em 缩进（导出与实时一致） |
+
+在浏览器里按这些样式表搭页面实测：正文 23.2/37.12px，h2 31.32px，h3 26.68px，h4 24.36px。
+`npm run check:scroll` 需要的 playwright 包不在依赖中且本机 npm 源证书校验失败，没有跑；排版、换行、
+标题、滚动的 happy-dom 测试通过。发布页（`theme-typora.css`）的 h2–h4 取同样比例。
+
+### wiki.db 结构
+
+真实库 325 页 32 MB。读表结构、各表体量（`dbstat`）、增量写入与搜索的执行计划后：
+
+| 发现 | 处理 |
+| --- | --- |
+| `page_bigrams(page_key)` 二级索引是整表副本（4.7 MB）；kernel 只走 `(bigram, page_key)` 主键；Node 服务器阅读器按页删除有无索引 19 vs 21 ms，建库插入 70 vs 12 ms | 删除（noema `652562b`）。新建库 32 → 27 MB，各表内容一致 |
+| 搜索的孤立页 / `link:` 过滤对每页做 `links.source_key` 关联子查询，该列无索引，每页扫全部链接 | 加 `links(source_key)`（noema `eddefe9`）：10 ms → 0.5 ms |
+| 增量写入删除 FTS 行时按全部列定位，FTS 只能全表扫 | 实测单页 1–12 ms，当前规模可忽略，不改 |
+| 两张 FTS 表各存一份正文（3.8 MB × 2） | 不改：外部内容表需要 FTS5 的 `'delete'` 命令与对齐的 rowid，增量写入按 rowid 通用删除，改动面大 |
+| 引用选择器读全部正文解析标题 | 已按索引代数缓存（`catalog.anchorsOf`），不改 |
+
+两项索引改动都不升 schema 版本：现有库在下一次全量重建（每周自愈等）时得到新结构，不会被迫重建。

@@ -64,7 +64,10 @@ or initialized automatically.
 
 `wiki.db` is a disposable, local SQLite/WAL projection of Git-owned Markdown.
 It stores page identity, titles, aliases, tags, links, backlinks, dependencies,
-diagnostics, Unicode/trigram full-text indexes, and a CJK character-pair index. It is never committed. The
+diagnostics, Unicode/trigram full-text indexes, and a CJK character-pair index. It is never committed.
+Links are indexed by source page and by target, because search filters ask both
+ways per page; `page_bigrams` is read only through its `(bigram, page_key)` key,
+so it carries no second index (one would copy the whole table). The
 legacy `roam.db` and `roam-db.json` are neither read nor written in either
 layout and can be removed. Both the desktop and Emacs adapters use the same
 `wiki.db`; the Emacs-hosted renderer does not maintain a second database.
