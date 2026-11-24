@@ -176,8 +176,12 @@ string），换编辑器打开仍可读。这与 Noema 现有 `syntax.md` 的方
 | 250 KB 前缀 | 3.3 s → 2.4 s | 2182 → 1544 MB |
 | 500 KB 前缀 | 7.7 s → 4.9 s | 4101 → 2925 MB |
 
-**遗留**：超过约 800 KB 的笔记在 happy-dom 下仍会耗尽 4 GB 堆（KaTeX 把每个公式展开成大量 span，
-happy-dom 的节点很重）。真实笔记最大 113 KB，日常不触发；彻底解决要换掉“先建 DOM 再处理”的导出架构。
+测量用的是 `scripts/render-html.mjs`：它在 Node 里用 happy-dom 跑同一套 `render-html.ts` 与
+`cleanEditorHTML`，能在命令行精确复现耗时。这个脚本本身没有调用方（编辑器里没有“导出 HTML”，LaTeX 导出走
+Pandoc，`make publish` 发布手写站点、不渲染笔记）；同一段代码的真实使用者是页面里的组件、幻灯片、链接预览与
+Jupyter 输出页，它们在 WebKit 里运行，也因此受益。超过约 800 KB 的笔记会让这个脚本在 happy-dom 下耗尽
+4 GB 堆（happy-dom 为 KaTeX 的每个 span 建很重的节点），只影响这个无人调用的脚本；按顶层块分段渲染在 250 KB
+前缀上与整篇逐字节一致，可行，但为一个无人调用的入口加代码不值得，没有加入。
 
 ### 手感：组件渲染缓存
 
