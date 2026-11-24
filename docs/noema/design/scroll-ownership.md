@@ -75,6 +75,14 @@ NOEMA_SCROLL_APP_URL=http://127.0.0.1:50999 NOEMA_SCROLL_APP_FILE=/tmp/scroll-fi
 由 CM6 写入点击的选区。回归测试在 `tests/cm6/pointer-selection.test.ts`；复现脚本
 `docs/works/markdown-detail/repro-kp-click.mjs`。
 
+### 已知差距：环绕表格的预览与逐格编辑不在同一个流里
+
+`{wrap=true}` 的表格在预览里浮动（`cm-float-anchor` 在文档流中高 0，正文环绕它）；打开格内公式进入逐格编辑后，
+表格变成几行在文档流中的源码行（测得约 88px），把下面的正文推下去，离开时再收回。视口稳定逻辑让被点的正文
+留在指针下（`check:scroll` 记录的 `wrapProseAfter` 与点击前相同），但 `scrollTop` 随之变化，所以
+“wrapped table leaves without scrolling”仍不通过。消除它需要让逐格编辑的行以同样的宽度浮在同一侧，
+属于表格编辑渲染的结构改动；测量脚本 `docs/works/markdown-detail/repro-wraptable.mjs`。
+
 ## Where a pointer lands
 
 The caret has one owner too: `src/cm6/pointer-position.ts`. Every click,
