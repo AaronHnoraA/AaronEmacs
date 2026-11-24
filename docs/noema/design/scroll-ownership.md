@@ -67,6 +67,14 @@ NOEMA_SCROLL_APP_URL=http://127.0.0.1:50999 NOEMA_SCROLL_APP_FILE=/tmp/scroll-fi
 应使用 DOM 光标坐标作锚点。表格预览和逐格编辑的单元格尺寸也要由同一份结构样式定义，否则切换后
 表格高度本身会变化。未聚焦时打开格内公式必须用 `view.focus()`，由 CM6 同步源码光标后再接管焦点。
 
+## 点击后光标被改回旧位置（2026-11-24）
+
+指针手势期间，`selection.ts` 停止 CM6 写 DOM 选区并设 `user-select: none`（避免 WebKit 在拖选时绘制跨视口的
+原生选区），WebKit 于是把原生选区停在内容元素开头。CM6 的观察器仍在读它：点击期间的一次 measure 触发 flush，
+把这个位置当作用户的选区变化，光标回到 0 或旧光标处，点击像没发生。手势期间读与写一起暂停，松开时一起恢复，
+由 CM6 写入点击的选区。回归测试在 `tests/cm6/pointer-selection.test.ts`；复现脚本
+`docs/works/markdown-detail/repro-kp-click.mjs`。
+
 ## Where a pointer lands
 
 The caret has one owner too: `src/cm6/pointer-position.ts`. Every click,

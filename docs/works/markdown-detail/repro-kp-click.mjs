@@ -77,9 +77,59 @@ try {
     }
   });
   console.log("click text at", text);
-  await page.mouse.click(text.x, text.y);
+  await page.evaluate(() => {
+    window.__tx = [];
+    const v = editor.view, original = v.dispatch.bind(v);
+    v.dispatch = (...args) => {
+      const before = v.state.selection.main.head;
+      const r = original(...args);
+      const after = v.state.selection.main.head;
+      if (before !== after || args[0]?.selection) {
+        const stack = (new Error().stack || "").split(String.fromCharCode(10)).slice(1, 7)
+          .map((l) => l.trim().replace(/https?:\/\/[^ ]*\/(src|pages|node_modules)\//, "$1/").slice(0, 110)).join(" < ");
+        window.__tx.push(`sel ${before} -> ${after} | ${stack}`);
+      }
+      return r;
+    };
+  });
+  console.log("mapping at text point", await page.evaluate(async ({ root, text }) => {
+    const { pointerPosition, renderedTextOffsetAtPoint } = await import(root + "src/cm6/pointer-position.ts");
+    const el = document.elementFromPoint(text.x, text.y);
+    return { cm: editor.view.posAtCoords({ x: text.x, y: text.y }), noema: pointerPosition(editor.view, text.x, text.y),
+      element: el?.tagName + "." + (el?.className || ""), inContent: editor.view.contentDOM.contains(el) };
+  }, { root, text }));
+  await page.evaluate(() => {
+    window.__calls = [];
+    const short = () => (new Error().stack || "").split(String.fromCharCode(10)).slice(2, 6)
+      .map((l) => l.trim().replace(/https?:\/\/[^ ]*\/(src|pages|node_modules)\//, "$1/").slice(0, 90)).join(" < ");
+    const wrap = (proto, name) => { const o = proto[name]; proto[name] = function (...a) { window.__calls.push(`${name}(${this.className ?? ""}) | ${short()}`); return o.apply(this, a); }; };
+    wrap(HTMLElement.prototype, "focus");
+    for (const n of ["setBaseAndExtent", "addRange", "removeAllRanges"]) wrap(Selection.prototype, n);
+    const desc = (node) => node ? `${node.nodeName}${node.nodeType === 3 ? JSON.stringify(node.data.slice(0, 20)) : "." + (node.className || "")} in ${node.parentElement?.tagName}.${(node.parentElement?.className || "").toString().slice(0, 40)}` : "null";
+    const oc = Selection.prototype.collapse;
+    Selection.prototype.collapse = function (node, offset) {
+      const r = oc.call(this, node, offset);
+      window.__calls.push(`collapse(${desc(node)}, ${offset}) -> now focus ${desc(this.focusNode)}@${this.focusOffset} rangeCount=${this.rangeCount}`);
+      return r;
+    };
+  });
+  const domSel = () => page.evaluate(() => { const s = getSelection(); try { return editor.view.posAtDOM(s.focusNode, s.focusOffset); } catch { return null; } });
+  await page.mouse.move(text.x, text.y);
+  await page.mouse.down({ button: "left" });
+  console.log("after mousedown", await page.evaluate(() => ({ head: editor.view.state.selection.main.head, mouseSel: !!editor.view.inputState?.mouseSelection })), "domSel", await domSel());
+  console.log("internals after mousedown", await page.evaluate(() => {
+    const v = editor.view, d = (n, o) => n ? `${n.nodeName}${n.nodeType === 3 ? JSON.stringify(n.data.slice(0, 16)) : "." + (n.className || "")}@${o} in ${n.parentElement?.className?.toString().slice(0, 30)}` : "null";
+    const cached = v.observer.selectionRange;
+    const raw = getSelection();
+    let near = null; try { const p = v.docView.inlineDOMNearPos(v.state.selection.main.head, 1); near = d(p.node, p.offset); } catch (e) { near = "err " + e.message; }
+    return { cachedFocus: d(cached.focusNode, cached.focusOffset), rawFocus: d(raw.focusNode, raw.focusOffset), inlineNear: near, active: document.activeElement?.className?.toString().slice(0, 30) };
+  }));
+  await page.mouse.up({ button: "left" });
+  console.log("after mouseup domSel", await domSel());
+  console.log("CALLS\n" + (await page.evaluate(() => window.__calls.join("\n"))));
   await page.waitForTimeout(600);
   console.log(await state("after text click"));
+  console.log("TXLOG\n" + (await page.evaluate(() => (window.__tx || []).join("\n"))));
   console.log((await page.evaluate(() => window.__events)).join("\n"));
 } finally {
   await browser.close();
