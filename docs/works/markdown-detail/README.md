@@ -197,9 +197,23 @@ Markdown 的缓存（noema `30fbb0c`）。happy-dom 下 50 个带公式的单元
 | h2 / h3 / h4 / h5 / h6 | 29 / 24 / 21 / 19 / 18px | 正文的 1.35 / 1.15 / 1.05 / 1.0 / 0.95 倍（31.3 / 26.7 / 24.4 / 23.2 / 22.0px）；h1 35px 不变 |
 | 引用块 | 3px 竖线、0.8em 缩进 | 2px 细线、1em 缩进（导出与实时一致） |
 
-在浏览器里按这些样式表搭页面实测：正文 23.2/37.12px，h2 31.32px，h3 26.68px，h4 24.36px。
-`npm run check:scroll` 需要的 playwright 包不在依赖中且本机 npm 源证书校验失败，没有跑；排版、换行、
-标题、滚动的 happy-dom 测试通过。发布页（`theme-typora.css`）的 h2–h4 取同样比例。
+发布页（`theme-typora.css`）的 h2–h4 取同样比例。引用块的默认规则在 `widgets.css`：主题样式先于打包
+样式加载、选择器同样具体，只改主题时实际页面仍是 3px / 0.8em，所以默认规则本身也改为细线（noema `538ac64`）。
+
+验证：
+
+- **真实页面**：`make build-web`（`.nvmrc` 的 Node 26.5.0）后，由真实 Noema host 提供的编辑页上读计算样式：
+  正文 23.2px / 37.12px，h2 31.32px，h3 26.68px，h4 24.36px，引用 2px 线、23.2px 缩进；页面的
+  `__noemaRendererBuild` 与新构建一致。
+- **WebKit 滚动检查**（`npm run check:scroll`）：playwright 不在依赖中，从镜像下载 tar 包离线安装后，用本机
+  缓存的 WebKit 构建（2370，playwright 1.65.1 期望 2388；下载匹配构建的操作未获许可）运行。去掉本次排版
+  提交时 21 处违规，带上时 20 处，类别相同，差别只是同类条目的 start/end 变体在两次运行间交替，排版没有
+  引入新的违规。这批既有违规是否来自构建版本不匹配，需要匹配的 WebKit 才能确认。
+
+**部署说明**：`dist/` 是从工作区构建的，不是从 HEAD：HEAD 本身过不了 `tsc`，已提交的
+`src/cm6/editor-cm6.ts` 引用了只存在于另一任务未提交的 `commands/index.ts`、`paste-context.ts` 中的符号
+（`handleTablePipeInput`、`tableGridPasteTransactionSpec` 等），只有工作区是一致的。Go kernel 从 HEAD 构建
+（`eddefe9`），不含其它任务未提交的 Go 改动。
 
 ### wiki.db 结构
 
