@@ -222,6 +222,14 @@ switch between the embedded themes. Press Escape to close the outline and
 return to its trigger. For notes with spoilers, **Spoilers** and Shift+S
 reveal or hide the answers across the page.
 
+### Editor reading shortcuts
+
+With the caret on a link, press Mod+Shift+K to open its preview. Escape
+closes the card and returns focus to the editor. Mod+Alt+S reveals or hides
+spoilers in the current note, including tab pages opened later. Opening a
+different note resets its spoiler state. These actions also run as
+`preview-link` and `toggle-spoilers` through the editor command API.
+
 ### Code fence presentation
 
 After the language, `line-numbers=38` starts the line numbers at 38.

@@ -230,3 +230,7 @@ ETAF-MD 0.3.0 把布局、等宽卡片和分栏统一为 `columns`，按可用�
 ### 独立阅读页验证
 
 工具条提供目录与主题切换，带答案的笔记另有全篇遮罩开关。宽窗的目录靠右定位，窄窗目录在正文前展开，标题仍完整可读。WebKit 实测了焦点进入目录、跳转后聚焦标题、Escape 归还焦点、Shift+S 批量显隐和明暗切换，425 px 无横向溢出。Gemini 通过了宽窗深色与窄窗浅色的布局、焦点和原生环境外观。样例与审阅存于本机 `.agent/views/etaf-md/noema-standalone-reader/`。 [读取方法](../../noema/design/syntax.md#standalone-reading-controls)
+
+### 编辑器阅读快捷键验证
+
+键盘链接预览复用已有链接解析与操作，在光标对侧显示同主题卡片。Escape 归还编辑焦点。全篇答案开关使用文档视图状态，后挂载的标签页读取同一状态，打开另一篇笔记时恢复该笔记的初始显隐。WebKit 验证了两条实际快捷键、重复引用的目标、未访问标签页、单项切换、会话切换以及原稿保真。Gemini 复审通过了两个视口的预览位置、清晰的不透明纸面、单一目标与操作焦点。样例与审阅存于本机 `.agent/views/etaf-md/noema-editor-reading/`。 [快捷键](../../noema/design/syntax.md#editor-reading-shortcuts)
