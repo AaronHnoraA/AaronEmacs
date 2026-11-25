@@ -60,7 +60,7 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 | `chart` | 已实现 `#+begin chart [title] {type=…}`，用 GFM 表格承载类别、单位及数值 | 条形、堆叠、热图、折线，保留原始数据和文本可访问性。 |
 | `table` | 已实现 `#+begin table [title]`，复用 GFM 表格和现有 Markdown 源码编辑 | 可选排序、复制、行列和单元格强调。窄窗局部横移，发布保留原表顺序。 |
 | `field`, `form` | 扩展现有属性、结构化数据与显式动作入口 | 字段状态、必填、多种输入、清晰的变更提交；静态阅读仍可见字段与值。 |
-| `file-tree`, `code-tree` | 新增 Markdown 树视图并接现有文件引用；同一文件可展开或选入代码阅读区 | 折叠、目标不存在、长路径、键盘移动、复制。 |
+| `file-tree`, `code-tree` | 已实现 Markdown 列表目录和围栏代码树，复用文件链接和语法高亮 | 目录折叠、键盘移动、相对文件、选中预览、长行换行、复制及完整导出。 |
 | `project-tree` | 扩展工作区文件查询与目录渲染；复用上条树视图 | 真实目录和刷新、项目身份、拒绝越界、发布回退。 |
 | `chat` | 新增有作者或角色的 Markdown 消息组 | 长代码、时间与作者、消息归属、完整复制。 |
 | `tabs`, `code-tabs`, `tab-panel`, `swiper` | 已实现以同层 Markdown 标题分组的标签、代码和轮播，纯代码组可从围栏推断页名 | 初始页、键盘换页、窄窗导航、编辑别处保留选择。只挂载活动页，按源顺序导出所有页。 |
@@ -158,3 +158,7 @@ ETAF 使用 `qrencode` 与磁盘 PNG 缓存。Noema 用固定版本的 `uqr` 在
 ### 只读 Diff 验证
 
 `diff` 对两份 Markdown 围栏做有界的行对齐，配对的变更行显示词级差异。窄窗统一显示同一份对齐结果，保留双列行号和删增符号。独立 WebKit 复核在普通正文、标签页、折叠和分栏中逐行打开正确源码，复制内容逐字符一致。Go 与 Node 的 LaTeX 样例覆盖 raw 格式标签和引用中的 Diff，实际 Pandoc 把两边保留为字面代码。比较超限时保留两段带标签的文本。Gemini 复审通过清除代码框后的行级颜色、词级标记和窄窗字行布局。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-diff/`。 [当前语法](../../noema/design/syntax.md#read-only-comparisons)
+
+### 文件树与代码树验证
+
+`file-tree` 用普通 Markdown 列表定义目录。相对路径交给现有 Emacs 链接入口，显式链接保留原目标。`code-tree` 只高亮选中的文件，宽窗并排显示目录与代码，窄窗沿文档顺序排列。代码预览支持长行换行、局部滚动、原生选区与逐字符复制。目录展开和选中文件按名称及路径记忆，在同块插入文件后仍指向原目标。独立 WebKit 复核覆盖长树键盘导航、中文路径、折叠打印与分栏中的预览。Go 和 Node 共用 LaTeX 样例，实际 Pandoc 验证列表中的 raw 格式示例保留为字面代码。样例、截图和 Gemini 审阅存于本机 `.agent/views/etaf-md/noema-trees/`。 [当前语法](../../noema/design/syntax.md#file-and-code-trees)

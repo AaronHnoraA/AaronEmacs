@@ -609,6 +609,46 @@ unified view. Comparisons that exceed the alignment limit show two labelled
 literal snippets. HTML displays the comparison and LaTeX retains both
 snippets as code in source order, including when a diff is inside a quotation.
 
+### File and code trees
+
+`file-tree` uses an ordinary nested Markdown bullet list. Add a description
+after a plain name with ` # `. The default is a static list. Set
+`collapsible=true` to allow folders to close, and `open-depth` to set how many
+levels start open. With `clickable=true`, plain file names link relatively to
+the note, using their parent folders. Explicit Markdown links keep their own
+destinations. Use `lines=false` to hide guide lines or `icon=simple` or
+`icon=colored` to mark node types. Use `++ ` and `-- ` before names to mark
+additions and removals, and a trailing slash to mark an empty directory.
+
+```markdown
+#+begin file-tree 笔记目录 {collapsible=true open-depth=1 clickable=true icon=colored}
+- docs
+  - 阅读手册.md # 排版入口
+  - [变更记录](#review)
+#+end file-tree
+```
+
+In a `code-tree`, put each file in a single ordinary fence under a heading
+at the same level. Heading paths group related files into folders. The reader
+can move through visible nodes with Up, Down, Home and End, and use Enter to
+open a folder or file. The preview wraps long lines and scrolls when it
+reaches `height` display lines. Selection and copies keep the authored text.
+Published HTML, PDF and LaTeX include every snippet.
+
+````markdown
+#+begin code-tree 示例 {height=11}
+### src/render.ts
+~~~typescript
+const document = parseMarkdown(source);
+~~~
+
+### tools/format.py
+~~~python
+print("ready")
+~~~
+#+end code-tree
+````
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
