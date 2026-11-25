@@ -509,6 +509,45 @@ LaTeX keeps the caption and the literal content as readable text.
 #+end qrcode
 ```
 
+### Tabbed documents and examples
+
+`tabs` uses two or more top-level Markdown headings of the same level as
+page boundaries. The first heading sets that level. Deeper headings belong
+to the current page. Content before the first heading appears above the
+controls. `tab-panel` adds a frame, and `swiper` adds previous and next
+buttons. Use `selected=2` to start on the second page and `accent` for a
+semantic highlight.
+
+```markdown
+#+begin tabs 验收笔记 {selected=2}
+### 摘要
+用普通 Markdown 保存原始证据。
+
+### 实机结果
+检查窄窗、主题和键盘操作。
+#+end tabs
+```
+
+`code-tabs` accepts the same headings. A body containing consecutive code
+fences can omit the headings. Its tab names come from the fence languages.
+
+````markdown
+#+begin code-tabs 调用示例
+```bash
+noema render notes.md
+```
+```python
+print("Hello, Noema")
+```
+#+end code-tabs
+````
+
+Tab moves to the selected control. Left and Right switch pages, and Home
+and End select the first and last page. The choice stays with the block
+when editing other parts of the document. Clicking the page content in an
+editable tab opens its Markdown. Exported HTML and LaTeX include every page
+in source order.
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
