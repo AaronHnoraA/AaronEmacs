@@ -222,3 +222,7 @@ ETAF-MD 0.3.0 把布局、等宽卡片和分栏统一为 `columns`，按可用�
 ### 任务框验证
 
 任务框保留原勾选样式，可用鼠标、Space 或 Enter 逐项改变 Markdown 标记。控件在状态转换后保留焦点，每次操作可以单独撤销。发布 HTML 在紧凑和宽松列表中都显示完成状态。真实 WebKit 验证了两次键盘操作、单次撤销、源码变化和焦点复用，Gemini 在 1060 px 和 425 px 的实机图中确认了焦点环、纵向对齐和完成态层次。样例与审阅存于本机 `.agent/views/etaf-md/noema-tasks/`。 [当前语法](../../noema/design/syntax.md#task-lists)
+
+### 媒体验证
+
+图片与 Mermaid 图共用放大对话框。真实 WebKit 验证了键盘开启、关闭后归还焦点、生成图的清晰渲染以及逐字节保留 Markdown。独立 HTML 使用同一查看器打开已内嵌的离线图片。实际 H.264 样例以浏览器原生控件载入，初始暂停，播放与暂停都成功。行内图库的左右切换沿用已有交互。Gemini 通过了宽屏图片与 425 px 图表的比例、关闭按钮和外缘留白。样例与审阅存于本机 `.agent/views/etaf-md/noema-media/`。 [当前语法](../../noema/design/syntax.md#media-previews)

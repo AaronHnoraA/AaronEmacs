@@ -207,6 +207,14 @@ Visual mode, click the checkbox or focus it and press Space or Enter. The
 editor changes the marker in place and records a separate undo step for
 each change. HTML shows the state in both tight and loose lists.
 
+### Media previews
+
+Focus an image and press Enter or Space to enlarge it. In Visual mode,
+you can also double-click a figure or use the enlarge button on a rendered
+Mermaid diagram. Use the arrow keys to step through a row of images and
+Escape to return to the figure. Standalone HTML can enlarge its embedded
+images. Supported video files use the browser's inline playback controls.
+
 ### Code fence presentation
 
 After the language, `line-numbers=38` starts the line numbers at 38.
