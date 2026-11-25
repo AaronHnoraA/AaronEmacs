@@ -185,6 +185,32 @@ autolinks.  Noema adds, in `src/render-html.ts` and the editor's Lezer rules:
 Heading numbers are display-only (`src/heading-number.ts`) and never enter
 the source.
 
+### Code fence presentation
+
+After the language, `line-numbers=38` starts the line numbers at 38.
+`collapsed-lines=5` shows the first five lines and folds the rest.
+The defaults without `=` are 1 and 15. `no-line-numbers` and
+`no-collapsed-lines` turn off their respective options. The same options
+accept a leading colon. `whitespace` shows spaces and tabs, and
+`indent-guides` draws leading guides. Use `/literal text/` to highlight
+matches throughout the block.
+
+````markdown
+```typescript title="journal.ts" line-numbers=38 collapsed-lines=5 /cursor/
+const next = load(cursor); // [!code focus:1]
+commit(next); // [!code ++]
+```
+````
+
+Trailing `[!code ...]` markers can use `highlight`, `++`, `--`,
+`warning`, `error`, `word:literal text`, `focus` or `focus:N`.
+`focus:N` keeps the marker line and the next N lines at normal contrast.
+The editor shows the annotation on the current source line. Copying
+code retains the authored text, including annotations. Published PDF and
+LaTeX include the full code body even when its tail starts folded in the
+editor. LaTeX uses Pandoc's line numbers and preserves the authored
+comment text.
+
 ## Block environments
 
 ```text
