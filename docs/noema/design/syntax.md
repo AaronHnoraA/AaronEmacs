@@ -211,6 +211,24 @@ LaTeX include the full code body even when its tail starts folded in the
 editor. LaTeX uses Pandoc's line numbers and preserves the authored
 comment text.
 
+### Inline reading controls
+
+| Command | Result |
+| --- | --- |
+| `@@spoiler [**Answer**]{label="Show answer" hide="Hide answer"}` | Reveal or hide inline Markdown. |
+| `@@gloss [TOC]{text="Table of contents"}` | Open a glossary card. |
+| `@@annotation [Context]{text="See [the appendix](appendix.md)."}` | Open a card with formatted text and links. |
+| `@@symbol [find-file]{text="Open a file"}` | Display a code name and open its explanation. `href` can provide a documentation link. |
+| `@@kbd [C-c t]` | Show a key or key sequence. |
+| `@@badge [Ready]{tone=tip}` | Show an author-provided status. Tones include `neutral`, `note`, `info`, `tip`, `important`, `warning`, and `danger`. |
+| `@@color [#389ba0]{label="Teal"}` | Show a color swatch with an optional label. A semantic tone also works. |
+| `@@hidden [Draft note]` | Keep a source-only editor note. The document HTML, PDF and LaTeX renderers omit its text. |
+
+Tab reaches the controls. Space toggles a spoiler. Enter opens a card and
+Escape closes it. Cards open below the paragraph and reserve room for their
+content. Near the viewport edge, the document scrolls enough to show the card.
+PDF and LaTeX include the reading details.
+
 ## Block environments
 
 ```text
