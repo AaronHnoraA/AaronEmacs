@@ -649,6 +649,31 @@ print("ready")
 #+end code-tree
 ````
 
+### Parameter cards and field lists
+
+A `field` with `name` documents a parameter. Use `type` and optional
+`type-link`, `default`, `since`, `required=true`, `deprecated` and
+`experimental` to describe its signature and status. `enum`, `unit`,
+`format` and `constraint` give further detail. The body is ordinary Markdown.
+
+```markdown
+#+begin field 视图宽度 {name=width type=number default=46 required=true unit=列}
+控制宽窗的正文列宽。
+#+end field
+```
+
+A `field` without `name` displays aligned name and value columns. A `form`
+displays each value below its name. Both use a normal bullet list with `:`
+or `：`, or a separator set with `separator`. The field list also accepts
+`label-width`. Values keep inline Markdown.
+
+```markdown
+#+begin form 当前环境
+- 渲染器：**WebKit**
+- 入口：[阅读手册](guide.md)
+#+end form
+```
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**

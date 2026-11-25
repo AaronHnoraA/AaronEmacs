@@ -59,7 +59,7 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 | `progress` | 已实现 `#+begin progress [title]`，正文为带标签的普通 Markdown 无序列表 | 多项、百分比及 `完成量/总量`，数值可读，窄窗无溢出。 |
 | `chart` | 已实现 `#+begin chart [title] {type=…}`，用 GFM 表格承载类别、单位及数值 | 条形、堆叠、热图、折线，保留原始数据和文本可访问性。 |
 | `table` | 已实现 `#+begin table [title]`，复用 GFM 表格和现有 Markdown 源码编辑 | 可选排序、复制、行列和单元格强调。窄窗局部横移，发布保留原表顺序。 |
-| `field`, `form` | 扩展现有属性、结构化数据与显式动作入口 | 字段状态、必填、多种输入、清晰的变更提交；静态阅读仍可见字段与值。 |
+| `field`, `form` | 用参数卡和两种列表布局呈现说明、配置和值，匹配当前 ETAF 的文档语义 | 参数类型和状态、默认值、约束、窄窗键值布局、链接和静态导出。 |
 | `file-tree`, `code-tree` | 已实现 Markdown 列表目录和围栏代码树，复用文件链接和语法高亮 | 目录折叠、键盘移动、相对文件、选中预览、长行换行、复制及完整导出。 |
 | `project-tree` | 扩展工作区文件查询与目录渲染；复用上条树视图 | 真实目录和刷新、项目身份、拒绝越界、发布回退。 |
 | `chat` | 新增有作者或角色的 Markdown 消息组 | 长代码、时间与作者、消息归属、完整复制。 |
@@ -162,3 +162,7 @@ ETAF 使用 `qrencode` 与磁盘 PNG 缓存。Noema 用固定版本的 `uqr` 在
 ### 文件树与代码树验证
 
 `file-tree` 用普通 Markdown 列表定义目录。相对路径交给现有 Emacs 链接入口，显式链接保留原目标。`code-tree` 只高亮选中的文件，宽窗并排显示目录与代码，窄窗沿文档顺序排列。代码预览支持长行换行、局部滚动、原生选区与逐字符复制。目录展开和选中文件按名称及路径记忆，在同块插入文件后仍指向原目标。独立 WebKit 复核覆盖长树键盘导航、中文路径、折叠打印与分栏中的预览。Go 和 Node 共用 LaTeX 样例，实际 Pandoc 验证列表中的 raw 格式示例保留为字面代码。样例、截图和 Gemini 审阅存于本机 `.agent/views/etaf-md/noema-trees/`。 [当前语法](../../noema/design/syntax.md#file-and-code-trees)
+
+### 参数卡与字段列表验证
+
+`field` 参数卡显示签名、状态、正文和约束。字段列表对齐名称和值，`form` 使用 ETAF 文档中的名称在上和值在下的读取布局。两种列表共用 Markdown 解析与链接处理，遵循转义，保留链接标题和代码里的冒号。宽窄 WebKit 实测覆盖正文排版、键盘打开类型链接与原地源码，Gemini 复审通过窄窗状态标签。实际 Pandoc 保留参数名、类型、默认值、约束和字段列表。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-fields/`。 [当前语法](../../noema/design/syntax.md#parameter-cards-and-field-lists)
