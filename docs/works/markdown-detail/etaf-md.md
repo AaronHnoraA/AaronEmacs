@@ -238,3 +238,7 @@ ETAF-MD 0.3.0 把布局、等宽卡片和分栏统一为 `columns`，按可用�
 ### 行内图标与语义高亮验证
 
 `@@icon` 使用行内矢量笔画，提供可访问名称和文字回退，内置校对、关闭、静音、查找等常见形状。`@@highlight` 给作者的行内 Markdown 添加主题色效果，续行沿用相同内边距。WebKit 验证了原稿显露、独立 HTML 的可访问名称、425 px 续行及原生 NOTE 结束符。Node、Go 和实际 Pandoc 验证图标的文字回退、高亮内的粗体与代码，以及源稿说明的省略。Gemini 复审通过了宽窄、深浅主题中的基线和留白。样例与审阅存于本机 `.agent/views/etaf-md/noema-inline-icons/`。 [当前语法](../../noema/design/syntax.md#inline-reading-controls)
+
+### 定义列表与缩写验证
+
+定义列表识别冒号和波浪号、多个别名共用释义、同词多义与缩进续段。缩写按整词标注，释义跨正文、卡片、折叠和分栏生效。独立 WebKit 复核通过了围栏和注释的隔离、普通环境内定义、`#pragma` 术语、延续段内的强调和链接，以及 emoji 和链接地址的边界。Node、Go 和实际 Pandoc 验证了合并别名、保留多义和打印缩写释义。Gemini 通过了宽窄的术语层次、续段和原生环境外观。样例与审阅存于本机 `.agent/views/etaf-md/noema-definitions/`。 [当前语法](../../noema/design/syntax.md#definition-lists-and-abbreviations) · [MarkdownIt 定义列表](https://github.com/markdown-it/markdown-it-deflist) · [MarkdownIt 缩写](https://github.com/markdown-it/markdown-it-abbr)

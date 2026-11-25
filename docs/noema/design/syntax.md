@@ -230,6 +230,28 @@ spoilers in the current note, including tab pages opened later. Opening a
 different note resets its spoiler state. These actions also run as
 `preview-link` and `toggle-spoilers` through the editor command API.
 
+### Definition lists and abbreviations
+
+Write a term on its own line followed by `: Definition` or `~ Definition`.
+Consecutive term lines name aliases that share the following definition.
+Use another marker for a second meaning. Indented paragraphs, lists,
+and code can continue the definition.
+
+```markdown
+Codec
+Encoder
+: Converts text into a stored representation.
+
+: May also recover the original bytes.
+
+*[API]: Application interface
+```
+
+An abbreviation definition adds a tooltip to whole occurrences of the term
+throughout the document, including rendered components. The editor keeps
+the declaration editable. HTML includes the abbreviation's semantic
+label. LaTeX groups aliases in the term label and prints the expansion.
+
 ### Code fence presentation
 
 After the language, `line-numbers=38` starts the line numbers at 38.
