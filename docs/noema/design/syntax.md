@@ -925,6 +925,39 @@ to 60 lines and 12,000 characters. **Stop** interrupts the active command
 and **Open output** opens its native Emacs buffer. HTML, PDF and LaTeX
 include the authored command and text.
 
+### Responsive columns
+
+Add `columns=3` to an existing `columns` environment to set the maximum
+number of equal columns. Add `tracks="24ch 2fr 25%"` for a fixed track,
+a fractional track and a percentage of the space available after gaps.
+As the measure shrinks, equal columns reduce their count and explicit
+tracks stack. Set `wrap=on` to let explicit tracks share any row that fits.
+
+```markdown
+#+begin columns {tracks="24ch 2fr 25%" min-width=16ch gap=2ch padding=1ch divider=off}
+An outline and references.
+
+#+col {grow=1.5}
+The primary reading pane.
+
+#+col
+An at-a-glance summary.
+#+end columns
+```
+
+`#+col {grow=1.5}` multiplies that pane's share of fractional space.
+`min-width` defaults to `24ch`, and `gap` to `2ch`. Lengths for
+`min-width`, `gap` and `padding` accept `ch`, `px`, `em`, `rem` and
+`lh`. `align-items` controls vertical placement. `justify-content` controls
+placement when the tracks leave room in a row. Stacked panes read from the
+start of the line. Divider rules run between panes and across successive rows.
+
+The editor and published HTML share the responsive layout. Use **Source** in
+the editor to revise responsive track settings and pane boundaries. Print HTML
+keeps panes in source order, and Pandoc lays them out against a fixed print
+measure. The existing `widths=60-40` layout also accepts its original
+WYSIWYG resize and reorder controls.
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**

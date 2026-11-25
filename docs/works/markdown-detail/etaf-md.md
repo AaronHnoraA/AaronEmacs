@@ -50,7 +50,7 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 | 上游可写名称 | Noema 对应入口 | 组件独立验收点 |
 | --- | --- | --- |
 | `note`, `tip`, `important`, `warning`, `caution`, `info`, `danger` | 已实现 `[!type]` 默认标题及折叠，原生环境可选择折叠正文 | 标题、语义色、嵌套状态、惰性正文和完整导出。 |
-| `columns` | 扩展现有 `#+begin columns` / `layout`、`#+col` | 权重和混合宽度、最小宽度后堆叠、窄窗顺序、导出。 |
+| `columns` | 已扩展原有 `#+begin columns` 和 `#+col`，支持等宽减栏和混合轨宽 | 权重和混合宽度、最小宽度后堆叠、窄窗顺序、导出。 |
 | `center`, `justify`, `left`, `right` | 已实现四种普通 Markdown 对齐环境，沿用 Noema 的环境边界 | 段落和列表的对齐、行内及嵌套内容、原位编辑。 |
 | `box`, `card`, `panel` | 已实现独立的 `box`、`card`、`panel` 正文，复用已有环境标题 | 面与语义色、状态、主链接和独立正文链接、窄窗尺寸约束。 |
 | `steps`、`step` | 已实现 `#+begin steps [title]`，普通有序列表保留起始编号，任务标记提供状态 | 当前项、已完成项和等待项均可读，保留正文和普通列表回退。 |
@@ -210,3 +210,7 @@ Markdown 引用从首行读取语义、默认标题和 `+`、`-` 折叠状态。
 ### 文档运行验证
 
 `run` 在用户点击后调用 Emacs 自带的编译命令输入，然后通过项目输出机制执行。原生测试以合成指令验证取消输入与执行审阅后修改的命令。WebKit 经实际 Emacs 网关验证成功、失败退出码、停止及打开原生输出，且原稿保持完整。卡片显示近期输出，状态请求暂时失败时继续重连。独立复核验证了切换标签页后跟踪同一次启动。Pandoc 和 HTML 保留作者命令及说明。Gemini 复审通过完整的窄窗命令换行、状态层次、输出区域以及原生环境和字体。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-run/`。 [当前语法](../../noema/design/syntax.md#commands-in-documents)
+
+### 分栏验证
+
+ETAF-MD 0.3.0 把布局、等宽卡片和分栏统一为 `columns`，按可用字宽计算每行的列数。Noema 在原有分隔符上加入份数、字宽和百分比轨道，并以 WebKit 实际测得的栏宽计算换行。分栏改变时按源顺序调整原有节点。1060、720 和 425 px 的 WebKit 样例分别测得三列、两列和一列，混合轨宽在放不下时堆叠且没有横向溢出。独立复核还验证了旧百分比布局、标签页状态和文末源码往返的字节保真。Standalone 使用同一布局函数，Node 和 Go 的 LaTeX 变换以约 80 字的标称行宽计算印刷比例，Pandoc 经 XeLaTeX 实际生成了包含全部栏的 PDF。Gemini 复审通过随栏宽延伸的原生标题线、同行等高竖线和窄窗堆叠分隔。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-columns/`。 [当前语法](../../noema/design/syntax.md#responsive-columns) · [ETAF 分栏源码](https://github.com/emacs-taf/etaf-md/blob/b4157e5c88a5df32a0bb5d74a77aa805ba62d825/lisp/etaf-md-nodes.el#L191)
