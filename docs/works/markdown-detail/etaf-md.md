@@ -71,7 +71,7 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 | `keymap`, `breadcrumb` | 已实现键帽速查和文档路径，使用列表、语义化标签和现有链接导航 | 当前项、键位分组、紧凑时的换行、键盘打开链接。 |
 | `log`, `statusbar` | 已支持 Markdown 中的级别、时间、模式、快捷键和状态文字 | 与正文共用字体，宽窄窗重排，静态导出保留原文与配置。 |
 | `home-box`, `image-card`, `link-card` | 复用页面封面、图像/图注、链接预览和文档标题；补卡片变体 | 无图占位、外链、键盘可达、纯文本说明仍可读。 |
-| `qrcode` | 新增二维码组件，正文保留可复制的原始值 | 窄宽还能扫描、值非法可读、离线可生成。 |
+| `qrcode` | 已实现离线二维码，可用 `text` 属性或普通文本围栏，保留原始值 | 深浅主题下保持黑白编码、安全区与方形比例，容量不足仍显示原文。 |
 | `npm-badge`, `npm-to` | 新增包状态展示和确定性的包管理命令视图；共用标签页与围栏 | 保持版本、按管理器切换、复制仅得选中命令、不可转换时保留原文。 |
 | `include`, `code-ref`, `symbol` | 复用 Wiki/块引用、`@@note-code` 和 Emacs 符号查询；补全文/片段、符号跳转和回退 | 稳定目标身份、循环/缺失、源变更后刷新、私有内容的发布边界。 |
 | `git-log`, `git-diff` | 扩展现有 Wiki 版本页和项目 Git 能力；纳入 Jujutsu 工作区支持 | 文件与仓库范围、空历史、错误与异步完成、作者和对象 ID 可追溯。 |
@@ -138,3 +138,7 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 ### 日志、导航和双栏比较验证
 
 `log` 在宽窗对齐时间、级别和正文，窄窗将正文放到下一行。`keymap` 共用键帽与说明的对齐线，`breadcrumb` 可用键盘打开链接，`statusbar` 显示由作者提供的模式、键位和说明。`pros-cons` 在窄窗按源顺序展开两栏，允许引用定义跨栏使用。Gemini 阅读实际 WebKit 截图后指出窄窗键位说明拆字，复查时确认了修正后的对齐和换行。通过了 1060 px 深浅主题和 425 px 深色的字体、溢出、原地编辑和滚动检查。Node 与 Go 共用 LaTeX 样例，覆盖有效比较、格式错误的比较和状态文字。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-reading/`。 [当前语法](../../noema/design/syntax.md#reading-and-navigation-blocks)
+
+### 二维码验证
+
+ETAF 使用 `qrencode` 与磁盘 PNG 缓存。Noema 用固定版本的 `uqr` 在本地生成带四格安全区的 SVG，沿用 WebView 渲染缓存。宽窗图文并排，窄窗保留扫描区域和全文。macOS Vision 从 1060 px 深浅主题和 425 px 深色 WebKit 截图各解出了完整的 URL 与多行中文，实测图像为正方形、正文沿用原排版、选入源码或离开组件后文档与滚动稳定。Gemini 通过对齐、留白与文字层级审查。回归测试涵盖注释标记和布局属性的字面值、块引用、围栏缩进、超长回退与导出。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-qrcode/`。 [当前语法](../../noema/design/syntax.md#qr-codes) · [UnJS uqr](https://github.com/unjs/uqr) · [ETAF 二维码实现](https://github.com/emacs-taf/etaf-md/blob/b4157e5c88a5df32a0bb5d74a77aa805ba62d825/lisp/etaf-md-qrcode.el)

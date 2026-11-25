@@ -447,6 +447,33 @@ order, one below the other.
 Entering a block in the editor exposes its source. LaTeX keeps the original
 body, status metadata, and the labels of valid comparison sections.
 
+### QR codes
+
+Use `#+begin qrcode [title] {text="value"}` to encode a short value. The
+optional body is a Markdown caption. The QR code is generated locally, and
+the encoded value remains visible as plain text.
+
+```markdown
+#+begin qrcode 阅读手册 {text="https://example.com/noema/guide?lang=zh&view=compact"}
+用手机扫描，打开手册。
+#+end qrcode
+```
+
+For multiline values and text containing braces, omit `text` and use a
+single plain or `text` fence. Spaces, punctuation, and line breaks inside
+the fence become part of the code. If a value exceeds the encoder's capacity,
+it remains visible with a short message. HTML includes the generated symbol.
+LaTeX keeps the caption and the literal content as readable text.
+
+```markdown
+#+begin qrcode 传递文字
+~~~text
+阅读手册 · 自动折行
+状态：已复核 ✓
+~~~
+#+end qrcode
+```
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
