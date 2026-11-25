@@ -387,6 +387,41 @@ to align their contents. Opening any of these environments in the editor
 exposes the original Markdown. LaTeX preserves titles, body content, card
 descriptions and destinations, and panel status text.
 
+### Home, link, and image cards
+
+`home-box` introduces a document or section. It accepts a `description`,
+semantic `accent`, `surface`, optional `href` and `action`, and an ordinary
+Markdown body.
+
+```markdown
+#+begin home-box 渲染工作台 {description="从渲染规则到实机检查" accent=info href="#guide" action="查看阅读指南"}
+先核对源码与预览，再检查深浅主题和键盘操作。
+#+end home-box
+```
+
+`link-card` uses `href` and `action`, or promotes a standalone Markdown
+link at the start of its body. `image-card` uses a standalone leading
+Markdown image as the cover. Reference-style images and normal attachment
+paths work here. For short one-line card definitions, `src` and `alt` can
+specify the cover in the opening line. Both card types may include a
+description and additional Markdown. The main action can be reached with
+Tab or by clicking the card surface. Secondary links keep their own targets,
+and the editable body and environment heading still open the source.
+
+```markdown
+#+begin link-card 键盘与交互 {description="快捷键、焦点和阅读位置"}
+[打开交互清单](interaction.md)
+#+end link-card
+
+#+begin image-card 窄窗专题 {description="布局示例" href="interaction.md" action="阅读窄窗指南"}
+![窄窗下单列文档](assets/ui-narrow.png)
+#+end image-card
+```
+
+LaTeX keeps card descriptions, destinations, and Markdown body images.
+A cover specified with `src` and `alt` is exported as its path and
+alternative text. All three card types accept `align` and `width`.
+
 ### Reading and navigation blocks
 
 `breadcrumb` uses a list of paths or links in reading order. The last item
