@@ -267,6 +267,8 @@ comment text.
 | `@@kbd [C-c t]` | Show a key or key sequence. |
 | `@@badge [Ready]{tone=tip}` | Show an author-provided status. Tones include `neutral`, `note`, `info`, `tip`, `important`, `warning`, and `danger`. |
 | `@@color [#389ba0]{label="Teal"}` | Show a color swatch with an optional label. A semantic tone also works. |
+| `@@icon [check]{label="Reviewed" tone=tip}` | Draw a named inline icon. The label describes it for assistive technology and provides the text fallback. |
+| `@@highlight [**Check** the source]{tone=warning}` | Highlight rich inline Markdown with a semantic tone. |
 | `@@hidden [Draft note]` | Keep a source-only editor note. The document HTML, PDF and LaTeX renderers omit its text. |
 
 Tab reaches the controls. Space toggles a spoiler. Enter opens a card and

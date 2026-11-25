@@ -234,3 +234,7 @@ ETAF-MD 0.3.0 把布局、等宽卡片和分栏统一为 `columns`，按可用�
 ### 编辑器阅读快捷键验证
 
 键盘链接预览复用已有链接解析与操作，在光标对侧显示同主题卡片。Escape 归还编辑焦点。全篇答案开关使用文档视图状态，后挂载的标签页读取同一状态，打开另一篇笔记时恢复该笔记的初始显隐。WebKit 验证了两条实际快捷键、重复引用的目标、未访问标签页、单项切换、会话切换以及原稿保真。Gemini 复审通过了两个视口的预览位置、清晰的不透明纸面、单一目标与操作焦点。样例与审阅存于本机 `.agent/views/etaf-md/noema-editor-reading/`。 [快捷键](../../noema/design/syntax.md#editor-reading-shortcuts)
+
+### 行内图标与语义高亮验证
+
+`@@icon` 使用行内矢量笔画，提供可访问名称和文字回退，内置校对、关闭、静音、查找等常见形状。`@@highlight` 给作者的行内 Markdown 添加主题色效果，续行沿用相同内边距。WebKit 验证了原稿显露、独立 HTML 的可访问名称、425 px 续行及原生 NOTE 结束符。Node、Go 和实际 Pandoc 验证图标的文字回退、高亮内的粗体与代码，以及源稿说明的省略。Gemini 复审通过了宽窄、深浅主题中的基线和留白。样例与审阅存于本机 `.agent/views/etaf-md/noema-inline-icons/`。 [当前语法](../../noema/design/syntax.md#inline-reading-controls)
