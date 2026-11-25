@@ -698,6 +698,24 @@ example.
 #+end demo
 ```
 
+### Conversations
+
+`chat` uses headings at the same Markdown level to name speakers.
+`{self=true}` aligns the author's reply to the other side. A heading
+without a body and with `{timestamp=true}` marks a time between
+messages. Message bodies can include paragraphs, links, lists and fences.
+The editor can copy the complete conversation as Markdown.
+
+```markdown
+#+begin chat 预览讨论
+### 2026-11-26 10:36 {timestamp=true}
+### Lin
+窄窗的时候，目录入口放在哪里？
+### 编辑者 {self=true}
+目录从边栏移到抽屉。
+#+end chat
+```
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
