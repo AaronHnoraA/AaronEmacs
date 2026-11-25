@@ -174,6 +174,7 @@ autolinks.  Noema adds, in `src/render-html.ts` and the editor's Lezer rules:
 | `[toc]` on its own line | table of contents |
 | `> [!type] Title` | callout; `type` is any word (`note`, `tip`, `warning`, …); first line is the title |
 | `[^id]` / `[^id]: text` | footnote; continuation lines indented two or more spaces |
+| `[text][id]` / `[id]: destination` | CommonMark reference link, including collapsed and shortcut forms |
 | `{==text==}{>>#c-ID<<}` | comment anchor: the commented text and its comment's id (C70, C80). The comment lives in the folder's hidden `.noema-comments.jsonl`; the editor hides the markers, highlights the text and pops the comment's card up above it; the text may hold math. HTML and the Wiki index keep only the text. One line, not nested |
 | `## Heading {#slug}` | explicit heading anchor |
 | `## Heading <!-- omit from toc -->` | heading left out of the TOC and the slide list |
@@ -184,6 +185,20 @@ autolinks.  Noema adds, in `src/render-html.ts` and the editor's Lezer rules:
 
 Heading numbers are display-only (`src/heading-number.ts`) and never enter
 the source.
+
+### Document references
+
+The editor and HTML reader share footnote and link definitions across prose
+and rendered document blocks. Footnote numbers follow definition order.
+Click a reference to reach its definition. The return link goes back to the
+last reference you activated, including repeated references on a tab page.
+Before the first activation, it points to the first reference. In the editor
+you can still edit the Markdown definition directly.
+
+Fenced code and literal environments keep their examples out of the
+reference index. The HTML reader gives rendered comments their own
+anchors. In LaTeX export, Pandoc applies its document-wide rules to
+definitions in exported annotations and to repeated IDs.
 
 ### Code fence presentation
 

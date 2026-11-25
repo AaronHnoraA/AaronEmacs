@@ -214,3 +214,7 @@ Markdown 引用从首行读取语义、默认标题和 `+`、`-` 折叠状态。
 ### 分栏验证
 
 ETAF-MD 0.3.0 把布局、等宽卡片和分栏统一为 `columns`，按可用字宽计算每行的列数。Noema 在原有分隔符上加入份数、字宽和百分比轨道，并以 WebKit 实际测得的栏宽计算换行。分栏改变时按源顺序调整原有节点。1060、720 和 425 px 的 WebKit 样例分别测得三列、两列和一列，混合轨宽在放不下时堆叠且没有横向溢出。独立复核还验证了旧百分比布局、标签页状态和文末源码往返的字节保真。Standalone 使用同一布局函数，Node 和 Go 的 LaTeX 变换以约 80 字的标称行宽计算印刷比例，Pandoc 经 XeLaTeX 实际生成了包含全部栏的 PDF。Gemini 复审通过随栏宽延伸的原生标题线、同行等高竖线和窄窗堆叠分隔。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-columns/`。 [当前语法](../../noema/design/syntax.md#responsive-columns) · [ETAF 分栏源码](https://github.com/emacs-taf/etaf-md/blob/b4157e5c88a5df32a0bb5d74a77aa805ba62d825/lisp/etaf-md-nodes.el#L191)
+
+### 脚注和引用式链接验证
+
+正文、卡片、分栏和标签页共享 Markdown 定义，脚注按定义出现顺序编号。编辑器与独立阅读页各验证了重复引用的精确回跳。独立复核覆盖隐藏标记、嵌套标签页、编辑定义后的回跳、列表边界失效以及 Unicode 锚点。围栏保留字面代码，HTML 评论使用独立锚点。实际 Pandoc 输出保留跨块脚注、缩进续行和紧邻的引用式链接。Pandoc 对导出的评论和重名定义仍采用自身的全篇解析规则。Gemini 用 1060 px 深色编辑器和 425 px 浅色独立阅读页复审通过了脚注层次、末尾回链和两侧留白。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-references/`。 [当前语法](../../noema/design/syntax.md#document-references)
