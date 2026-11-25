@@ -500,6 +500,36 @@ to align their contents. Opening any of these environments in the editor
 exposes the original Markdown. LaTeX preserves titles, body content, card
 descriptions and destinations, and panel status text.
 
+### Reusable document components
+
+Declare a component once in the current note with an empty top-level
+`component` block. Use its name in another `component` block. An instance
+keeps its own title and Markdown body and can override specific defaults.
+
+```markdown
+#+begin component review-card {kind=card accent=info width=100% description="版面检查"}
+#+end component
+
+#+begin component 交付检查 {use=review-card accent=warning}
+复核图表、[源文档](guide.md)和窄窗排版。
+#+end component
+```
+
+Names start with a lowercase letter and contain up to 48 lowercase letters,
+digits, or hyphens. The first valid declaration for a name applies throughout
+the note, including to earlier instances and instances in rendered columns.
+Definitions travel with the note, and editing a definition updates its
+instances. The scope is a single Markdown document.
+
+The supported styles are `box`, `card`, `home-box`, `panel`, and the native
+`note`, `tip`, `important`, `warning`, `caution`, `info`, and `danger` callouts.
+They accept the style's dimensions, alignment, accents, and other presentation
+options documented here. Write links and media in the Markdown body. A missing
+name or an invalid instance option falls back to a plain readable environment.
+Declarations appear in the editor and are omitted from published output. HTML
+uses the same frame or callout as the editor, and LaTeX preserves titles,
+descriptions, status text, and bodies in the corresponding print environment.
+
 ### Home, link, and image cards
 
 `home-box` introduces a document or section. It accepts a `description`,
