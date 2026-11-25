@@ -73,7 +73,7 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 | `home-box`, `image-card`, `link-card` | 已实现首页卡、图片卡和链接卡，复用文档框体、附件解析与宿主链接入口 | 主动作可键盘到达，卡片保持独立次链接、自然图片比例和普通 Markdown 回退。 |
 | `qrcode` | 已实现离线二维码，可用 `text` 属性或普通文本围栏，保留原始值 | 深浅主题下保持黑白编码、安全区与方形比例，容量不足仍显示原文。 |
 | `npm-badge`, `npm-to` | 已实现静态包元数据和围栏命令转换，复用标签页 | 保留包名与版本、窄窗工具选项、活动命令复制、复杂脚本原文和静态导出。 |
-| `include`, `code-ref`, `symbol` | 复用 Wiki/块引用、`@@note-code` 和 Emacs 符号查询；补全文/片段、符号跳转和回退 | 稳定目标身份、循环/缺失、源变更后刷新、私有内容的发布边界。 |
+| `include`, `code-ref`, `symbol` | 已实现本地摘录、行号/区域/章节/定义定位、刷新与回退。行内符号释义和链接可用，工作区符号卡待补 | 转到对应源行、切换笔记时锁定真实路径、发布只使用作者回退。 |
 | `git-log`, `git-diff` | 扩展现有 Wiki 版本页和项目 Git 能力；纳入 Jujutsu 工作区支持 | 文件与仓库范围、空历史、错误与异步完成、作者和对象 ID 可追溯。 |
 | `run` | 新增到现有显式工作区执行入口的文档动作，使用已有目标与任务确认 | 加载、展开与导出只显示内容；点击后呈现命令、目标、运行状态与结果。 |
 
@@ -190,3 +190,7 @@ Markdown 引用从首行读取语义、默认标题和 `+`、`-` 折叠状态。
 ### 行内阅读验证
 
 答案原位展开，术语、注解和符号卡可以用键盘开启和关闭。窄窗附注在母句之后留出空间，并对齐正文左边，关闭后恢复间距。WebKit 测试覆盖 425 px 深色与 1060 px 深浅色、Standalone、链接、数学和源码往返。独立复核另覆盖标签页、分栏和原生折叠内的点击。Node、Go、Pandoc 和 HTML 验证展开释义与省略源稿说明的处理，含原生标题、未闭合的附加属性与代码字面内容。Gemini 复审通过附注边界、极窄视口的标点间距和键帽、徽章、色片。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-inline/`。 [当前语法](../../noema/design/syntax.md#inline-reading-controls)
+
+### 工作区摘录验证
+
+`include` 和 `code-ref` 按行、标记、Markdown 章节或定义读源码。服务端用 CommonMark 块定位章节，TypeScript 和 JavaScript 用 Lezer 定位完整定义。WebKit 的真实临时项目验证 CRLF 复制、源行跳转参数、点击刷新、滚到视野后加载，以及错误时恢复作者回退。独立复核覆盖标签页未激活时零请求、同窗切换文件、外链越界拒绝和 Unicode 符号名。导出使用作者回退。Gemini 核对了宽窄截图的路径、行范围、操作区和完整错误图。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-excerpts/`。 [当前语法](../../noema/design/syntax.md#workspace-source-excerpts)

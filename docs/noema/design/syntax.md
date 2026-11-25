@@ -815,6 +815,26 @@ controls the body accent.
 
 PDF and LaTeX include callout bodies regardless of their initial state.
 
+### Workspace source excerpts
+
+`include` and `code-ref` read a UTF-8 file relative to the saved note.
+A leading slash resolves from the note's content root. Choose `lines=12-28`,
+`region=cache`, or `section="Cache hits"`. `code-ref` also accepts `symbol`
+and `context` for surrounding lines. Regions can use `#region` markers or
+the existing `@noema` source markers. `lang` overrides display highlighting.
+
+```markdown
+#+begin code-ref Load cache {src="src/cache.ts" symbol=loadCache context=1}
+The public examples use an in-memory cache.
+#+end code-ref
+```
+
+The editor shows the source range as the preview enters view. Copy preserves
+the excerpt's original line endings. Open file goes to its first source line.
+Refresh rereads the saved file. A preview reads at most 2 MiB and displays up
+to 200 lines. HTML, PDF and LaTeX export the authored fallback or source
+reference. Browser exports skip local file access.
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
