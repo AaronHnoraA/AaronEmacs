@@ -1748,6 +1748,11 @@ This is a memory-only check; it never opens an inactive project or reads disk."
    (require 'noema/bridge/document-symbol)
    (+noema--document-symbol-api params client)))
 (remote-gateway-register-method
+ "noema.document.run"
+ (lambda (params client)
+   (require 'noema/bridge/document-run)
+   (+noema--document-run-api params client)))
+(remote-gateway-register-method
  "noema.event" #'+noema--gateway-event)
 (remote-gateway-register-method
  "noema.pi"

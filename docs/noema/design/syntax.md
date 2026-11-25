@@ -903,6 +903,28 @@ The editor retains the authored fallback when the symbol is unavailable or
 the bridge is disconnected. HTML, PDF and LaTeX use the symbol name and
 the authored text.
 
+### Commands in documents
+
+A `run` block can specify `cmd` or contain a single top-level shell fence
+using `sh`, `shell`, `bash` or `zsh`. Set `cwd` to a directory within
+the saved note's content root. Relative paths start beside the note.
+
+````markdown
+#+begin run Check the parser {cwd=src}
+```sh
+npm test
+```
+#+end run
+````
+
+**Run…** fills Emacs' usual compile command input. Review or edit the
+command there, then submit it to the configured compilation shell.
+Cancelling the input leaves the command
+unstarted. The card then shows the result and the tail of the output, up
+to 60 lines and 12,000 characters. **Stop** interrupts the active command
+and **Open output** opens its native Emacs buffer. HTML, PDF and LaTeX
+include the authored command and text.
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
