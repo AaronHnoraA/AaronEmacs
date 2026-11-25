@@ -73,7 +73,7 @@ channels.
 
 - [agent-document-workspace](works/agent-document-workspace/README.md) Draft: document-driven tasks, a native Emacs sidebar, execution feedback and human review; [source study](works/agent-document-workspace/sources.md), [implementation plan](works/agent-document-workspace/implementation.md).
 - [nocodb](works/nocodb/README.md) Study: NocoDB's database views, grid feel, two Markdown parsers, workflow expression engine and AI use-case routing against Noema, with a per-module Noema audit (full test results, a live host run, fixes and recorded gaps); adopted as `noema-attribute-view` and the CSV/Markdown table grid.
-- [markdown-detail](works/markdown-detail/README.md) Study: Pele (Mermaid renderer) and AutumnMark against Noema Markdown details — diagram loading, theme, width, errors, export; code block title, line highlight and preview height.
+- [markdown-detail](works/markdown-detail/README.md) Study: Pele and AutumnMark against Noema Markdown details. [ETAF Markdown study](works/markdown-detail/etaf-md.md) covers the interface, parser, incremental rendering and the full component catalog.
 
 The ignored upstream clones remain under `works/doom-template/upstream/` and `works/neo-emacs/upstream/` for reference.
 

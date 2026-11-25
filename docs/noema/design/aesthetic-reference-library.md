@@ -31,6 +31,13 @@ heading, table, figure and theorem structure.
 
 ## Product constraints
 
+- The Emacs-hosted WebView is Noema's primary note surface. The saved
+  Markdown is the document. CodeMirror renders components over that source
+  while providing direct editing, selection, focus and navigation.
+- Preserve the shared `org-env` appearance and Noema's typography when
+  adapting individual components from ETAF Markdown. Apply the reference
+  at component level through spacing, rules, alignment, responsive layout
+  and interaction feedback. See the [ETAF Markdown study](../../works/markdown-detail/etaf-md.md).
 - Day and Night CSS keep their existing backgrounds, palette tokens and font
   families. Layout, spacing, line weight, letter spacing and ornamentation are
   the adjustable parts. The two themes must remain readable independently.

@@ -1,5 +1,7 @@
 # Noema Markdown 细节：Pele 与 AutumnMark 学习笔记
 
+后续的 [ETAF Markdown 源码对照](etaf-md.md) 覆盖界面、交互、解析、增量渲染和组件能力迁移。
+
 状态：源码学习结论，供用户决定取舍；不表示下述改动已经实现。现行行为以
 [syntax.md](../../noema/design/syntax.md) 与
 [rendered-constructs.md](../../noema/design/rendered-constructs.md) 为准。
