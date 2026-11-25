@@ -49,7 +49,7 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 
 | 上游可写名称 | Noema 对应入口 | 组件独立验收点 |
 | --- | --- | --- |
-| `note`, `tip`, `important`, `warning`, `caution`, `info`, `danger` | 扩展现有 `[!type]` 和 `org-env` 提示语义；常用提示的通用外观沿用当前 Noema | 带标题、默认/忽略状态、嵌套和折叠、语义色可见。 |
+| `note`, `tip`, `important`, `warning`, `caution`, `info`, `danger` | 已实现 `[!type]` 默认标题及折叠，原生环境可选择折叠正文 | 标题、语义色、嵌套状态、惰性正文和完整导出。 |
 | `columns` | 扩展现有 `#+begin columns` / `layout`、`#+col` | 权重和混合宽度、最小宽度后堆叠、窄窗顺序、导出。 |
 | `center`, `justify`, `left`, `right` | 已实现四种普通 Markdown 对齐环境，沿用 Noema 的环境边界 | 段落和列表的对齐、行内及嵌套内容、原位编辑。 |
 | `box`, `card`, `panel` | 已实现独立的 `box`、`card`、`panel` 正文，复用已有环境标题 | 面与语义色、状态、主链接和独立正文链接、窄窗尺寸约束。 |
@@ -178,3 +178,7 @@ ETAF 使用 `qrencode` 与磁盘 PNG 缓存。Noema 用固定版本的 `uqr` 在
 ### 包徽章和命令转换验证
 
 `npm-badge` 显示作者提供的版本和下载文字。`npm-to` 共用一份 shell 分词结果，识别单行命令和引号外的 `&&`。各管理器使用其官方 CLI 写法，保留包范围、版本与引号内参数。复杂脚本保留原文。编辑态只挂载当前工具的面板，发布把配置过的工具一起列出，实际 Pandoc 导出保留原始 npm 命令。WebKit 样例覆盖 425 px 五个标签、键盘切换、原样复制和编辑后的选择记忆，独立复核还覆盖 361 px 双层标签页。Gemini 复审通过宽窄布局。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-packages/`。 [当前语法](../../noema/design/syntax.md#package-metadata-and-commands) · [pnpm CLI](https://pnpm.io/pnpm-cli) · [Yarn CLI](https://yarnpkg.com/cli) · [Bun 安装](https://bun.com/docs/pm/cli/install) · [Deno CLI](https://docs.deno.com/runtime/reference/cli/)
+
+### 提示块验证
+
+Markdown 引用从首行读取语义、默认标题和 `+`、`-` 折叠状态。原生提示保留 Noema 环境标题、侧线和结束符，标题旁的箭头折叠正文。编辑器与发布共用 MarkdownIt 的块边界。列表和标签页里的折叠按原稿位置记忆，正文在展开时挂载，宽窄 WebKit 的实测中收起时图像请求为零。PDF 和实际 Pandoc 保留完整正文，原地源码编辑与滚动复核另有测试。Gemini 用窄屏展开和宽屏收起的实机图确认了调整后的控件位置和排版。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-callouts/`。 [当前语法](../../noema/design/syntax.md#callouts)

@@ -745,6 +745,32 @@ The renderer translates known install, remove, run, create, init, CI and
 authored text. Published HTML displays the configured variants. LaTeX
 keeps the original npm fence.
 
+### Callouts
+
+In a Markdown quote, put `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`,
+`[!WARNING]`, `[!CAUTION]`, `[!INFO]` or `[!DANGER]` on the first
+content line. Optional text on that line supplies a heading. Use `+` or
+`-` immediately after the marker for a disclosure that starts open or
+closed. Markdown lists, nested quotes and tab pages can contain callouts.
+
+```markdown
+> [!TIP]- 窄窗阅读
+> 在抽屉里打开目录。
+```
+
+The same kinds are available as Noema environments. `collapsible=true`
+adds a disclosure to the body, while `open=false` starts it closed. An
+optional `background` sets the body surface, and `border-left-width`
+controls the body accent.
+
+```markdown
+#+begin warning 版本要求 {collapsible=true open=false background=quote}
+需要当前的 WebKit 读取示例。
+#+end warning
+```
+
+PDF and LaTeX include callout bodies regardless of their initial state.
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
