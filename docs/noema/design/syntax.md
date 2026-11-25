@@ -262,6 +262,36 @@ Accents are `neutral`, `primary`, `info`, `success`, `warning`, `danger` and
 body renders as ordinary Markdown. The editor shows the table on entering the
 body, and the default LaTeX conversion keeps the table and its headings.
 
+### Data charts
+
+Use `#+begin chart [title] {type=bar}` and `#+end chart` around one GFM table.
+The first column labels observations. Put quantities and units in the
+remaining column headings. Each row has the same number of cells as the header.
+Keep an explicit empty cell for a missing observation where the chart permits it.
+
+```markdown
+#+begin chart 耗时差 {type=bar accent=info}
+| 阶段 | 相对基准 (ms) |
+| --- | ---: |
+| 解析 | -4 |
+| 布局 | 0 |
+| 绘制 | 8 |
+#+end chart
+```
+
+- `bar` is the default. It uses one measurement column and a shared zero line.
+- `stacked` uses one nonnegative measurement column with a positive total.
+  The legend keeps source order, exact inputs and their shares of the total.
+- `heatmap` uses one or more measurement columns. Cells show exact values,
+  with separate colors for negative and positive values and a dash for missing data.
+- `line` uses one measurement column and equal spacing in source order.
+  Empty cells break the line. The table keeps the observation labels and exact values.
+
+`accent` uses the same semantic roles as metric cards. The editor reveals
+the table and options on entering the block. A nonrectangular table remains
+readable as source. Other unsupported shapes use ordinary Markdown. LaTeX
+uses the display title and the source table.
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
