@@ -206,6 +206,7 @@ Open and close lines pair by kind and nest.  Parser: `ORG_ENV_OPEN_RE` in
 | `comment` | collapsed comment, shown on demand |
 | `fold` | folded region |
 | `progress [title]` | a Markdown list of named percentages or completed/total amounts, rendered as aligned progress rows |
+| `stats [title]` | a GFM table rendered as metric cards with optional trend, note, series and semantic accent |
 | `columns [{widths=60-40 valign=top gap=md rule=on align=left}]` | multi-column layout; each pane separated by `#+col [{align=...}]` holds arbitrary multi-block Markdown (headings, lists, math, code, images, tables, nested org-envs), or `{mode=flow cols=2..4}` for newspaper-style flowing prose; exports to LaTeX `minipage` / `multicols` (`shared/columns-layout.mjs`) |
 | `tikz [id]` | TikZ/PGFPlots figure, kept verbatim in LaTeX (`shared/tikz-source.mjs`) |
 | `html` | raw HTML block, sanitized by `src/sanitize-html.ts` in the editor and in HTML export alike (`src/render-html.ts`), so a published page shows what the editor showed |
@@ -239,6 +240,27 @@ rendering inside the environment. Entering the block in the editor reveals
 the original text. Editing or switching surface leaves the source in the
 same Markdown form. The default LaTeX conversion keeps the title and original
 items in its ordinary environment fallback.
+
+### Metric cards
+
+Use `#+begin stats [title]` and `#+end stats` around one GFM table. The first
+two columns give the metric name and its formatted value. Optional columns in
+order give the trend, a note, a comma-separated series of finite numbers and a
+semantic accent. Column headings can use the document's language.
+
+```markdown
+#+begin stats 文档交付
+| 指标 | 数值 | 趋势 | 说明 | 走势 | 强调 |
+| --- | ---: | --- | --- | --- | --- |
+| 验收用例 | 403 项 | +18% | 完整验收 | 4,6,5,8 | success |
+| 遗留问题 | 0 | | | | neutral |
+#+end stats
+```
+
+Accents are `neutral`, `primary`, `info`, `success`, `warning`, `danger` and
+`important`. Trend direction alone does not assign an accent. An incompatible
+body renders as ordinary Markdown. The editor shows the table on entering the
+body, and the default LaTeX conversion keeps the table and its headings.
 
 ### Pending Markdown edits (`ediff`)
 
