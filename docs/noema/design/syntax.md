@@ -674,6 +674,30 @@ or `：`, or a separator set with `separator`. The field list also accepts
 #+end form
 ```
 
+### Document windows and demonstrations
+
+`window` gives ordinary Markdown a reading frame. Use `height` for a
+scrollable reading area, `gap` for space above the content, and
+`no-padding=true` for content that needs the full width. Printed output
+includes the full body.
+
+```markdown
+#+begin window 参照文档 {height=8lh gap=1lh}
+普通 Markdown，支持段落和链接。
+#+end window
+```
+
+`demo` renders its Markdown body and lets editor readers inspect or copy
+the authored Markdown. The Source control is closed initially and can start
+open with `open=true`. Published HTML, PDF and LaTeX include the rendered
+example.
+
+```markdown
+#+begin demo 布局示例
+**正文预览**和[示例链接](guide.md)。
+#+end demo
+```
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**

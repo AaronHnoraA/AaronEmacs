@@ -65,7 +65,7 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 | `chat` | 新增有作者或角色的 Markdown 消息组 | 长代码、时间与作者、消息归属、完整复制。 |
 | `tabs`, `code-tabs`, `tab-panel`, `swiper` | 已实现以同层 Markdown 标题分组的标签、代码和轮播，纯代码组可从围栏推断页名 | 初始页、键盘换页、窄窗导航、编辑别处保留选择。只挂载活动页，按源顺序导出所有页。 |
 | `details`, `accordion` | 已实现原生单块折叠和同层 Markdown 标题分组，复用选页的源码与状态模型 | 单开、多开、默认展开、鼠标键盘、闭合卸载正文、打印保留全部内容。 |
-| `window`, `demo` | 新增可嵌入的文档示例面板 | 标题与演示内容可分辨，窄窗回退，预览控件加入键盘顺序。 |
+| `window`, `demo` | 已实现限高阅读窗与可展开源码的 Markdown 演示 | 独立焦点、窗口局部滚动、逐字符复制、窄窗换行和完整导出。 |
 | `diff` | 已实现只读比较，用两份普通 Markdown 围栏，共享字词比较的有界算法 | 并排/统一切换、窄窗自动堆叠、配对行、完整复制和对应行源码。 |
 | `pros-cons` | 已实现双栏比较环境，支持自定义栏头、普通 Markdown 和跨栏引用 | 语义各自可读，窄窗按源顺序堆叠，结构有误时保留可读内容。 |
 | `keymap`, `breadcrumb` | 已实现键帽速查和文档路径，使用列表、语义化标签和现有链接导航 | 当前项、键位分组、紧凑时的换行、键盘打开链接。 |
@@ -166,3 +166,7 @@ ETAF 使用 `qrencode` 与磁盘 PNG 缓存。Noema 用固定版本的 `uqr` 在
 ### 参数卡与字段列表验证
 
 `field` 参数卡显示签名、状态、正文和约束。字段列表对齐名称和值，`form` 使用 ETAF 文档中的名称在上和值在下的读取布局。两种列表共用 Markdown 解析与链接处理，遵循转义，保留链接标题和代码里的冒号。宽窄 WebKit 实测覆盖正文排版、键盘打开类型链接与原地源码，Gemini 复审通过窄窗状态标签。实际 Pandoc 保留参数名、类型、默认值、约束和字段列表。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-fields/`。 [当前语法](../../noema/design/syntax.md#parameter-cards-and-field-lists)
+
+### 阅读窗与演示块验证
+
+`window` 以既有环境标题标明内容，高度由作者设置，达到上限后显示局部滚动条。`demo` 将效果留在上方，把源码展开与复制放在底栏的独立焦点中。源码区按需挂载，引用和列表中的演示保留原始 Markdown。发布页面显示已批准的演示正文，PDF 与实际 Pandoc 检查覆盖完整阅读窗内容。独立 WebKit 复核验证了分栏内的点击、拖动局部滚动条、引用与列表的精确复制，Gemini 复审通过宽窄布局和控件。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-demos/`。 [当前语法](../../noema/design/syntax.md#document-windows-and-demonstrations)
