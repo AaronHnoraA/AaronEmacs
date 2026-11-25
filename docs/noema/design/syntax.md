@@ -205,6 +205,7 @@ Open and close lines pair by kind and nest.  Parser: `ORG_ENV_OPEN_RE` in
 | `note`, `info`, `attention`, `warning`, `important` | admonition |
 | `comment` | collapsed comment, shown on demand |
 | `fold` | folded region |
+| `progress [title]` | a Markdown list of named percentages or completed/total amounts, rendered as aligned progress rows |
 | `columns [{widths=60-40 valign=top gap=md rule=on align=left}]` | multi-column layout; each pane separated by `#+col [{align=...}]` holds arbitrary multi-block Markdown (headings, lists, math, code, images, tables, nested org-envs), or `{mode=flow cols=2..4}` for newspaper-style flowing prose; exports to LaTeX `minipage` / `multicols` (`shared/columns-layout.mjs`) |
 | `tikz [id]` | TikZ/PGFPlots figure, kept verbatim in LaTeX (`shared/tikz-source.mjs`) |
 | `html` | raw HTML block, sanitized by `src/sanitize-html.ts` in the editor and in HTML export alike (`src/render-html.ts`), so a published page shows what the editor showed |
@@ -218,6 +219,26 @@ Which kinds are prose for spelling and diagnostics:
 `TECHNICAL_ORG_ENV_KINDS` in `shared/prose-mask.mjs`.  Which kinds can carry
 a block id: everything except `NON_SEMANTIC_ORG_ENVS` in
 `shared/block-identity.mjs`.
+
+### Progress rows
+
+Use `#+begin progress [title]` and `#+end progress` around a flat unordered list.
+Each item separates its inline Markdown label and amount with `:` or `：`.
+
+```markdown
+#+begin progress 文档交付
+- 解析：75%
+- **复核**: 4/8
+#+end progress
+```
+
+HTML and the visual editor display the named rows and keep the amount visible
+as text. The bar stops at its maximum and the text shows the written amount.
+An invalid list, including a fraction with zero total, uses ordinary Markdown
+rendering inside the environment. Entering the block in the editor reveals
+the original text. Editing or switching surface leaves the source in the
+same Markdown form. The default LaTeX conversion keeps the title and original
+items in its ordinary environment fallback.
 
 ### Pending Markdown edits (`ediff`)
 

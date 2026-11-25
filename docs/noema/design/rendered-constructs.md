@@ -59,6 +59,7 @@
 | 表格 | `live-preview.ts` | structure（块） | `edge`（文档开头的 0 偏移不算） | 自有字段 + `constructSources` |
 | HTML 块、行内标记、emoji | `live-preview.ts` | structure | `caret-edge` / `interior` | `selectionOpensSource` / `rangeRevealsSource` |
 | org 环境、TOC、HR、语义标题、front matter | `widgets/block-extras.ts` | structure（TikZ 为 object） | `caret-edge`（front matter `caret-interior`） | `selectionOpensSource` |
+| 进度环境 | `widgets/block-extras.ts` + `render-html.ts` | structure | `caret-edge` | 正文显示与 HTML 共用渲染；环境标题、侧线、结束标记沿用 org-env，分别按光标位置显示源码 |
 | `ediff` 待审 patch | `widgets/ediff.ts`，由 `block-extras.ts` 放置 | structure | `caret-interior` | `selectionOpensSource`，进入源码可改 patch |
 | `@@` 行内命令 | `widgets/inline-commands.ts` | structure | `caret-edge` | `selectionOpensSource` |
 | wiki 链接标题 | `roam-link-status.ts` | structure | `edge`（任一选区） | `anySelectionRevealsSource` |
