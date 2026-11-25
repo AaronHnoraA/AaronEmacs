@@ -835,6 +835,27 @@ Refresh rereads the saved file. A preview reads at most 2 MiB and displays up
 to 200 lines. HTML, PDF and LaTeX export the authored fallback or source
 reference. Browser exports skip local file access.
 
+### Workspace directory tree
+
+`project-tree` displays the saved note's local directory. `path=/` starts at
+the note's content root. `depth` accepts 1–6 and defaults to 3. `ignore`
+accepts file and directory names separated by spaces or commas. Child
+entries skip version-control internals, generated Elisp files and symlinks.
+The explicitly selected root may resolve through a symlink inside the
+note's content root.
+
+```markdown
+#+begin project-tree Source layout {path=src depth=3 open-depth=1 ignore=fixtures icon=colored}
+- The parser and renderer are in `src/`.
+#+end project-tree
+```
+
+`open-depth` controls initial folder expansion. `icon` accepts `none`,
+`simple` or `colored`. `lines=off` hides branch rules. Arrow keys move among
+visible entries and Enter opens a folder or file. Refresh retains the state
+of folders whose paths still exist. The editor caps a preview at 150 entries.
+Published HTML, PDF and LaTeX use the authored fallback.
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**

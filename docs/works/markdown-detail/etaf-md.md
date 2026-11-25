@@ -61,6 +61,7 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 | `table` | 已实现 `#+begin table [title]`，复用 GFM 表格和现有 Markdown 源码编辑 | 可选排序、复制、行列和单元格强调。窄窗局部横移，发布保留原表顺序。 |
 | `field`, `form` | 用参数卡和两种列表布局呈现说明、配置和值，匹配当前 ETAF 的文档语义 | 参数类型和状态、默认值、约束、窄窗键值布局、链接和静态导出。 |
 | `file-tree`, `code-tree` | 已实现 Markdown 列表目录和围栏代码树，复用文件链接和语法高亮 | 目录折叠、键盘移动、相对文件、选中预览、长行换行、复制及完整导出。 |
+| `project-tree` | 已实现工作区目录和有界展开，复用文件树的键盘交互和主题 | 根范围、目录和文件识别、刷新保留选择、静态回退。 |
 | `project-tree` | 扩展工作区文件查询与目录渲染；复用上条树视图 | 真实目录和刷新、项目身份、拒绝越界、发布回退。 |
 | `chat` | 已实现用 Markdown 标题分组的消息、作者归属和时间行 | 长代码、时间与作者、键盘链接、完整复制。 |
 | `tabs`, `code-tabs`, `tab-panel`, `swiper` | 已实现以同层 Markdown 标题分组的标签、代码和轮播，纯代码组可从围栏推断页名 | 初始页、键盘换页、窄窗导航、编辑别处保留选择。只挂载活动页，按源顺序导出所有页。 |
@@ -194,3 +195,7 @@ Markdown 引用从首行读取语义、默认标题和 `+`、`-` 折叠状态。
 ### 工作区摘录验证
 
 `include` 和 `code-ref` 按行、标记、Markdown 章节或定义读源码。服务端用 CommonMark 块定位章节，TypeScript 和 JavaScript 用 Lezer 定位完整定义。WebKit 的真实临时项目验证 CRLF 复制、源行跳转参数、点击刷新、滚到视野后加载，以及错误时恢复作者回退。独立复核覆盖标签页未激活时零请求、同窗切换文件、外链越界拒绝和 Unicode 符号名。导出使用作者回退。Gemini 核对了宽窄截图的路径、行范围、操作区和完整错误图。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-excerpts/`。 [当前语法](../../noema/design/syntax.md#workspace-source-excerpts)
+
+### 工作区目录验证
+
+`project-tree` 从已保存笔记的工作区读取有限深度的目录。它复用文件树的分支和键盘移动，刷新后按同一路径恢复文件夹状态。WebKit 以真实临时项目验证键盘开文件、长文件名、无横向溢出、刷新和源码往返。共享 Node 与 Go 导出验证只保留作者回退。Gemini 复审通过文件与目录图标、窄窗续行和操作区。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-project-tree/`。 [当前语法](../../noema/design/syntax.md#workspace-directory-tree)
