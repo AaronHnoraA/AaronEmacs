@@ -53,8 +53,8 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 | `columns` | 扩展现有 `#+begin columns` / `layout`、`#+col` | 权重和混合宽度、最小宽度后堆叠、窄窗顺序、导出。 |
 | `center`, `justify`, `left`, `right` | 扩展现有块布局与段落对齐属性 | 长文、CJK、公式、混合嵌套内容；不改变行高。 |
 | `box`, `card`, `panel` | 扩展现有环境边界；在具体卡片内部新增标题、次要动作、内容和语义 surface 选项 | 可点击区域符合语义，无动作卡片稳定，链接内嵌可独立操作。 |
-| `steps` | 增强连续的有序 Markdown 清单，必要时使用 `steps` 环境 | 标号、高亮当前步骤、长说明换行、嵌套块。 |
-| `timeline` | 新增对应环境，以时间和标题清单为正文 | 垂直与横向布局、状态色、窄窗回落。 |
+| `steps`、`step` | 已实现 `#+begin steps [title]`，普通有序列表保留起始编号，任务标记提供状态 | 当前项、已完成项和等待项均可读，保留正文和普通列表回退。 |
+| `timeline`、`event` | 已实现 `#+begin timeline [title]`，普通列表承载日期、标题、状态与正文 | 独立日期状态行、竖向和横向布局，窄窗纵向按原序阅读。 |
 | `stats`、`stat` | 已实现 `#+begin stats [title]`，普通 GFM 表格的一行对应一张指标卡 | 名称、值、趋势、说明、迷你柱图、语义强调；窄窗自动收列。 |
 | `progress` | 已实现 `#+begin progress [title]`，正文为带标签的普通 Markdown 无序列表 | 多项、百分比及 `完成量/总量`，数值可读，窄窗无溢出。 |
 | `chart` | 已实现 `#+begin chart [title] {type=…}`，用 GFM 表格承载类别、单位及数值 | 条形、堆叠、热图、折线，保留原始数据和文本可访问性。 |
@@ -122,3 +122,7 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 `chart` 复用 GFM 的解析结果和 `org-env` 的正文渲染生命周期。条形图共用连续零线，构成图提供原值和占比，热图区分空值、零、正数和负数，折线的缺失值断开并保留数据表。宽屏深浅主题及 425 px 的深色窗口验证了字体、字号、字重、行高和原地编辑。Gemini 复审通过了浅色图例、窄窗热图、连续零线和更轻的数据表。Node 与 Go 的 LaTeX 测试共用同一份预处理样例，输出的表格和彩色 WebView 图形读取同一份源数据。 [当前语法](../../noema/design/syntax.md#data-charts)
 
 长文实测暴露了一个高度补偿的时序问题。CodeMirror 在 `requestMeasure` 的写入回调结束后补偿高度映射差量，Noema 此前在回调中也写了滚动位置，焦点处于编辑器时会叠加两次。修正后，Noema 在同帧微任务中按文档锚点校正。浏览器探针覆盖外部光标位置、焦点有无、退出编辑、惯性滚动和紧随点击的滚动；图表、指标卡、进度块三组均通过。样例、截图、审阅和实测记录存于本机 `.agent/views/etaf-md/noema-chart/`。
+
+### 时间线与步骤验证
+
+`timeline` 以普通列表承载内容，日期与状态在同一行，事件标题独立一行。宽视口横排卡片，425 px 窄窗沿轴线按原顺序向下阅读。`steps` 保留 Markdown 有序列表的起始号，使用任务标记标出已完成、当前和等待三种状态。转义过的方括号按文字显示。Gemini 复审通过了宽窄布局、卡片层级及既有排版。实测还检查了滚动、源码回读、行内链接与数学，以及保留编号的 LaTeX 回退。样例与截图存于本机 `.agent/views/etaf-md/noema-sequences/`。 [当前语法](../../noema/design/syntax.md#timelines-and-steps)

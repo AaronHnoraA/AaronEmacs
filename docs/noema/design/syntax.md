@@ -292,6 +292,42 @@ the table and options on entering the block. A nonrectangular table remains
 readable as source. Other unsupported shapes use ordinary Markdown. LaTeX
 uses the display title and the source table.
 
+### Timelines and steps
+
+Use `#+begin timeline [title]` around a Markdown list of events. Separate the
+time and event title with ` · ` or ` — ` to give them distinct rows. Continue
+with ordinary list content. A leading `[success]`, `[warning]`, `[danger]` or `[info]` on an
+event adds a visible status label. Add `{orientation=horizontal}` for cards
+across a wide content area. A narrow area displays the events in one column.
+The `card=true|false` and `list-style=decimal|bullet|none` options select the
+card surface and the marker style. Horizontal timelines use cards by default.
+
+```markdown
+#+begin timeline 发布记录 {orientation=horizontal}
+- [success] **11 月 20 日** · 完成解析
+
+  记录关键边界与验证结果。
+
+- **11 月 25 日** · 交付
+#+end timeline
+```
+
+`#+begin steps [title]` uses an ordered Markdown list. The authored starting
+number carries through to the visual list. An optional `[x]` marks a done
+step. The first `[ ]` marks the current step and later unchecked steps are
+pending. The `list-style` option takes the same three marker styles.
+
+```markdown
+#+begin steps 审阅流程
+3. [x] 锁定范围
+4. [ ] 对照内容
+5. [ ] 提交
+#+end steps
+```
+
+Both environments reveal the list in the editor on entry. LaTeX keeps the
+display title and original Markdown list.
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
