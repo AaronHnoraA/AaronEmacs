@@ -200,6 +200,13 @@ reference index. The HTML reader gives rendered comments their own
 anchors. In LaTeX export, Pandoc applies its document-wide rules to
 definitions in exported annotations and to repeated IDs.
 
+### Task lists
+
+Use `- [ ]` and `- [x]` for incomplete and completed tasks. In editable
+Visual mode, click the checkbox or focus it and press Space or Enter. The
+editor changes the marker in place and records a separate undo step for
+each change. HTML shows the state in both tight and loose lists.
+
 ### Code fence presentation
 
 After the language, `line-numbers=38` starts the line numbers at 38.

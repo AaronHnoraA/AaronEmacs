@@ -218,3 +218,7 @@ ETAF-MD 0.3.0 把布局、等宽卡片和分栏统一为 `columns`，按可用�
 ### 脚注和引用式链接验证
 
 正文、卡片、分栏和标签页共享 Markdown 定义，脚注按定义出现顺序编号。编辑器与独立阅读页各验证了重复引用的精确回跳。独立复核覆盖隐藏标记、嵌套标签页、编辑定义后的回跳、列表边界失效以及 Unicode 锚点。围栏保留字面代码，HTML 评论使用独立锚点。实际 Pandoc 输出保留跨块脚注、缩进续行和紧邻的引用式链接。Pandoc 对导出的评论和重名定义仍采用自身的全篇解析规则。Gemini 用 1060 px 深色编辑器和 425 px 浅色独立阅读页复审通过了脚注层次、末尾回链和两侧留白。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-references/`。 [当前语法](../../noema/design/syntax.md#document-references)
+
+### 任务框验证
+
+任务框保留原勾选样式，可用鼠标、Space 或 Enter 逐项改变 Markdown 标记。控件在状态转换后保留焦点，每次操作可以单独撤销。发布 HTML 在紧凑和宽松列表中都显示完成状态。真实 WebKit 验证了两次键盘操作、单次撤销、源码变化和焦点复用，Gemini 在 1060 px 和 425 px 的实机图中确认了焦点环、纵向对齐和完成态层次。样例与审阅存于本机 `.agent/views/etaf-md/noema-tasks/`。 [当前语法](../../noema/design/syntax.md#task-lists)
