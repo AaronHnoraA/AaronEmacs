@@ -387,6 +387,66 @@ to align their contents. Opening any of these environments in the editor
 exposes the original Markdown. LaTeX preserves titles, body content, card
 descriptions and destinations, and panel status text.
 
+### Reading and navigation blocks
+
+`breadcrumb` uses a list of paths or links in reading order. The last item
+is the current page. The optional `separator` sets the visible delimiter.
+
+```markdown
+#+begin breadcrumb 文档位置
+- [工作区](#workspace)
+- [渲染手册](#renderer)
+- 当前页
+#+end breadcrumb
+```
+
+`keymap` displays one shortcut per list item. Separate the shortcut and its
+description with a colon. Use spaces between sequential keys and ` / `
+between alternatives. `columns` accepts `1`, `2`, or `3` and narrows to fit
+the page. `statusbar` can use the same list, optional `mode` and `note`, and
+a comma-separated `keys` attribute. The keys display as labels.
+
+```markdown
+#+begin keymap 常用快捷键 {columns=2}
+- C-x C-f / ⌘O : 打开文件
+- M-: : 求值
+#+end keymap
+
+#+begin statusbar 编辑状态 {mode=READ keys="C-f:搜索, C-x C-s:保存" note="待复核"}
+#+end statusbar
+```
+
+`log` aligns optional timestamps (`HH:mm`, `HH:mm:ss`, or the same time
+preceded by `YYYY-MM-DD` and a space or `T`), known severity labels, and
+messages. Severity includes `TRACE`, `DEBUG`, `INFO`, `NOTICE`, `WARN`,
+`WARNING`, `ERROR`, `FATAL`, `OK`, and `SUCCESS`. It is case-insensitive.
+Entries may omit the timestamp. Ordinary list entries remain readable.
+
+```markdown
+#+begin log 渲染记录
+- 09:10:18 INFO 载入 Markdown
+- 09:12:30 [WARN] 重新测量长行、公式和组件宽度
+- 本轮保留完整的原始文本。
+#+end log
+```
+
+`pros-cons` displays two Markdown sections. Separate them with `#+col` and
+set their labels with `pros` and `cons`. Narrow windows show them in source
+order, one below the other.
+
+```markdown
+#+begin pros-cons 排版选择 {pros="优势" cons="限制"}
+- 文档使用普通 Markdown。
+
+#+col
+
+- 高级组件需要单独验证。
+#+end pros-cons
+```
+
+Entering a block in the editor exposes its source. LaTeX keeps the original
+body, status metadata, and the labels of valid comparison sections.
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
