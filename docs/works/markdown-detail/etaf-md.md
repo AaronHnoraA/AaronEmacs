@@ -51,8 +51,8 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 | --- | --- | --- |
 | `note`, `tip`, `important`, `warning`, `caution`, `info`, `danger` | 扩展现有 `[!type]` 和 `org-env` 提示语义；常用提示的通用外观沿用当前 Noema | 带标题、默认/忽略状态、嵌套和折叠、语义色可见。 |
 | `columns` | 扩展现有 `#+begin columns` / `layout`、`#+col` | 权重和混合宽度、最小宽度后堆叠、窄窗顺序、导出。 |
-| `center`, `justify`, `left`, `right` | 扩展现有块布局与段落对齐属性 | 长文、CJK、公式、混合嵌套内容；不改变行高。 |
-| `box`, `card`, `panel` | 扩展现有环境边界；在具体卡片内部新增标题、次要动作、内容和语义 surface 选项 | 可点击区域符合语义，无动作卡片稳定，链接内嵌可独立操作。 |
+| `center`, `justify`, `left`, `right` | 已实现四种普通 Markdown 对齐环境，沿用 Noema 的环境边界 | 段落和列表的对齐、行内及嵌套内容、原位编辑。 |
+| `box`, `card`, `panel` | 已实现独立的 `box`、`card`、`panel` 正文，复用已有环境标题 | 面与语义色、状态、主链接和独立正文链接、窄窗尺寸约束。 |
 | `steps`、`step` | 已实现 `#+begin steps [title]`，普通有序列表保留起始编号，任务标记提供状态 | 当前项、已完成项和等待项均可读，保留正文和普通列表回退。 |
 | `timeline`、`event` | 已实现 `#+begin timeline [title]`，普通列表承载日期、标题、状态与正文 | 独立日期状态行、竖向和横向布局，窄窗纵向按原序阅读。 |
 | `stats`、`stat` | 已实现 `#+begin stats [title]`，普通 GFM 表格的一行对应一张指标卡 | 名称、值、趋势、说明、迷你柱图、语义强调；窄窗自动收列。 |
@@ -130,3 +130,7 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 ### 可排序表格验证
 
 `table` 采用三线表，支持行、列和单元格的语义高亮，激活的列有底色、细线与方向指示。排序保持相同键值的原始顺序，剪贴板保留所见行序、原始对齐、行内标记和引用式链接定义。点击重排后的单元格使用它在原表中的位置。WebKit 的 1060 px 深浅主题与 425 px 深色验证了键盘排序和复制、窄窗横移及原地编辑。Gemini 最后复查通过了窄窗的工具条，验证样例与截图存于本机 `.agent/views/etaf-md/noema-tables/`。 [当前语法](../../noema/design/syntax.md#sortable-document-tables)
+
+### 文档框体和对齐验证
+
+`box`、`card` 与 `panel` 沿用 `org-env` 的标题、侧轨和结束记号，分别提供阅读框、明确的主链接和可见状态。四种对齐环境承载普通 Markdown。复审后默认对齐正文栏，面板状态在宽窗与正文并排，窄窗顺序换行。验证了 WebKit 宽窄与深浅主题、完整窄窗面板、键盘激活卡片链接、原地源码切换和滚动稳定性。引用在 Node 与 Go 的 LaTeX 回退中保留标题、描述、目的地和状态，引号中的逗号和分号有共用回归用例。样例与 Gemini 复审记录存于本机 `.agent/views/etaf-md/noema-frames/`。 [当前语法](../../noema/design/syntax.md#document-frames-and-alignment)

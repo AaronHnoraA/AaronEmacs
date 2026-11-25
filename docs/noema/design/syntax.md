@@ -358,6 +358,35 @@ metric card's semantic accent. `align`, `width` and `text-align` position the
 table and give its default cell alignment. GFM column alignment takes priority.
 Published HTML and LaTeX present the formatted table in its authored order.
 
+### Document frames and alignment
+
+`#+begin box [title]` uses ordinary Markdown inside a quiet frame. Its options
+include `surface=none|paper|quiet|raised`, `padding`, `width`, `align` and
+`text-align`.
+
+`#+begin card [title]` can add a `description`, semantic `accent`, optional
+`icon=link|file|check|info`, and a primary `href`. Use `action` for the link
+label. Ordinary links in the Markdown body keep their own destinations.
+
+`#+begin panel [title]` can display `status`, `accent` and `focus=true`.
+`variant=flat` uses the outline surface. Box, card, and panel widths are
+bounded by the document column.
+
+```markdown
+#+begin card 使用手册 {description="命令与示例" href=https://example.com action="查看手册" accent=info}
+在这里补充阅读说明和 [版本记录](https://example.org)。
+#+end card
+
+#+begin panel 交付 {status="待复核" focus=true accent=warning}
+核对窄窗和键盘操作。
+#+end panel
+```
+
+Wrap ordinary Markdown in `center`, `left`, `right` or `justify` environments
+to align their contents. Opening any of these environments in the editor
+exposes the original Markdown. LaTeX preserves titles, body content, card
+descriptions and destinations, and panel status text.
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
