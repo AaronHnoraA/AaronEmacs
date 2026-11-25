@@ -856,6 +856,35 @@ visible entries and Enter opens a folder or file. Refresh retains the state
 of folders whose paths still exist. The editor caps a preview at 150 entries.
 Published HTML, PDF and LaTeX use the authored fallback.
 
+### Repository history and patches
+
+`git-log` displays recent commits and `git-diff` displays a unified patch
+from the saved note's repository. `vcs=auto` selects the nearest repository,
+preferring Jujutsu where both providers share a directory. `vcs=git` or
+`vcs=jj` chooses a provider. The matching CLI must be installed on the host.
+
+```markdown
+#+begin git-log Milestones {path=src limit=6}
+The public release notes list the milestones.
+#+end git-log
+
+#+begin git-diff Reviewed change {path=src/cache.ts range=HEAD~1..HEAD vcs=git}
+The cache now groups entries by source.
+#+end git-diff
+```
+
+`path` limits the view to a file or directory. Bare paths start beside the
+note and fall back to the repository root when the note-relative path is
+absent from the disk and history checked by the provider. A leading slash
+starts at the note's content root. Deleted files can still be selected.
+`limit` defaults to 8 and accepts 1–50. A Git patch without `range` shows
+unstaged changes. A Jujutsu patch without `range` shows the recorded
+working-copy commit. `range=A..B` compares revisions with either provider,
+while Jujutsu also accepts a single revset. Refresh rereads the repository.
+Select a commit ID to copy its full hash. The patch button copies the visible
+patch verbatim, up to 200 lines. HTML, PDF and LaTeX export the authored
+fallback and reference metadata.
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
