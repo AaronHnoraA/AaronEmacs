@@ -64,7 +64,7 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 | `project-tree` | 扩展工作区文件查询与目录渲染；复用上条树视图 | 真实目录和刷新、项目身份、拒绝越界、发布回退。 |
 | `chat` | 新增有作者或角色的 Markdown 消息组 | 长代码、时间与作者、消息归属、完整复制。 |
 | `tabs`, `code-tabs`, `tab-panel`, `swiper` | 已实现以同层 Markdown 标题分组的标签、代码和轮播，纯代码组可从围栏推断页名 | 初始页、键盘换页、窄窗导航、编辑别处保留选择。只挂载活动页，按源顺序导出所有页。 |
-| `details`, `accordion` | 扩展现有 `fold`；用多个折叠项表达 accordion | 页内展开、默认打开项、键盘、折叠状态生存期。 |
+| `details`, `accordion` | 已实现原生单块折叠和同层 Markdown 标题分组，复用选页的源码与状态模型 | 单开、多开、默认展开、鼠标键盘、闭合卸载正文、打印保留全部内容。 |
 | `window`, `demo` | 新增可嵌入的文档示例面板 | 标题与演示内容可分辨，窄窗回退，预览控件加入键盘顺序。 |
 | `diff` | 从现有 `ediff` 复用展示原语，提供只读 diff 的入口 | 并排/统一切换、窄窗自动回落、配对行、复制；只读 diff 独立于补丁接受流程。 |
 | `pros-cons` | 已实现双栏比较环境，支持自定义栏头、普通 Markdown 和跨栏引用 | 语义各自可读，窄窗按源顺序堆叠，结构有误时保留可读内容。 |
@@ -150,3 +150,7 @@ ETAF 使用 `qrencode` 与磁盘 PNG 缓存。Noema 用固定版本的 `uqr` 在
 ### 标签页与轮播验证
 
 四种分段视图由 Markdown 标题和围栏定义。只在活动页挂正文，实际 WebKit 证实切到图片页前资源请求为零。下一页、上一页和键盘移动保留文档视口，窄窗长标签只滚动标签条。页面选择跟随环境源标记的位置，离屏后在文首插字、Source 往返、折叠及分栏转原位编辑都保留状态。同标题同正文的两个组各自保留原有选择。WebKit 实测确认页内链接、任务框、原地源码、深浅字体和布局，Gemini 通过四种视图的当前项、窄窗方向按钮和代码区边界审查。HTML 与共用 Node/Go LaTeX 样例按原序保留全部内容。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-tabs/`。 [当前语法](../../noema/design/syntax.md#tabbed-documents-and-examples)
+
+### 单块折叠与折叠组验证
+
+`details` 与 `accordion` 复用原生披露控件、Markdown 标题和按源位置保存的阅读状态。关闭正文时卸载其节点。重新打开混合嵌套的内容后，各组标签页和折叠沿用各自的选择。WebKit 宽窄实测核对键盘、鼠标、单开与多开、源码打开、原字体和已发布页面的折叠组互斥。PDF 和浏览器打印显示完整正文，Go 与 Node 的 LaTeX 回退保留各节原文。Gemini 通过箭头、源码控件、展开层级与窄窗换行审查。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-disclosures/`。 [当前语法](../../noema/design/syntax.md#details-and-accordions)

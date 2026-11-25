@@ -548,6 +548,39 @@ when editing other parts of the document. Clicking the page content in an
 editable tab opens its Markdown. Exported HTML and LaTeX include every page
 in source order.
 
+### Details and accordions
+
+`#+begin details [title]` provides a single disclosure. It starts closed
+unless you set `open=true`. Its body accepts ordinary Markdown. The source
+control opens the block in the editor, and a click in the expanded body
+goes to its Markdown.
+
+```markdown
+#+begin details 阅读说明 {open=true}
+从原文开始核对渲染结果。
+#+end details
+```
+
+`accordion` divides its body into sections with same-level Markdown headings,
+using the same heading rule as `tabs`. It allows one open section by default.
+`open=2` starts with the second section open. For independent sections, use
+`multiple=true` with `open="1,3"`. Use `expand=true` to open every section
+initially. The reader can expand or collapse sections using the mouse, Enter,
+or Space. The editor remembers the choices during editing elsewhere.
+
+```markdown
+#+begin accordion 核对清单 {open=2}
+### 证据
+保留原文、数据和实际界面截图。
+
+### 方法
+检查所选区间和链接。
+#+end accordion
+```
+
+Published HTML keeps every section and its default disclosure state. Printed
+publications, PDF output, and LaTeX include the complete content.
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
