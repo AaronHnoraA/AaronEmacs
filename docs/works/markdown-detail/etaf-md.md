@@ -72,7 +72,7 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 | `log`, `statusbar` | 已支持 Markdown 中的级别、时间、模式、快捷键和状态文字 | 与正文共用字体，宽窄窗重排，静态导出保留原文与配置。 |
 | `home-box`, `image-card`, `link-card` | 已实现首页卡、图片卡和链接卡，复用文档框体、附件解析与宿主链接入口 | 主动作可键盘到达，卡片保持独立次链接、自然图片比例和普通 Markdown 回退。 |
 | `qrcode` | 已实现离线二维码，可用 `text` 属性或普通文本围栏，保留原始值 | 深浅主题下保持黑白编码、安全区与方形比例，容量不足仍显示原文。 |
-| `npm-badge`, `npm-to` | 新增包状态展示和确定性的包管理命令视图；共用标签页与围栏 | 保持版本、按管理器切换、复制仅得选中命令、不可转换时保留原文。 |
+| `npm-badge`, `npm-to` | 已实现静态包元数据和围栏命令转换，复用标签页 | 保留包名与版本、窄窗工具选项、活动命令复制、复杂脚本原文和静态导出。 |
 | `include`, `code-ref`, `symbol` | 复用 Wiki/块引用、`@@note-code` 和 Emacs 符号查询；补全文/片段、符号跳转和回退 | 稳定目标身份、循环/缺失、源变更后刷新、私有内容的发布边界。 |
 | `git-log`, `git-diff` | 扩展现有 Wiki 版本页和项目 Git 能力；纳入 Jujutsu 工作区支持 | 文件与仓库范围、空历史、错误与异步完成、作者和对象 ID 可追溯。 |
 | `run` | 新增到现有显式工作区执行入口的文档动作，使用已有目标与任务确认 | 加载、展开与导出只显示内容；点击后呈现命令、目标、运行状态与结果。 |
@@ -174,3 +174,7 @@ ETAF 使用 `qrencode` 与磁盘 PNG 缓存。Noema 用固定版本的 `uqr` 在
 ### 对话验证
 
 `chat` 用同层标题分组，时间居中，作者的答复沿右侧排列。正文沿用 Markdown 和既有字体，窄窗代码跟随消息宽度换行。复制读取原稿，发布页面显示已批准的内容。WebKit 测试覆盖左右归属、长代码、键盘链接、整段复制和原地源码，Gemini 复审通过宽窄布局。实际 Pandoc 检查确认常规对话里的时间、作者及围栏字面代码都保留。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-chat/`。 [当前语法](../../noema/design/syntax.md#conversations)
+
+### 包徽章和命令转换验证
+
+`npm-badge` 显示作者提供的版本和下载文字。`npm-to` 共用一份 shell 分词结果，识别单行命令和引号外的 `&&`。各管理器使用其官方 CLI 写法，保留包范围、版本与引号内参数。复杂脚本保留原文。编辑态只挂载当前工具的面板，发布把配置过的工具一起列出，实际 Pandoc 导出保留原始 npm 命令。WebKit 样例覆盖 425 px 五个标签、键盘切换、原样复制和编辑后的选择记忆，独立复核还覆盖 361 px 双层标签页。Gemini 复审通过宽窄布局。样例、截图和审阅存于本机 `.agent/views/etaf-md/noema-packages/`。 [当前语法](../../noema/design/syntax.md#package-metadata-and-commands) · [pnpm CLI](https://pnpm.io/pnpm-cli) · [Yarn CLI](https://yarnpkg.com/cli) · [Bun 安装](https://bun.com/docs/pm/cli/install) · [Deno CLI](https://docs.deno.com/runtime/reference/cli/)

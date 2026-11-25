@@ -716,6 +716,35 @@ The editor can copy the complete conversation as Markdown.
 #+end chat
 ```
 
+### Package metadata and commands
+
+`npm-badge` displays an authored package `name`, optionally with `version`
+and `downloads`. The values come from the note.
+
+```markdown
+#+begin npm-badge 版本信息 {name=@example/note-reader version=1.2.3 downloads="12.8k / week"}
+#+end npm-badge
+```
+
+`npm-to` takes one shell fence. The editor can switch tools with the keyboard
+and copy the current command. All five managers are available by default.
+Set `tabs` to a comma-separated list and `selected` to the initial tab
+number, starting at one.
+
+````markdown
+#+begin npm-to 安装和检查 {tabs="npm,pnpm,deno" selected=2}
+~~~sh
+npm install --save-dev @example/note-reader@1.2.3
+npm run check -- '--label=宽窗 && 窄窗'
+~~~
+#+end npm-to
+````
+
+The renderer translates known install, remove, run, create, init, CI and
+`npx` forms. Unsupported commands and compound shell syntax keep their
+authored text. Published HTML displays the configured variants. LaTeX
+keeps the original npm fence.
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
