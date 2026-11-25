@@ -581,6 +581,34 @@ or Space. The editor remembers the choices during editing elsewhere.
 Published HTML keeps every section and its default disclosure state. Printed
 publications, PDF output, and LaTeX include the complete content.
 
+### Read-only comparisons
+
+`diff` compares two fenced snippets in source order. An optional Markdown
+heading immediately before each fence supplies its display label. The
+`before` and `after` attributes also set labels. The view defaults to
+`auto`, which uses a paired layout in a wide column and a unified layout in
+a narrow column. Set `view=split` or `view=unified` for a fixed initial view.
+
+````markdown
+#+begin diff 布局变更 {before="原设置" after="新设置"}
+~~~text
+columns: 2
+navigation: sidebar
+~~~
+
+~~~text
+columns: auto
+navigation: drawer
+~~~
+#+end diff
+````
+
+The editor can switch layouts or copy either snippet. Clicking a line opens
+its source. Both line number sequences are retained, including in the
+unified view. Comparisons that exceed the alignment limit show two labelled
+literal snippets. HTML displays the comparison and LaTeX retains both
+snippets as code in source order, including when a diff is inside a quotation.
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
