@@ -215,6 +215,13 @@ Mermaid diagram. Use the arrow keys to step through a row of images and
 Escape to return to the figure. Standalone HTML can enlarge its embedded
 images. Supported video files use the browser's inline playback controls.
 
+### Standalone reading controls
+
+In standalone HTML, use **Outline** to select a heading and **Theme** to
+switch between the embedded themes. Press Escape to close the outline and
+return to its trigger. For notes with spoilers, **Spoilers** and Shift+S
+reveal or hide the answers across the page.
+
 ### Code fence presentation
 
 After the language, `line-numbers=38` starts the line numbers at 38.

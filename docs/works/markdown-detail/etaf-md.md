@@ -226,3 +226,7 @@ ETAF-MD 0.3.0 把布局、等宽卡片和分栏统一为 `columns`，按可用�
 ### 媒体验证
 
 图片与 Mermaid 图共用放大对话框。真实 WebKit 验证了键盘开启、关闭后归还焦点、生成图的清晰渲染以及逐字节保留 Markdown。独立 HTML 使用同一查看器打开已内嵌的离线图片。实际 H.264 样例以浏览器原生控件载入，初始暂停，播放与暂停都成功。行内图库的左右切换沿用已有交互。Gemini 通过了宽屏图片与 425 px 图表的比例、关闭按钮和外缘留白。样例与审阅存于本机 `.agent/views/etaf-md/noema-media/`。 [当前语法](../../noema/design/syntax.md#media-previews)
+
+### 独立阅读页验证
+
+工具条提供目录与主题切换，带答案的笔记另有全篇遮罩开关。宽窗的目录靠右定位，窄窗目录在正文前展开，标题仍完整可读。WebKit 实测了焦点进入目录、跳转后聚焦标题、Escape 归还焦点、Shift+S 批量显隐和明暗切换，425 px 无横向溢出。Gemini 通过了宽窗深色与窄窗浅色的布局、焦点和原生环境外观。样例与审阅存于本机 `.agent/views/etaf-md/noema-standalone-reader/`。 [读取方法](../../noema/design/syntax.md#standalone-reading-controls)
