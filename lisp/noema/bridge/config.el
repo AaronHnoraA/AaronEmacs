@@ -1743,6 +1743,11 @@ This is a memory-only check; it never opens an inactive project or reads disk."
    (require 'noema/bridge/agenda-source)
    (+noema--agenda-source-request params client)))
 (remote-gateway-register-method
+ "noema.document.symbol"
+ (lambda (params client)
+   (require 'noema/bridge/document-symbol)
+   (+noema--document-symbol-api params client)))
+(remote-gateway-register-method
  "noema.event" #'+noema--gateway-event)
 (remote-gateway-register-method
  "noema.pi"

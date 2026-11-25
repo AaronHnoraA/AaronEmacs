@@ -885,6 +885,24 @@ Select a commit ID to copy its full hash. The patch button copies the visible
 patch verbatim, up to 200 lines. HTML, PDF and LaTeX export the authored
 fallback and reference metadata.
 
+### Emacs symbol cards
+
+The editor looks up `symbol` in the connected Emacs session as the card
+enters view. It shows the kind, signature, first help paragraph, global
+bindings and source file name when Emacs provides them.
+
+```markdown
+#+begin symbol Move by sentence {name=forward-sentence}
+Move to the end of the next sentence.
+#+end symbol
+```
+
+**Help** opens the native Emacs help buffer, including current values for
+variables and options. **Definition** opens available Lisp source in Emacs.
+The editor retains the authored fallback when the symbol is unavailable or
+the bridge is disconnected. HTML, PDF and LaTeX use the symbol name and
+the authored text.
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
