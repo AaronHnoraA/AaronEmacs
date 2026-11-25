@@ -58,7 +58,7 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 | `stats`、`stat` | 已实现 `#+begin stats [title]`，普通 GFM 表格的一行对应一张指标卡 | 名称、值、趋势、说明、迷你柱图、语义强调；窄窗自动收列。 |
 | `progress` | 已实现 `#+begin progress [title]`，正文为带标签的普通 Markdown 无序列表 | 多项、百分比及 `完成量/总量`，数值可读，窄窗无溢出。 |
 | `chart` | 已实现 `#+begin chart [title] {type=…}`，用 GFM 表格承载类别、单位及数值 | 条形、堆叠、热图、折线，保留原始数据和文本可访问性。 |
-| `table` | 扩展 GFM 表格和现有表格菜单；数据视图继续走已有 attribute-view | 排序与复制对当前视图生效，排序类型正确，原文只在显式编辑时变化。 |
+| `table` | 已实现 `#+begin table [title]`，复用 GFM 表格和现有 Markdown 源码编辑 | 可选排序、复制、行列和单元格强调。窄窗局部横移，发布保留原表顺序。 |
 | `field`, `form` | 扩展现有属性、结构化数据与显式动作入口 | 字段状态、必填、多种输入、清晰的变更提交；静态阅读仍可见字段与值。 |
 | `file-tree`, `code-tree` | 新增 Markdown 树视图并接现有文件引用；同一文件可展开或选入代码阅读区 | 折叠、目标不存在、长路径、键盘移动、复制。 |
 | `project-tree` | 扩展工作区文件查询与目录渲染；复用上条树视图 | 真实目录和刷新、项目身份、拒绝越界、发布回退。 |
@@ -126,3 +126,7 @@ Noema 的主笔记界面是 Emacs 承载的 WebView。CodeMirror 同时提供原
 ### 时间线与步骤验证
 
 `timeline` 以普通列表承载内容，日期与状态在同一行，事件标题独立一行。宽视口横排卡片，425 px 窄窗沿轴线按原顺序向下阅读。`steps` 保留 Markdown 有序列表的起始号，使用任务标记标出已完成、当前和等待三种状态。转义过的方括号按文字显示。Gemini 复审通过了宽窄布局、卡片层级及既有排版。实测还检查了滚动、源码回读、行内链接与数学，以及保留编号的 LaTeX 回退。样例与截图存于本机 `.agent/views/etaf-md/noema-sequences/`。 [当前语法](../../noema/design/syntax.md#timelines-and-steps)
+
+### 可排序表格验证
+
+`table` 采用三线表，支持行、列和单元格的语义高亮，激活的列有底色、细线与方向指示。排序保持相同键值的原始顺序，剪贴板保留所见行序、原始对齐、行内标记和引用式链接定义。点击重排后的单元格使用它在原表中的位置。WebKit 的 1060 px 深浅主题与 425 px 深色验证了键盘排序和复制、窄窗横移及原地编辑。Gemini 最后复查通过了窄窗的工具条，验证样例与截图存于本机 `.agent/views/etaf-md/noema-tables/`。 [当前语法](../../noema/design/syntax.md#sortable-document-tables)

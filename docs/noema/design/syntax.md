@@ -328,6 +328,36 @@ pending. The `list-style` option takes the same three marker styles.
 Both environments reveal the list in the editor on entry. LaTeX keeps the
 display title and original Markdown list.
 
+### Sortable document tables
+
+Use `#+begin table [title]` around one GFM table to use the document table
+style. Add `sortable=true` for header buttons and `copy=true` for a copy
+button in Noema. Sorting keeps the authored order of equal values and toggles
+direction on the active header. Copy writes the displayed order as GFM with
+its inline Markdown and column alignment. Entering a cell opens its source
+position, including after the view has been sorted.
+
+Numeric sorting accepts signed decimals and scientific notation. Ascending
+order groups numbers before text. Reference links keep their definitions when
+copied. In a narrow layout with hidden columns, the `More →` button scrolls
+within the table.
+
+```markdown
+#+begin table 阶段耗时 {sortable=true copy=true highlight-cells="2:2"}
+| 阶段 | 耗时 (ms) |
+| --- | ---: |
+| 解析 | 4 |
+| 布局 | 7 |
+#+end table
+```
+
+`highlight-rows`, `highlight-columns` and `highlight-cells` take
+space-separated one-based coordinates in the authored table. Row indexes
+start at the first data row. A cell uses `row:column`. `highlight` takes a
+metric card's semantic accent. `align`, `width` and `text-align` position the
+table and give its default cell alignment. GFM column alignment takes priority.
+Published HTML and LaTeX present the formatted table in its authored order.
+
 ### Pending Markdown edits (`ediff`)
 
 An `ediff` environment replaces the exact Markdown lines **at its position**
