@@ -107,6 +107,44 @@
       (:label (car action))
       (:command (cdr action)))))
 
+(defun aaron-ui-docs--outline-buttons (outline label-width &optional on-select)
+  "Build heading jump buttons for OUTLINE within LABEL-WIDTH columns.
+Run ON-SELECT after jumping when the outline is in a drawer."
+  (mapcar
+   (lambda (heading)
+     (pcase-let ((`(,level ,title ,id . ,_) heading))
+       (let* ((target (aaron-ui-docs--heading-ref id))
+              (label (concat (make-string (min 4 (max 0 (1- level))) ?\s)
+                             title)))
+         (etaf-view
+          (etaf-button
+           :ref (intern (format "aaron-ui-docs-link-%s" id))
+           :label (truncate-string-to-width label label-width nil nil "…")
+           :aria-label title :help-echo title :variant 'ghost
+           :on-press
+           (lambda ()
+             (etaf-scroll-into-view (etaf-runtime-for-buffer (current-buffer))
+                                    target 'start)
+             (when on-select (funcall on-select))))))))
+   outline))
+
+(etaf-define-component aaron-ui-docs-compact-outline (&key outline rows columns)
+  "Open a scrollable outline over the single-column reading view."
+  :bindings ((open (etaf-ref nil)))
+  :render
+  (let ((close (lambda () (etaf-set-value open nil)))
+        (drawer-width (min 46 columns)))
+    (etaf-view
+     (fragment
+      (etaf-button :ref 'aaron-ui-docs-outline-toggle :label "目录"
+                   :variant 'secondary :on-press (lambda () (etaf-set-value open t)))
+      (etaf-drawer :open open :title "目录" :placement 'left
+                   :width (list 'ch drawer-width) :on-close close
+        (column :ref 'aaron-ui-docs-outline-items :width 'stretch
+                :height (list 'lh (max 1 (- rows 4))) :overflow 'scroll
+          (expr (aaron-ui-docs--outline-buttons outline (max 4 (- drawer-width 6))
+                                                close))))))))
+
 (etaf-define-component aaron-ui-docs-page (&key entry)
   "Render the reactive Markdown ENTRY in the floating reader."
   :setup (aaron-ui-etaf-provide-theme)
@@ -119,8 +157,13 @@
          (actions (plist-get page :actions))
          (outline (plist-get document :outline))
          (blocks (plist-get document :children))
-         (rows (max 12 (or (cdr (etaf-viewport)) 32)))
-         (body-height (max 6 (- rows (if actions 3 1))))
+         (viewport (etaf-viewport))
+         (cell-width (plist-get (etaf-display-metrics) :char-width))
+         (columns (/ (or (car viewport) (* 112 cell-width)) cell-width))
+         (compact-outline (and outline (< columns 102)))
+         (toolbar (or actions compact-outline))
+         (rows (max 12 (or (cdr viewport) 32)))
+         (body-height (max 6 (- rows (if toolbar 3 1))))
          (env (list :palette (aaron-ui-docs--palette)
                     :features (plist-get document :features)
                     :line-grid t
@@ -128,11 +171,15 @@
                                  (aaron-ui-docs--follow-link url file actions)))))
     (etaf-view
      (column :width '(vw 100) :height '(vh 100) :overflow 'hidden
+             :cross-align 'center
        (expr
-        (when actions
+        (when toolbar
           (etaf-view
-           (row :height '(lh 2) :padding '((lh 0) (ch 2))
+           (row :width 'stretch :max-width '(ch 112)
+                :height '(lh 2) :padding '((lh 0) (ch 1))
                 :item-gap '(ch 1)
+             (aaron-ui-docs-compact-outline :if compact-outline
+                                            :outline outline :rows rows :columns columns)
              (expr
               (mapcar
                (lambda (action)
@@ -148,26 +195,14 @@
                            (funcall command)
                          (aaron-ui-docs--leave-panel command)))))))
                actions))))))
-       (row :width 'stretch :height (list 'lh body-height)
-         (column :width '(ch 24) :height (list 'lh body-height) :overflow 'scroll
-                 :padding '((lh 1) (ch 1)) :item-gap '(lh 0)
+       (flex :width 'stretch :max-width '(ch 112) :height (list 'lh body-height)
+         (column :if (and outline (not compact-outline))
+                 :ref 'aaron-ui-docs-outline :width '(ch 26) :flex-shrink 0
+                 :height (list 'lh body-height) :overflow 'scroll
+                 :border-right (list '(px 1) 'solid (aaron-ui-color 'border-subtle))
+                 :padding '((lh 1) (ch 2)) :item-gap '(lh 0)
            (etaf-label :text "目录" :variant 'strong)
-           (expr
-            (mapcar
-             (lambda (heading)
-               (let ((ref (aaron-ui-docs--heading-ref (nth 2 heading)))
-                     (label (format "%s%s"
-                                    (make-string (max 0 (1- (car heading))) ?\s)
-                                    (nth 1 heading))))
-                 (etaf-view
-                  (etaf-button
-                   :label label :variant 'ghost
-                   :on-press
-                   (lambda ()
-                     (etaf-scroll-into-view
-                      (etaf-runtime-for-buffer (current-buffer))
-                      ref 'start))))))
-             outline)))
+           (expr (aaron-ui-docs--outline-buttons outline 20)))
          (column :ref 'aaron-ui-docs-scroll
                  :flex-grow 1 :flex-basis '(px 0) :min-width '(px 0)
                  :height (list 'lh body-height) :overflow 'scroll

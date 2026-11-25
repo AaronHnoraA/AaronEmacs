@@ -75,6 +75,49 @@
             (should (> (etaf-scroll-to runtime 'aaron-ui-docs-scroll 'end) 0))))
       (kill-buffer buffer))))
 
+(ert-deftest aaron-ui-docs-centers-reading-area-and-moves-outline-on-refit ()
+  "Wide documents center the two columns. Narrow readers use an outline drawer."
+  (let* ((paragraphs (mapconcat #'identity (make-list 20 "Reading body.") "\n\n"))
+         (source (concat "# Heading\n\n" paragraphs "\n\n## Later\n\n" paragraphs))
+         (document (etaf-ui-markdown-parse source))
+         (entry (etaf-ref (list :document document :file "example.md")))
+         (buffer (etaf-mount "*Aaron Document Measure Test*"
+                             (etaf-view (aaron-ui-docs-page :entry entry))
+                             '(:viewport-width 1200 :viewport-height 20))))
+    (unwind-protect
+        (let* ((runtime (etaf-runtime-for-buffer buffer))
+               (cell (plist-get (etaf-display-metrics runtime) :char-width)))
+          (etaf-runtime-refit runtime (* 150 cell) 20)
+          (etaf-runtime-flush runtime)
+          (let* ((outline (etaf-runtime-host-node runtime 'aaron-ui-docs-outline))
+                 (wide (and outline (ebox-node-geometry outline)))
+                 (body (ebox-node-geometry
+                        (etaf-runtime-host-node runtime 'aaron-ui-docs-scroll))))
+            (should wide)
+            (should (<= (abs (- (plist-get wide :x) (* 19 cell))) cell))
+            (should (= (plist-get wide :width) (* 26 cell)))
+            (should (= (plist-get body :width) (* 86 cell)))
+            (etaf-runtime-refit runtime (* 64 cell) 20)
+            (etaf-runtime-flush runtime)
+            (let ((body (ebox-node-geometry
+                          (etaf-runtime-host-node runtime 'aaron-ui-docs-scroll))))
+              (should-not (etaf-runtime-host-node runtime 'aaron-ui-docs-outline))
+              (should (<= (plist-get body :x) cell))
+              (should (= (plist-get body :width) (* 64 cell)))
+              (should (etaf-host-ref-bounds runtime 'aaron-ui-doc-heading))
+              (with-current-buffer buffer
+                (etaf-focus runtime 'aaron-ui-docs-outline-toggle)
+                (etaf-activate runtime)
+                (etaf-runtime-flush runtime)
+                (should (etaf-host-ref-bounds runtime 'aaron-ui-docs-outline-items))
+                (etaf-focus runtime 'aaron-ui-docs-link-later)
+                (etaf-activate runtime)
+                (etaf-runtime-flush runtime)
+                (should-not (etaf-runtime-host-node runtime 'aaron-ui-docs-outline-items))
+                (should (eq (etaf-focused-host-ref runtime) 'aaron-ui-docs-outline-toggle))
+                (should (> (etaf-scroll-offset runtime 'aaron-ui-docs-scroll) 0))))))
+      (kill-buffer buffer))))
+
 (ert-deftest aaron-ui-activity-long-page-scrolls-inside-viewport ()
   "A long Activity tab scrolls within the shared monitor viewport."
   (let* ((rows (cl-loop for index below 30
